@@ -2,31 +2,123 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 load_dotenv()
 
-app = FastAPI(title="Discharge Planning AI")
+BASE_DIR = Path(__file__).parent
+STATIC_DIR = BASE_DIR / "static"
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app = FastAPI(title="Discharge Planning AI")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Auth helpers
+SECRET_KEY = os.getenv("SECRET_KEY", "discharge-planning-dev-secret-change-in-prod")
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
+ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")  # comma-separated; empty = any email allowed
+ALLOWED_EMAILS = {e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.strip()}
+
+_serializer = URLSafeTimedSerializer(SECRET_KEY)
+COOKIE_NAME = "dp_session"
+COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
+
+
+def make_session_cookie(email: str) -> str:
+    return _serializer.dumps({"email": email})
+
+
+def verify_session_cookie(token: str) -> str | None:
+    """Return email if valid, None otherwise."""
+    try:
+        data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
+        return data.get("email")
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def get_current_user(request: Request) -> str | None:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    return verify_session_cookie(token)
+
+
+def require_login(request: Request):
+    """Return redirect response if not authenticated, else None."""
+    if not get_current_user(request):
+        return RedirectResponse(url="/login", status_code=302)
+    return None
+
+
+# ── Routes ──────────────────────────────────────────────────────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    with open(STATIC_DIR / "login.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/auth/login")
+async def do_login(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+
+    # Validate email format (basic)
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid email address."}, status_code=400)
+
+    # Validate password
+    if not AUTH_PASSWORD:
+        return JSONResponse({"error": "AUTH_PASSWORD is not configured on the server."}, status_code=500)
+    if password != AUTH_PASSWORD:
+        return JSONResponse({"error": "Incorrect password."}, status_code=401)
+
+    # Check allowed emails list (if configured)
+    if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
+        return JSONResponse({"error": "This email is not authorized."}, status_code=403)
+
+    # Set signed session cookie
+    token = make_session_cookie(email)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,  # set True if enforcing HTTPS in production
+        max_age=COOKIE_MAX_AGE,
+    )
+    return response
+
+
+@app.get("/api/auth/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(COOKIE_NAME)
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    """Serve the main single-page application."""
-    with open("static/index.html", encoding="utf-8") as f:
+async def index(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "index.html", encoding="utf-8") as f:
         return f.read()
 
 
 @app.get("/api/sample-patient")
-async def get_sample_patient():
-    """Return sample patient data pre-mapped to web form fields."""
+async def get_sample_patient(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     from sample_patient import SAMPLE_PATIENT_WEB
     return SAMPLE_PATIENT_WEB
 
@@ -47,11 +139,7 @@ async def stream_plan(patient_data: dict):
     from agents.social_determinants import SocialDeterminantsAgent
     from agents.coordinator import CoordinatorAgent
 
-    # Build a patient_data dict that the existing agents can work with.
-    # The web form sends flat string fields; map them to the nested structure
-    # that the specialist agents' format_input() methods expect.
     def build_agent_data(raw: dict) -> dict:
-        """Translate flat web form fields into the nested dict the agents expect."""
         def parse_med_list(text: str) -> list:
             return [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -59,7 +147,6 @@ async def stream_plan(patient_data: dict):
             return [line.strip() for line in text.splitlines() if line.strip()]
 
         return {
-            # Demographics
             "patient_name": raw.get("patient_name", ""),
             "age": raw.get("age", ""),
             "sex": raw.get("gender", ""),
@@ -67,44 +154,29 @@ async def stream_plan(patient_data: dict):
             "admission_date": raw.get("admission_date", ""),
             "anticipated_discharge_date": raw.get("expected_discharge_date", ""),
             "attending_physician": raw.get("attending_physician", ""),
-
-            # Diagnoses
             "primary_diagnosis": raw.get("primary_diagnosis", ""),
             "secondary_diagnoses": parse_diagnoses(raw.get("secondary_diagnoses", "")),
-
-            # Clinical notes
             "clinical_notes": raw.get("additional_clinical_notes", ""),
-
-            # Medications
             "admission_medications": parse_med_list(raw.get("admission_medications", "")),
             "inpatient_medications": parse_med_list(raw.get("inpatient_medications", "")),
             "discharge_medications": parse_med_list(raw.get("discharge_medications", "")),
-
-            # Therapy evaluations
             "therapy_evaluations": {
                 "PT": raw.get("pt_evaluation", "Not evaluated"),
                 "OT": raw.get("ot_evaluation", "Not evaluated"),
                 "ST": raw.get("st_evaluation", "Not evaluated"),
             },
-
-            # Insurance — nested structure the insurance agent expects
             "insurance": {
                 "primary": {
                     "payer_name": raw.get("primary_insurance", ""),
                     "medicare_type": raw.get("medicare_part_a", "N/A"),
                     "snf_days_used_this_benefit_period": raw.get("snf_days_used", 0),
                 },
-                "secondary": {
-                    "payer_name": raw.get("secondary_insurance", ""),
-                },
+                "secondary": {"payer_name": raw.get("secondary_insurance", "")},
             },
-            # Also expose flat insurance fields for agents that look for them directly
             "primary_insurance": raw.get("primary_insurance", ""),
             "secondary_insurance": raw.get("secondary_insurance", ""),
             "medicare_part_a": raw.get("medicare_part_a", "N/A"),
             "snf_days_used": raw.get("snf_days_used", 0),
-
-            # Social / home environment
             "support_system": {
                 "living_situation": raw.get("living_situation", ""),
                 "primary_caregiver": raw.get("caregiver", ""),
@@ -113,21 +185,14 @@ async def stream_plan(patient_data: dict):
                 "housing_type": raw.get("housing_type", ""),
                 "bedroom_location": raw.get("bedroom_location", ""),
             },
-            "transportation": {
-                "primary_transportation": raw.get("transportation", ""),
-            },
-            "language_literacy": {
-                "primary_language": raw.get("primary_language", "English"),
-            },
-            # Flat social fields for agents that access them directly
+            "transportation": {"primary_transportation": raw.get("transportation", "")},
+            "language_literacy": {"primary_language": raw.get("primary_language", "English")},
             "living_situation": raw.get("living_situation", ""),
             "caregiver": raw.get("caregiver", ""),
             "primary_language": raw.get("primary_language", "English"),
             "transportation_notes": raw.get("transportation", ""),
             "housing_type": raw.get("housing_type", ""),
             "bedroom_location": raw.get("bedroom_location", ""),
-
-            # Discharge goals
             "patient_family_preference": raw.get("patient_family_preference", ""),
             "physician_goals": raw.get("physician_goals", ""),
             "additional_notes": raw.get("additional_notes", ""),
@@ -143,7 +208,6 @@ async def stream_plan(patient_data: dict):
         "social": SocialDeterminantsAgent(client),
     }
 
-    # Use a queue to stream events as agents complete
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run_agent(name, agent):
@@ -156,10 +220,8 @@ async def stream_plan(patient_data: dict):
             await queue.put({"type": "agent_error", "agent": name, "error": str(e)})
             return name, f"[ERROR: {str(e)}]"
 
-    # Launch all agent tasks
     tasks = [asyncio.create_task(run_agent(name, agent)) for name, agent in agents.items()]
 
-    # Stream events as they arrive
     completed = 0
     agent_outputs: dict = {}
 
@@ -170,10 +232,8 @@ async def stream_plan(patient_data: dict):
             completed += 1
             agent_outputs[event["agent"]] = event.get("output", event.get("error", ""))
 
-    # Wait for all tasks to finish
     await asyncio.gather(*tasks)
 
-    # Run coordinator
     yield f"data: {json.dumps({'type': 'coordinator_start'})}\n\n"
     try:
         coordinator = CoordinatorAgent(client)
@@ -185,7 +245,8 @@ async def stream_plan(patient_data: dict):
 
 @app.post("/api/plan/stream")
 async def create_plan(request: Request):
-    """Accept patient data and stream SSE events as agents execute."""
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     patient_data = await request.json()
     return StreamingResponse(
         stream_plan(patient_data),
