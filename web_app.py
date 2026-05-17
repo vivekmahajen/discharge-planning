@@ -17,38 +17,24 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
-# Vercel has a read-only filesystem except /tmp; fall back there when needed
-DATA_DIR = Path("/tmp") if os.getenv("VERCEL") else BASE_DIR / "data"
-USERS_FILE = DATA_DIR / "users.json"
 
 app = FastAPI(title="Discharge Planning AI")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Auth helpers
+# Auth config
 SECRET_KEY = os.getenv("SECRET_KEY", "discharge-planning-dev-secret-change-in-prod")
-ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")  # comma-separated; empty = any email allowed
+ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")
 ALLOWED_EMAILS = {e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.strip()}
 
 _serializer = URLSafeTimedSerializer(SECRET_KEY)
 COOKIE_NAME = "dp_session"
 COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
 
-
-# ── User store (file-backed) ─────────────────────────────────────────────────
-
-def _load_users() -> dict:
-    if USERS_FILE.exists():
-        try:
-            return json.loads(USERS_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+# Postgres URL — Vercel injects POSTGRES_URL automatically; DATABASE_URL is the fallback
+DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
 
-def _save_users(users: dict) -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
-
+# ── Password helpers ─────────────────────────────────────────────────────────
 
 def _hash_password(password: str, salt: str) -> str:
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
@@ -59,26 +45,99 @@ def _verify_password(password: str, salt: str, stored_hash: str) -> bool:
     return secrets.compare_digest(_hash_password(password, salt), stored_hash)
 
 
+# ── User store ───────────────────────────────────────────────────────────────
+# Uses Postgres when DATABASE_URL / POSTGRES_URL is set, otherwise falls back
+# to a local JSON file (convenient for local development without a DB).
+
+def _get_conn():
+    import psycopg2
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _ensure_table() -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    email TEXT PRIMARY KEY,
+                    salt  TEXT NOT NULL,
+                    hash  TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+
+
+# File-based fallback for local dev
+_LOCAL_USERS_FILE = BASE_DIR / "data" / "users.json"
+
+def _file_load() -> dict:
+    if _LOCAL_USERS_FILE.exists():
+        try:
+            return json.loads(_LOCAL_USERS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def _file_save(users: dict) -> None:
+    _LOCAL_USERS_FILE.parent.mkdir(exist_ok=True)
+    _LOCAL_USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
+
+
 def register_user(email: str, password: str) -> str | None:
     """Create user. Returns None on success, error string on failure."""
-    users = _load_users()
+    salt = secrets.token_hex(16)
+    pw_hash = _hash_password(password, salt)
+
+    if DATABASE_URL:
+        import psycopg2
+        try:
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO users (email, salt, hash) VALUES (%s, %s, %s)",
+                        (email, salt, pw_hash),
+                    )
+                conn.commit()
+        except psycopg2.errors.UniqueViolation:
+            return "An account with this email already exists."
+        return None
+
+    # File fallback
+    users = _file_load()
     if email in users:
         return "An account with this email already exists."
-    salt = secrets.token_hex(16)
-    users[email] = {"salt": salt, "hash": _hash_password(password, salt)}
-    _save_users(users)
+    users[email] = {"salt": salt, "hash": pw_hash}
+    _file_save(users)
     return None
 
 
 def authenticate_user(email: str, password: str) -> str | None:
     """Return None if credentials are valid, error string if not."""
-    users = _load_users()
-    if email not in users:
-        return "No account found with this email. Please sign up first."
-    entry = users[email]
-    if not _verify_password(password, entry["salt"], entry["hash"]):
+    if DATABASE_URL:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT salt, hash FROM users WHERE email = %s", (email,))
+                row = cur.fetchone()
+        if not row:
+            return "No account found with this email. Please sign up first."
+        salt, stored_hash = row
+    else:
+        users = _file_load()
+        if email not in users:
+            return "No account found with this email. Please sign up first."
+        salt, stored_hash = users[email]["salt"], users[email]["hash"]
+
+    if not _verify_password(password, salt, stored_hash):
         return "Incorrect password."
     return None
+
+
+@app.on_event("startup")
+async def startup():
+    if DATABASE_URL:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _ensure_table)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────
