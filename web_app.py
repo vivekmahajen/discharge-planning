@@ -20,7 +20,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """Serve the main single-page application."""
-    with open("static/index.html") as f:
+    with open("static/index.html", encoding="utf-8") as f:
         return f.read()
 
 
