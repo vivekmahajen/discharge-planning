@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Discharge Planning AI</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -248,15 +249,72 @@
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    padding: 24px;
-    font-family: "Courier New", Courier, monospace;
-    font-size: .82rem;
-    line-height: 1.65;
-    white-space: pre-wrap;
-    word-break: break-word;
+    padding: 28px 32px;
     max-height: 70vh;
     overflow-y: auto;
     color: #1e293b;
+    font-size: .9rem;
+    line-height: 1.7;
+  }
+
+  /* Markdown rendered content */
+  .report-body h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #1a56db;
+    margin: 28px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #dbeafe;
+  }
+  .report-body h2:first-child { margin-top: 0; }
+  .report-body h3 {
+    font-size: .97rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 20px 0 8px;
+  }
+  .report-body p { margin: 0 0 10px; }
+  .report-body ul, .report-body ol {
+    padding-left: 20px;
+    margin: 0 0 10px;
+  }
+  .report-body li { margin-bottom: 4px; }
+  .report-body strong { color: #0f172a; }
+  .report-body hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 24px 0;
+  }
+  .report-body table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .83rem;
+    margin: 10px 0 18px;
+  }
+  .report-body th {
+    background: #1a56db;
+    color: #fff;
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+  }
+  .report-body td {
+    padding: 7px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  .report-body tr:nth-child(even) td { background: #f1f5f9; }
+  .report-body tr:hover td { background: #dbeafe; }
+  .report-body blockquote {
+    border-left: 4px solid #fde047;
+    background: #fef9c3;
+    padding: 10px 16px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: .85rem;
   }
 
   .report-timestamp { font-size: .75rem; color: #94a3b8; margin-top: 12px; }
@@ -796,8 +854,12 @@ function handleEvent(event) {
   }
 }
 
+let _rawReportText = '';
+
 function showReport(text) {
-  document.getElementById('reportBody').textContent = text;
+  _rawReportText = text;
+  marked.setOptions({ breaks: true, gfm: true });
+  document.getElementById('reportBody').innerHTML = marked.parse(text);
   document.getElementById('reportTimestamp').textContent =
     'Generated: ' + new Date().toLocaleString();
   document.getElementById('reportPanel').style.display = 'block';
@@ -809,8 +871,7 @@ function showReport(text) {
 }
 
 function copyReport() {
-  const text = document.getElementById('reportBody').textContent;
-  navigator.clipboard.writeText(text).then(() => alert('Report copied to clipboard.'));
+  navigator.clipboard.writeText(_rawReportText).then(() => alert('Report copied to clipboard.'));
 }
 
 function resetForm() {
