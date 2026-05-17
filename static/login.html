@@ -22,7 +22,7 @@
   .card {
     background: #fff;
     border-radius: 12px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10), 0 1px 4px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
     padding: 40px 36px 32px;
     width: 100%;
     max-width: 400px;
@@ -30,47 +30,46 @@
 
   .brand {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 28px;
   }
 
-  .brand .icon {
-    font-size: 2.8rem;
-    line-height: 1;
-    margin-bottom: 10px;
-    display: block;
-  }
+  .brand .icon { font-size: 2.8rem; line-height: 1; margin-bottom: 10px; display: block; }
+  .brand h1 { font-size: 1.25rem; font-weight: 700; color: #1a56db; letter-spacing: -0.3px; margin-bottom: 4px; }
+  .brand p { font-size: 0.78rem; color: #64748b; letter-spacing: 0.2px; }
 
-  .brand h1 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #1a56db;
-    letter-spacing: -0.3px;
-    margin-bottom: 4px;
-  }
-
-  .brand p {
-    font-size: 0.78rem;
-    color: #64748b;
-    letter-spacing: 0.2px;
-  }
-
-  .form-group {
+  /* Mode tabs */
+  .tabs {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-bottom: 16px;
+    border-bottom: 2px solid #e2e8f0;
+    margin-bottom: 24px;
   }
-
-  label {
-    font-size: 0.75rem;
+  .tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 10px 0;
+    font-size: 0.88rem;
     font-weight: 600;
-    color: #475569;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    font-family: inherit;
+    color: #94a3b8;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
   }
+  .tab-btn.active { color: #1a56db; border-bottom-color: #1a56db; }
+  .tab-btn:hover:not(.active) { color: #475569; }
+
+  .form-panel { display: none; }
+  .form-panel.active { display: block; }
+
+  .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+
+  label { font-size: 0.75rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; }
 
   input[type="email"],
-  input[type="password"] {
+  input[type="password"],
+  input[type="text"] {
     border: 1px solid #cbd5e1;
     border-radius: 7px;
     padding: 10px 13px;
@@ -81,27 +80,25 @@
     transition: border-color 0.15s, box-shadow 0.15s;
     width: 100%;
   }
-
-  input[type="email"]:focus,
-  input[type="password"]:focus {
+  input:focus {
     outline: none;
     border-color: #1a56db;
-    box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.12);
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.12);
     background: #fff;
   }
+  input.invalid { border-color: #dc2626; }
 
-  #error-msg {
+  .msg {
     display: none;
-    background: #fef2f2;
-    border: 1px solid #fecaca;
     border-radius: 7px;
     padding: 10px 13px;
     font-size: 0.84rem;
-    color: #dc2626;
     margin-bottom: 16px;
   }
+  .msg.error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+  .msg.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
 
-  #submit-btn {
+  .submit-btn {
     width: 100%;
     padding: 11px;
     background: #1a56db;
@@ -115,18 +112,14 @@
     transition: background 0.15s, transform 0.1s;
     margin-top: 4px;
   }
+  .submit-btn:hover:not(:disabled) { background: #1646b8; }
+  .submit-btn:active:not(:disabled) { transform: scale(0.98); }
+  .submit-btn:disabled { background: #93aee8; cursor: not-allowed; }
 
-  #submit-btn:hover:not(:disabled) {
-    background: #1646b8;
-  }
-
-  #submit-btn:active:not(:disabled) {
-    transform: scale(0.98);
-  }
-
-  #submit-btn:disabled {
-    background: #93aee8;
-    cursor: not-allowed;
+  .password-hint {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    margin-top: 3px;
   }
 
   .footer {
@@ -148,34 +141,82 @@
     <p>Clinical Decision Support System</p>
   </div>
 
-  <div id="error-msg"></div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">Sign In</button>
+    <button class="tab-btn" id="tab-signup" onclick="switchTab('signup')">Create Account</button>
+  </div>
 
-  <form id="login-form" novalidate>
-    <div class="form-group">
-      <label for="email">Email Address</label>
-      <input type="email" id="email" name="email" placeholder="your@hospital.org" autocomplete="email" required />
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" autocomplete="current-password" required />
-    </div>
-    <button type="submit" id="submit-btn">Sign In</button>
-  </form>
+  <!-- Sign In panel -->
+  <div class="form-panel active" id="panel-login">
+    <div id="login-msg" class="msg error"></div>
+    <form id="login-form" novalidate>
+      <div class="form-group">
+        <label for="login-email">Email Address</label>
+        <input type="email" id="login-email" placeholder="your@hospital.org" autocomplete="email" required />
+      </div>
+      <div class="form-group">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="submit-btn" id="login-btn">Sign In</button>
+    </form>
+  </div>
+
+  <!-- Sign Up panel -->
+  <div class="form-panel" id="panel-signup">
+    <div id="signup-msg" class="msg"></div>
+    <form id="signup-form" novalidate>
+      <div class="form-group">
+        <label for="signup-email">Email Address</label>
+        <input type="email" id="signup-email" placeholder="your@hospital.org" autocomplete="email" required />
+      </div>
+      <div class="form-group">
+        <label for="signup-password">Password</label>
+        <input type="password" id="signup-password" autocomplete="new-password" required />
+        <span class="password-hint">Minimum 8 characters</span>
+      </div>
+      <div class="form-group">
+        <label for="signup-confirm">Confirm Password</label>
+        <input type="password" id="signup-confirm" autocomplete="new-password" required />
+      </div>
+      <button type="submit" class="submit-btn" id="signup-btn">Create Account</button>
+    </form>
+  </div>
 </div>
 
 <p class="footer">Authorized personnel only. All patient data is protected under HIPAA.</p>
 
 <script>
-async function handleLogin(e) {
+function switchTab(mode) {
+  ['login','signup'].forEach(m => {
+    document.getElementById('tab-' + m).classList.toggle('active', m === mode);
+    document.getElementById('panel-' + m).classList.toggle('active', m === mode);
+  });
+  // Clear messages when switching
+  ['login-msg','signup-msg'].forEach(id => {
+    const el = document.getElementById(id);
+    el.style.display = 'none';
+    el.className = 'msg error';
+  });
+}
+
+function showMsg(id, text, type) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'msg ' + type;
+  el.style.display = 'block';
+}
+
+document.getElementById('login-form').addEventListener('submit', async function(e) {
   e.preventDefault();
-  const btn = document.getElementById('submit-btn');
-  const errDiv = document.getElementById('error-msg');
-  const email = document.getElementById('email').value;
-  const password = document.getElementById('password').value;
+  const btn = document.getElementById('login-btn');
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
 
   btn.disabled = true;
   btn.textContent = 'Signing in...';
-  errDiv.style.display = 'none';
+  document.getElementById('login-msg').style.display = 'none';
 
   try {
     const res = await fetch('/api/auth/login', {
@@ -187,19 +228,59 @@ async function handleLogin(e) {
     if (res.ok) {
       window.location.href = '/';
     } else {
-      errDiv.textContent = data.error || 'Login failed.';
-      errDiv.style.display = 'block';
+      showMsg('login-msg', data.error || 'Login failed.', 'error');
       btn.disabled = false;
       btn.textContent = 'Sign In';
     }
   } catch(err) {
-    errDiv.textContent = 'Network error. Please try again.';
-    errDiv.style.display = 'block';
+    showMsg('login-msg', 'Network error. Please try again.', 'error');
     btn.disabled = false;
     btn.textContent = 'Sign In';
   }
-}
-document.getElementById('login-form').addEventListener('submit', handleLogin);
+});
+
+document.getElementById('signup-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('signup-btn');
+  const email = document.getElementById('signup-email').value.trim();
+  const password = document.getElementById('signup-password').value;
+  const confirm = document.getElementById('signup-confirm').value;
+
+  if (password.length < 8) {
+    showMsg('signup-msg', 'Password must be at least 8 characters.', 'error');
+    return;
+  }
+  if (password !== confirm) {
+    showMsg('signup-msg', 'Passwords do not match.', 'error');
+    document.getElementById('signup-confirm').classList.add('invalid');
+    return;
+  }
+  document.getElementById('signup-confirm').classList.remove('invalid');
+
+  btn.disabled = true;
+  btn.textContent = 'Creating account...';
+  document.getElementById('signup-msg').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      window.location.href = '/';
+    } else {
+      showMsg('signup-msg', data.error || 'Sign up failed.', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+    }
+  } catch(err) {
+    showMsg('signup-msg', 'Network error. Please try again.', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Create Account';
+  }
+});
 </script>
 
 </body>

@@ -47,5 +47,8 @@ Thumbs.db
 output_*.txt
 discharge_plan_*.txt
 
+# User accounts (contains hashed passwords — do not commit)
+data/users.json
+
 # Jupyter
 .ipynb_checkpoints

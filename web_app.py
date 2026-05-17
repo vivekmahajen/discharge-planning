@@ -1,7 +1,9 @@
 """FastAPI web application for the Multi-Agent Discharge Planning System."""
 import asyncio
+import hashlib
 import json
 import os
+import secrets
 from pathlib import Path
 
 import anthropic
@@ -15,13 +17,14 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
+DATA_DIR = BASE_DIR / "data"
+USERS_FILE = DATA_DIR / "users.json"
 
 app = FastAPI(title="Discharge Planning AI")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Auth helpers
 SECRET_KEY = os.getenv("SECRET_KEY", "discharge-planning-dev-secret-change-in-prod")
-AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
 ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")  # comma-separated; empty = any email allowed
 ALLOWED_EMAILS = {e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.strip()}
 
@@ -30,12 +33,60 @@ COOKIE_NAME = "dp_session"
 COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
 
 
+# ── User store (file-backed) ─────────────────────────────────────────────────
+
+def _load_users() -> dict:
+    if USERS_FILE.exists():
+        try:
+            return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_users(users: dict) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
+
+
+def _hash_password(password: str, salt: str) -> str:
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
+    return dk.hex()
+
+
+def _verify_password(password: str, salt: str, stored_hash: str) -> bool:
+    return secrets.compare_digest(_hash_password(password, salt), stored_hash)
+
+
+def register_user(email: str, password: str) -> str | None:
+    """Create user. Returns None on success, error string on failure."""
+    users = _load_users()
+    if email in users:
+        return "An account with this email already exists."
+    salt = secrets.token_hex(16)
+    users[email] = {"salt": salt, "hash": _hash_password(password, salt)}
+    _save_users(users)
+    return None
+
+
+def authenticate_user(email: str, password: str) -> str | None:
+    """Return None if credentials are valid, error string if not."""
+    users = _load_users()
+    if email not in users:
+        return "No account found with this email. Please sign up first."
+    entry = users[email]
+    if not _verify_password(password, entry["salt"], entry["hash"]):
+        return "Incorrect password."
+    return None
+
+
+# ── Session helpers ──────────────────────────────────────────────────────────
+
 def make_session_cookie(email: str) -> str:
     return _serializer.dumps({"email": email})
 
 
 def verify_session_cookie(token: str) -> str | None:
-    """Return email if valid, None otherwise."""
     try:
         data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
         return data.get("email")
@@ -51,18 +102,50 @@ def get_current_user(request: Request) -> str | None:
 
 
 def require_login(request: Request):
-    """Return redirect response if not authenticated, else None."""
     if not get_current_user(request):
         return RedirectResponse(url="/login", status_code=302)
     return None
 
 
-# ── Routes ──────────────────────────────────────────────────────────────────
+def _set_session(response: JSONResponse, email: str) -> JSONResponse:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=make_session_cookie(email),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=COOKIE_MAX_AGE,
+    )
+    return response
+
+
+# ── Auth routes ──────────────────────────────────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     with open(STATIC_DIR / "login.html", encoding="utf-8") as f:
         return f.read()
+
+
+@app.post("/api/auth/signup")
+async def do_signup(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid email address."}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters."}, status_code=400)
+    if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
+        return JSONResponse({"error": "This email is not authorized to register."}, status_code=403)
+
+    err = register_user(email, password)
+    if err:
+        return JSONResponse({"error": err}, status_code=409)
+
+    response = JSONResponse({"ok": True})
+    return _set_session(response, email)
 
 
 @app.post("/api/auth/login")
@@ -71,32 +154,17 @@ async def do_login(request: Request):
     email = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
 
-    # Validate email format (basic)
     if "@" not in email or "." not in email.split("@")[-1]:
         return JSONResponse({"error": "Invalid email address."}, status_code=400)
-
-    # Validate password
-    if not AUTH_PASSWORD:
-        return JSONResponse({"error": "AUTH_PASSWORD is not configured on the server."}, status_code=500)
-    if password != AUTH_PASSWORD:
-        return JSONResponse({"error": "Incorrect password."}, status_code=401)
-
-    # Check allowed emails list (if configured)
     if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
         return JSONResponse({"error": "This email is not authorized."}, status_code=403)
 
-    # Set signed session cookie
-    token = make_session_cookie(email)
+    err = authenticate_user(email, password)
+    if err:
+        return JSONResponse({"error": err}, status_code=401)
+
     response = JSONResponse({"ok": True})
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,  # set True if enforcing HTTPS in production
-        max_age=COOKIE_MAX_AGE,
-    )
-    return response
+    return _set_session(response, email)
 
 
 @app.get("/api/auth/logout")
