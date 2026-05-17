@@ -224,16 +224,17 @@ document.getElementById('login-form').addEventListener('submit', async function(
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, password})
     });
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch(_) {}
     if (res.ok) {
       window.location.href = '/';
     } else {
-      showMsg('login-msg', data.error || 'Login failed.', 'error');
+      showMsg('login-msg', data.error || `Server error (${res.status}). Please try again.`, 'error');
       btn.disabled = false;
       btn.textContent = 'Sign In';
     }
   } catch(err) {
-    showMsg('login-msg', 'Network error. Please try again.', 'error');
+    showMsg('login-msg', 'Could not reach the server. Please try again.', 'error');
     btn.disabled = false;
     btn.textContent = 'Sign In';
   }
@@ -267,16 +268,17 @@ document.getElementById('signup-form').addEventListener('submit', async function
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, password})
     });
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch(_) {}
     if (res.ok) {
       window.location.href = '/';
     } else {
-      showMsg('signup-msg', data.error || 'Sign up failed.', 'error');
+      showMsg('signup-msg', data.error || `Server error (${res.status}). Please try again.`, 'error');
       btn.disabled = false;
       btn.textContent = 'Create Account';
     }
   } catch(err) {
-    showMsg('signup-msg', 'Network error. Please try again.', 'error');
+    showMsg('signup-msg', 'Could not reach the server. Please try again.', 'error');
     btn.disabled = false;
     btn.textContent = 'Create Account';
   }

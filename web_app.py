@@ -17,7 +17,8 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
-DATA_DIR = BASE_DIR / "data"
+# Vercel has a read-only filesystem except /tmp; fall back there when needed
+DATA_DIR = Path("/tmp") if os.getenv("VERCEL") else BASE_DIR / "data"
 USERS_FILE = DATA_DIR / "users.json"
 
 app = FastAPI(title="Discharge Planning AI")
