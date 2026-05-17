@@ -45,7 +45,11 @@ A clean table with two columns (Field | Details) covering: Patient Name, DOB/Age
 ### Discharge Readiness
 **Status:** Ready / Not Ready / ⚠️ Conditional
 
-If conditional, list each condition as a bullet with an owner and deadline.
+If conditional, present each condition as a row in this table:
+
+| # | Condition | Clinical Rationale | Owner | Deadline | Status |
+|---|---|---|---|---|---|
+| 1 | ... | ... | ... | ... | ⏳ |
 
 ---
 
@@ -85,7 +89,13 @@ If conditional, list each condition as a bullet with an owner and deadline.
 | ... | ... | ... | ... | ... |
 
 ### ⚠️ High-Alert Medications
-List each with bold name, monitoring requirement, and patient education point.
+Present each high-alert medication as a row in this table:
+
+| Medication | Risk Level | Monitoring Required | Key Patient Education | ⚠️ Special Flags |
+|---|---|---|---|---|
+| **Drug name** dose | 🔴 High / 🟡 Moderate | Lab, frequency, who orders | Plain-language instructions (6th grade level) | Any urgent clinical flag |
+
+After the table, add a brief narrative paragraph for any medication requiring extended explanation (e.g. complex dosing decisions, hold conditions, or items pending physician sign-off).
 
 ### Lab Monitoring Required Post-Discharge
 | Lab | Frequency | Ordering Provider | First Due |
