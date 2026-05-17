@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Discharge Planning AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f0f4f8;
+    color: #1e293b;
+    min-height: 100vh;
+  }
+
+  header {
+    background: #1a56db;
+    color: #fff;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  header .logo { font-size: 2rem; }
+  header h1 { font-size: 1.3rem; font-weight: 700; letter-spacing: -.3px; }
+  header p  { font-size: .8rem; opacity: .85; margin-top: 2px; }
+
+  .container { max-width: 960px; margin: 32px auto; padding: 0 16px; }
+
+  /* ── Tabs ── */
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    background: #fff;
+    border-radius: 10px 10px 0 0;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
+    padding: 8px 8px 0;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .tab-btn {
+    padding: 8px 14px;
+    font-size: .8rem;
+    font-weight: 600;
+    border: none;
+    background: none;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    white-space: nowrap;
+    color: #64748b;
+    transition: background .15s, color .15s;
+  }
+  .tab-btn.active { background: #1a56db; color: #fff; }
+  .tab-btn:hover:not(.active) { background: #e8f0fe; color: #1a56db; }
+
+  /* ── Form card ── */
+  .form-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0 0 10px 10px;
+    padding: 28px;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1a56db;
+    margin-bottom: 18px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e8f0fe;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .form-grid.single { grid-template-columns: 1fr; }
+  @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field.full { grid-column: 1 / -1; }
+
+  label { font-size: .78rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .4px; }
+
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: .9rem;
+    font-family: inherit;
+    color: #1e293b;
+    background: #f8fafc;
+    transition: border-color .15s, box-shadow .15s;
+    width: 100%;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #1a56db;
+    box-shadow: 0 0 0 3px rgba(26,86,219,.12);
+    background: #fff;
+  }
+  textarea { resize: vertical; min-height: 100px; }
+  .hint { font-size: .72rem; color: #94a3b8; margin-top: 2px; }
+
+  /* ── Nav buttons ── */
+  .nav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid #e2e8f0;
+  }
+  .btn {
+    padding: 10px 22px;
+    border-radius: 7px;
+    font-size: .88rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: background .15s, transform .1s;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-secondary { background: #e8f0fe; color: #1a56db; }
+  .btn-secondary:hover { background: #d1e3ff; }
+  .btn-primary { background: #1a56db; color: #fff; }
+  .btn-primary:hover { background: #1648c0; }
+  .btn-danger  { background: #e53e3e; color: #fff; }
+  .btn-danger:hover { background: #c53030; }
+  .btn-generate {
+    width: 100%;
+    margin-top: 20px;
+    padding: 14px;
+    font-size: 1rem;
+    background: #16a34a;
+    color: #fff;
+    border-radius: 8px;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-generate:hover { background: #15803d; }
+  .btn-generate:disabled { background: #94a3b8; cursor: not-allowed; }
+
+  .sample-row { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+  .btn-sample { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; padding: 7px 16px; border-radius: 6px; font-size: .8rem; font-weight: 600; cursor: pointer; }
+  .btn-sample:hover { background: #e2e8f0; }
+
+  /* ── Progress panel ── */
+  .progress-panel {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 28px;
+    margin-top: 24px;
+    display: none;
+  }
+  .progress-panel h2 { font-size: 1rem; font-weight: 700; margin-bottom: 20px; color: #1e293b; }
+
+  .agent-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 600px) { .agent-grid { grid-template-columns: 1fr; } }
+
+  .agent-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #f8fafc;
+  }
+  .agent-icon { font-size: 1.5rem; }
+  .agent-name { font-size: .85rem; font-weight: 600; color: #1e293b; }
+  .agent-status {
+    font-size: .72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+    margin-top: 3px;
+    display: inline-block;
+  }
+  .status-waiting  { background: #f1f5f9; color: #94a3b8; }
+  .status-running  { background: #dbeafe; color: #1a56db; animation: pulse 1.4s infinite; }
+  .status-complete { background: #dcfce7; color: #16a34a; }
+  .status-error    { background: #fee2e2; color: #dc2626; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+  .coordinator-card {
+    grid-column: 1 / -1;
+    border: 2px solid #1a56db;
+    background: #eff6ff;
+  }
+
+  /* ── Report panel ── */
+  .report-panel {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 28px;
+    margin-top: 24px;
+    display: none;
+  }
+  .report-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .report-header h2 { font-size: 1.1rem; font-weight: 700; color: #1e293b; }
+  .report-actions { display: flex; gap: 8px; }
+
+  .report-body {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 24px;
+    font-family: "Courier New", Courier, monospace;
+    font-size: .82rem;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 70vh;
+    overflow-y: auto;
+    color: #1e293b;
+  }
+
+  .report-timestamp { font-size: .75rem; color: #94a3b8; margin-top: 12px; }
+
+  .alert {
+    background: #fef9c3;
+    border: 1px solid #fde047;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: .85rem;
+    color: #854d0e;
+    margin-top: 12px;
+  }
+  .alert strong { font-weight: 700; }
+
+  .error-msg { color: #dc2626; font-size: .85rem; margin-top: 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Multi-Agent Clinical Decision Support &nbsp;·&nbsp; All outputs require clinician review before action</p>
+  </div>
+</header>
+
+<div class="container">
+  <div class="sample-row">
+    <button class="btn-sample" onclick="loadSample()">⚡ Load Sample Patient</button>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" onclick="goTab(0)">1 · Demographics</button>
+    <button class="tab-btn" onclick="goTab(1)">2 · Diagnoses</button>
+    <button class="tab-btn" onclick="goTab(2)">3 · Insurance</button>
+    <button class="tab-btn" onclick="goTab(3)">4 · Medications</button>
+    <button class="tab-btn" onclick="goTab(4)">5 · Therapy</button>
+    <button class="tab-btn" onclick="goTab(5)">6 · Social History</button>
+    <button class="tab-btn" onclick="goTab(6)">7 · Goals</button>
+  </div>
+
+  <div class="form-card">
+
+    <!-- Section 1: Demographics -->
+    <div class="tab-panel active" id="tab-0">
+      <div class="section-title">Patient Demographics</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Patient Name</label>
+          <input type="text" id="patient_name" placeholder="Full name" />
+        </div>
+        <div class="field">
+          <label>MRN</label>
+          <input type="text" id="mrn" placeholder="Medical record number" />
+        </div>
+        <div class="field">
+          <label>Age</label>
+          <input type="number" id="age" min="0" max="130" placeholder="Years" />
+        </div>
+        <div class="field">
+          <label>Gender</label>
+          <select id="gender">
+            <option value="">Select…</option>
+            <option>Male</option>
+            <option>Female</option>
+            <option>Other</option>
+            <option>Prefer not to say</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Admission Date</label>
+          <input type="date" id="admission_date" />
+        </div>
+        <div class="field">
+          <label>Expected Discharge Date</label>
+          <input type="date" id="expected_discharge_date" />
+        </div>
+        <div class="field full">
+          <label>Attending Physician</label>
+          <input type="text" id="attending_physician" placeholder="Physician name" />
+        </div>
+      </div>
+      <div class="nav-row">
+        <div></div>
+        <button class="btn btn-primary" onclick="goTab(1)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 2: Diagnoses -->
+    <div class="tab-panel" id="tab-1">
+      <div class="section-title">Diagnoses &amp; Clinical Notes</div>
+      <div class="form-grid single">
+        <div class="field">
+          <label>Primary Diagnosis</label>
+          <textarea id="primary_diagnosis" rows="3" placeholder="e.g. Acute decompensated heart failure (HFrEF, EF 30%)"></textarea>
+        </div>
+        <div class="field">
+          <label>Secondary Diagnoses</label>
+          <textarea id="secondary_diagnoses" rows="5" placeholder="One per line&#10;e.g. Type 2 diabetes mellitus&#10;Hypertension&#10;CKD Stage 3"></textarea>
+        </div>
+        <div class="field">
+          <label>Additional Clinical Notes</label>
+          <textarea id="additional_clinical_notes" rows="4" placeholder="Progress notes, vital signs trends, lab values, specialist consults, hospital course summary…"></textarea>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(0)">← Back</button>
+        <button class="btn btn-primary" onclick="goTab(2)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 3: Insurance -->
+    <div class="tab-panel" id="tab-2">
+      <div class="section-title">Insurance &amp; Coverage</div>
+      <div class="form-grid">
+        <div class="field full">
+          <label>Primary Insurance</label>
+          <input type="text" id="primary_insurance" placeholder="e.g. Medicare Traditional, BlueCross PPO" />
+        </div>
+        <div class="field full">
+          <label>Secondary Insurance</label>
+          <input type="text" id="secondary_insurance" placeholder="e.g. Medigap Plan G (or leave blank)" />
+        </div>
+        <div class="field">
+          <label>Medicare Part A Active?</label>
+          <select id="medicare_part_a">
+            <option value="N/A">N/A — Not on Medicare</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>SNF Days Used This Benefit Period</label>
+          <input type="number" id="snf_days_used" min="0" max="100" value="0" />
+          <span class="hint">Medicare covers up to 100 SNF days per benefit period</span>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(1)">← Back</button>
+        <button class="btn btn-primary" onclick="goTab(3)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 4: Medications -->
+    <div class="tab-panel" id="tab-3">
+      <div class="section-title">Medication Reconciliation</div>
+      <div class="form-grid single">
+        <div class="field">
+          <label>Admission Medications (Home Meds)</label>
+          <textarea id="admission_medications" rows="6" placeholder="One per line: Drug Name, Dose, Frequency&#10;e.g. Furosemide 40mg daily&#10;Metoprolol succinate 50mg daily"></textarea>
+        </div>
+        <div class="field">
+          <label>Current Inpatient Medications</label>
+          <textarea id="inpatient_medications" rows="6" placeholder="One per line: Drug Name, Dose, Frequency&#10;e.g. IV Furosemide 80mg BID&#10;Metoprolol tartrate 5mg IV q6h"></textarea>
+        </div>
+        <div class="field">
+          <label>Anticipated Discharge Medications</label>
+          <textarea id="discharge_medications" rows="6" placeholder="One per line: Drug Name, Dose, Frequency&#10;e.g. Furosemide 80mg daily (increased)&#10;Spironolactone 25mg daily (new)"></textarea>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(2)">← Back</button>
+        <button class="btn btn-primary" onclick="goTab(4)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 5: Therapy -->
+    <div class="tab-panel" id="tab-4">
+      <div class="section-title">Therapy Evaluations</div>
+      <div class="form-grid single">
+        <div class="field">
+          <label>Physical Therapy (PT)</label>
+          <textarea id="pt_evaluation" rows="4" placeholder="PT evaluation findings, or type 'Not evaluated'"></textarea>
+        </div>
+        <div class="field">
+          <label>Occupational Therapy (OT)</label>
+          <textarea id="ot_evaluation" rows="4" placeholder="OT evaluation findings, or type 'Not evaluated'"></textarea>
+        </div>
+        <div class="field">
+          <label>Speech Therapy (ST)</label>
+          <textarea id="st_evaluation" rows="4" placeholder="ST evaluation findings, or type 'Not evaluated'"></textarea>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(3)">← Back</button>
+        <button class="btn btn-primary" onclick="goTab(5)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 6: Social History -->
+    <div class="tab-panel" id="tab-5">
+      <div class="section-title">Social History &amp; Home Environment</div>
+      <div class="form-grid">
+        <div class="field full">
+          <label>Living Situation</label>
+          <textarea id="living_situation" rows="3" placeholder="Who does the patient live with? Describe the home environment."></textarea>
+        </div>
+        <div class="field">
+          <label>Housing Type</label>
+          <select id="housing_type">
+            <option value="">Select…</option>
+            <option>House</option>
+            <option>Apartment</option>
+            <option>Assisted Living</option>
+            <option>Nursing Home</option>
+            <option>Shelter</option>
+            <option>Homeless</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Bedroom Location</label>
+          <select id="bedroom_location">
+            <option value="">Select…</option>
+            <option>First floor</option>
+            <option>Second floor</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>Identified Caregiver</label>
+          <input type="text" id="caregiver" placeholder="Name, relationship, hours available per day" />
+        </div>
+        <div class="field">
+          <label>Primary Language</label>
+          <input type="text" id="primary_language" value="English" />
+        </div>
+        <div class="field">
+          <label>Transportation</label>
+          <textarea id="transportation" rows="3" placeholder="Does patient have reliable transportation? How will they get to follow-up appointments?"></textarea>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(4)">← Back</button>
+        <button class="btn btn-primary" onclick="goTab(6)">Next →</button>
+      </div>
+    </div>
+
+    <!-- Section 7: Goals -->
+    <div class="tab-panel" id="tab-6">
+      <div class="section-title">Discharge Goals &amp; Preferences</div>
+      <div class="form-grid single">
+        <div class="field">
+          <label>Patient / Family Preference</label>
+          <textarea id="patient_family_preference" rows="4" placeholder="What is the patient and family requesting for discharge destination and support?"></textarea>
+        </div>
+        <div class="field">
+          <label>Physician Discharge Goals</label>
+          <textarea id="physician_goals" rows="4" placeholder="What has the attending physician communicated about discharge goals and timeline?"></textarea>
+        </div>
+        <div class="field">
+          <label>Additional Notes</label>
+          <textarea id="additional_notes" rows="4" placeholder="Any other relevant information the agents should consider…"></textarea>
+        </div>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-secondary" onclick="goTab(5)">← Back</button>
+        <div></div>
+      </div>
+
+      <button class="btn-generate" id="generateBtn" onclick="generatePlan()">
+        🤖 Generate Discharge Plan
+      </button>
+      <div class="error-msg" id="errorMsg"></div>
+    </div>
+
+  </div><!-- /form-card -->
+
+  <!-- Progress panel -->
+  <div class="progress-panel" id="progressPanel">
+    <h2>🔄 Running Specialist Agents in Parallel…</h2>
+    <div class="agent-grid">
+      <div class="agent-card" id="card-clinical">
+        <div class="agent-icon">🏥</div>
+        <div>
+          <div class="agent-name">Clinical Assessment</div>
+          <span class="agent-status status-waiting" id="status-clinical">Waiting</span>
+        </div>
+      </div>
+      <div class="agent-card" id="card-care_needs">
+        <div class="agent-icon">🩺</div>
+        <div>
+          <div class="agent-name">Care Needs</div>
+          <span class="agent-status status-waiting" id="status-care_needs">Waiting</span>
+        </div>
+      </div>
+      <div class="agent-card" id="card-insurance">
+        <div class="agent-icon">💳</div>
+        <div>
+          <div class="agent-name">Insurance &amp; Authorization</div>
+          <span class="agent-status status-waiting" id="status-insurance">Waiting</span>
+        </div>
+      </div>
+      <div class="agent-card" id="card-medications">
+        <div class="agent-icon">💊</div>
+        <div>
+          <div class="agent-name">Medication Reconciliation</div>
+          <span class="agent-status status-waiting" id="status-medications">Waiting</span>
+        </div>
+      </div>
+      <div class="agent-card" id="card-social">
+        <div class="agent-icon">🏠</div>
+        <div>
+          <div class="agent-name">Social Determinants &amp; Safety</div>
+          <span class="agent-status status-waiting" id="status-social">Waiting</span>
+        </div>
+      </div>
+      <div class="agent-card coordinator-card" id="card-coordinator">
+        <div class="agent-icon">📋</div>
+        <div>
+          <div class="agent-name">Coordinator — Synthesizing Plan</div>
+          <span class="agent-status status-waiting" id="status-coordinator">Waiting</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report panel -->
+  <div class="report-panel" id="reportPanel">
+    <div class="report-header">
+      <h2>📄 Discharge Plan — AI Draft</h2>
+      <div class="report-actions">
+        <button class="btn btn-secondary" onclick="copyReport()">📋 Copy</button>
+        <button class="btn btn-secondary" onclick="window.print()">🖨️ Print / PDF</button>
+        <button class="btn btn-primary" onclick="resetForm()">🔄 New Patient</button>
+      </div>
+    </div>
+    <div class="report-body" id="reportBody"></div>
+    <div class="report-timestamp" id="reportTimestamp"></div>
+    <div class="alert">
+      <strong>⚠️ DRAFT ONLY</strong> — This discharge plan has been prepared by an AI system to support clinical decision-making.
+      It requires review, modification as needed, and approval by a licensed clinician before implementation.
+      No actions should be taken based solely on this draft.
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── Tab navigation ──────────────────────────────────────────────────────────
+const TABS = 7;
+let currentTab = 0;
+
+function goTab(n) {
+  document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === n));
+  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === n));
+  currentTab = n;
+}
+
+// ── Collect form data ────────────────────────────────────────────────────────
+function collectFormData() {
+  const v = id => document.getElementById(id)?.value?.trim() ?? '';
+  return {
+    patient_name:             v('patient_name'),
+    age:                      v('age'),
+    gender:                   v('gender'),
+    mrn:                      v('mrn'),
+    admission_date:           v('admission_date'),
+    expected_discharge_date:  v('expected_discharge_date'),
+    attending_physician:      v('attending_physician'),
+    primary_diagnosis:        v('primary_diagnosis'),
+    secondary_diagnoses:      v('secondary_diagnoses'),
+    additional_clinical_notes:v('additional_clinical_notes'),
+    primary_insurance:        v('primary_insurance'),
+    secondary_insurance:      v('secondary_insurance'),
+    medicare_part_a:          v('medicare_part_a'),
+    snf_days_used:            v('snf_days_used') || '0',
+    admission_medications:    v('admission_medications'),
+    inpatient_medications:    v('inpatient_medications'),
+    discharge_medications:    v('discharge_medications'),
+    pt_evaluation:            v('pt_evaluation') || 'Not evaluated',
+    ot_evaluation:            v('ot_evaluation') || 'Not evaluated',
+    st_evaluation:            v('st_evaluation') || 'Not evaluated',
+    living_situation:         v('living_situation'),
+    caregiver:                v('caregiver'),
+    primary_language:         v('primary_language') || 'English',
+    transportation:           v('transportation'),
+    housing_type:             v('housing_type'),
+    bedroom_location:         v('bedroom_location'),
+    patient_family_preference:v('patient_family_preference'),
+    physician_goals:          v('physician_goals'),
+    additional_notes:         v('additional_notes'),
+  };
+}
+
+// ── Load sample patient ──────────────────────────────────────────────────────
+async function loadSample() {
+  try {
+    const res = await fetch('/api/sample-patient');
+    if (!res.ok) throw new Error('Failed to load sample');
+    const d = await res.json();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    set('patient_name', d.patient_name);
+    set('age', d.age);
+    set('gender', d.gender);
+    set('mrn', d.mrn);
+    set('admission_date', d.admission_date);
+    set('expected_discharge_date', d.expected_discharge_date);
+    set('attending_physician', d.attending_physician);
+    set('primary_diagnosis', d.primary_diagnosis);
+    set('secondary_diagnoses', d.secondary_diagnoses);
+    set('additional_clinical_notes', d.additional_clinical_notes);
+    set('primary_insurance', d.primary_insurance);
+    set('secondary_insurance', d.secondary_insurance);
+    set('medicare_part_a', d.medicare_part_a);
+    set('snf_days_used', d.snf_days_used);
+    set('admission_medications', d.admission_medications);
+    set('inpatient_medications', d.inpatient_medications);
+    set('discharge_medications', d.discharge_medications);
+    set('pt_evaluation', d.pt_evaluation);
+    set('ot_evaluation', d.ot_evaluation);
+    set('st_evaluation', d.st_evaluation);
+    set('living_situation', d.living_situation);
+    set('caregiver', d.caregiver);
+    set('primary_language', d.primary_language);
+    set('transportation', d.transportation);
+    set('housing_type', d.housing_type);
+    set('bedroom_location', d.bedroom_location);
+    set('patient_family_preference', d.patient_family_preference);
+    set('physician_goals', d.physician_goals);
+    set('additional_notes', d.additional_notes);
+    goTab(0);
+  } catch (e) {
+    alert('Could not load sample patient: ' + e.message);
+  }
+}
+
+// ── Set agent card status ────────────────────────────────────────────────────
+function setStatus(agent, status, label) {
+  const el = document.getElementById('status-' + agent);
+  if (!el) return;
+  el.className = 'agent-status status-' + status;
+  el.textContent = label;
+}
+
+// ── Generate plan ────────────────────────────────────────────────────────────
+async function generatePlan() {
+  const btn = document.getElementById('generateBtn');
+  const errEl = document.getElementById('errorMsg');
+  errEl.textContent = '';
+
+  const data = collectFormData();
+  if (!data.patient_name && !data.primary_diagnosis) {
+    errEl.textContent = 'Please enter at least a patient name and primary diagnosis before generating.';
+    return;
+  }
+
+  // Show progress panel, hide report
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating…';
+  document.getElementById('progressPanel').style.display = 'block';
+  document.getElementById('reportPanel').style.display = 'none';
+
+  // Reset all statuses
+  ['clinical','care_needs','insurance','medications','social','coordinator'].forEach(a =>
+    setStatus(a, 'waiting', 'Waiting')
+  );
+
+  try {
+    const res = await fetch('/api/plan/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) throw new Error('Server error: ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        let event;
+        try { event = JSON.parse(raw); } catch { continue; }
+        handleEvent(event);
+      }
+    }
+  } catch (e) {
+    errEl.textContent = 'Error: ' + e.message;
+    btn.disabled = false;
+    btn.innerHTML = '🤖 Generate Discharge Plan';
+  }
+}
+
+function handleEvent(event) {
+  const NAMES = {
+    clinical: 'Clinical Assessment',
+    care_needs: 'Care Needs',
+    insurance: 'Insurance & Auth',
+    medications: 'Medication Recon',
+    social: 'Social Determinants',
+    coordinator: 'Coordinator',
+  };
+
+  switch (event.type) {
+    case 'agent_start':
+      setStatus(event.agent, 'running', 'Running…');
+      break;
+
+    case 'agent_complete':
+      setStatus(event.agent, 'complete', 'Complete ✓');
+      break;
+
+    case 'agent_error':
+      setStatus(event.agent, 'error', 'Error ✗');
+      break;
+
+    case 'coordinator_start':
+      setStatus('coordinator', 'running', 'Synthesizing…');
+      break;
+
+    case 'coordinator_complete':
+      setStatus('coordinator', 'complete', 'Complete ✓');
+      showReport(event.output);
+      break;
+
+    case 'error':
+      document.getElementById('errorMsg').textContent = 'Error: ' + event.message;
+      document.getElementById('generateBtn').disabled = false;
+      document.getElementById('generateBtn').innerHTML = '🤖 Generate Discharge Plan';
+      break;
+  }
+}
+
+function showReport(text) {
+  document.getElementById('reportBody').textContent = text;
+  document.getElementById('reportTimestamp').textContent =
+    'Generated: ' + new Date().toLocaleString();
+  document.getElementById('reportPanel').style.display = 'block';
+  document.getElementById('reportPanel').scrollIntoView({ behavior: 'smooth' });
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = false;
+  btn.innerHTML = '🤖 Generate Discharge Plan';
+}
+
+function copyReport() {
+  const text = document.getElementById('reportBody').textContent;
+  navigator.clipboard.writeText(text).then(() => alert('Report copied to clipboard.'));
+}
+
+function resetForm() {
+  document.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], textarea')
+    .forEach(el => el.value = '');
+  document.querySelectorAll('select').forEach(el => el.selectedIndex = 0);
+  document.getElementById('primary_language').value = 'English';
+  document.getElementById('snf_days_used').value = '0';
+  document.getElementById('reportPanel').style.display = 'none';
+  document.getElementById('progressPanel').style.display = 'none';
+  goTab(0);
+}
+</script>
+</body>
+</html>

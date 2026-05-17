@@ -320,3 +320,74 @@ SAMPLE_PATIENT: dict = {
         "(5) Advance directive discussion — patient interested in completing living will."
     ),
 }
+
+# ---------------------------------------------------------------------------
+# Web form field mapping — flat string values for the browser intake form.
+# ---------------------------------------------------------------------------
+SAMPLE_PATIENT_WEB: dict = {
+    # Section 1 — Patient Demographics
+    "patient_name": SAMPLE_PATIENT["patient_name"],
+    "age": str(SAMPLE_PATIENT["age"]),
+    "gender": SAMPLE_PATIENT["sex"],
+    "mrn": SAMPLE_PATIENT["mrn"],
+    "admission_date": SAMPLE_PATIENT["admission_date"],
+    "expected_discharge_date": SAMPLE_PATIENT["anticipated_discharge_date"],
+    "attending_physician": "Dr. Sarah Chen, MD — Cardiology",
+
+    # Section 2 — Diagnoses
+    "primary_diagnosis": SAMPLE_PATIENT["primary_diagnosis"],
+    "secondary_diagnoses": "\n".join(SAMPLE_PATIENT["secondary_diagnoses"]),
+    "additional_clinical_notes": SAMPLE_PATIENT["clinical_notes"],
+
+    # Section 3 — Insurance
+    "primary_insurance": SAMPLE_PATIENT["insurance"]["primary"]["payer_name"],
+    "secondary_insurance": (
+        SAMPLE_PATIENT["insurance"]["secondary"]["payer_name"]
+        + " — "
+        + SAMPLE_PATIENT["insurance"]["secondary"]["carrier"]
+    ),
+    "medicare_part_a": "Yes",
+    "snf_days_used": str(
+        SAMPLE_PATIENT["insurance"]["primary"]["snf_days_used_this_benefit_period"]
+    ),
+
+    # Section 4 — Medications
+    "admission_medications": "\n".join(SAMPLE_PATIENT["admission_medications"]),
+    "inpatient_medications": "\n".join(SAMPLE_PATIENT["inpatient_medications"]),
+    "discharge_medications": "\n".join(SAMPLE_PATIENT["discharge_medications"]),
+
+    # Section 5 — Therapy Evaluations
+    "pt_evaluation": SAMPLE_PATIENT["therapy_evaluations"]["PT"],
+    "ot_evaluation": SAMPLE_PATIENT["therapy_evaluations"]["OT"],
+    "st_evaluation": SAMPLE_PATIENT["therapy_evaluations"]["ST"],
+
+    # Section 6 — Social History
+    "living_situation": SAMPLE_PATIENT["support_system"]["living_situation"],
+    "caregiver": (
+        SAMPLE_PATIENT["support_system"]["primary_caregiver"]
+        + " — "
+        + SAMPLE_PATIENT["support_system"]["caregiver_availability"]
+    ),
+    "primary_language": SAMPLE_PATIENT["language_literacy"]["primary_language"],
+    "transportation": SAMPLE_PATIENT["transportation"]["primary_transportation"],
+    "housing_type": "House",
+    "bedroom_location": "Second floor",
+
+    # Section 7 — Discharge Goals
+    "patient_family_preference": (
+        "Patient and daughter prefer discharge to home with home health services. "
+        "Daughter (Susan Mitchell-Torres) willing to take 1 week off work to support transition. "
+        "Patient does not want to go to a nursing facility."
+    ),
+    "physician_goals": (
+        "Discharge home with home health nursing, PT, and OT. "
+        "Cardiology follow-up within 7 days. PCP follow-up within 5 days. "
+        "BMP (electrolytes, creatinine) within 3-5 days post-discharge. "
+        "First-floor bedroom relocation required before discharge."
+    ),
+    "additional_notes": (
+        "Advance directive discussion needed — patient interested in completing living will. "
+        "Eliquis manufacturer copay card application pending. "
+        "Church community provides meal support 2x/week."
+    ),
+}
