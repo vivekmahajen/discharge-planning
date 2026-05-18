@@ -371,6 +371,105 @@ async def stream_plan(patient_data: dict):
         yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
 
+@app.get("/summary-generator", response_class=HTMLResponse)
+async def summary_generator_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "summary-generator.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/summary/generate")
+async def generate_summary(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=500)
+
+    body = await request.json()
+    clinical_notes = body.get("clinicalNotes", "")
+    ctx = body.get("patientContext", {})
+
+    if not clinical_notes.strip():
+        return JSONResponse({"error": "clinicalNotes is required"}, status_code=400)
+
+    SYSTEM_PROMPT = """You are an expert clinical documentation specialist embedded in a HIPAA-compliant hospital discharge planning system. Your role is to generate accurate, structured, CMS-compliant discharge summaries for use by licensed discharge planners, case managers, and attending physicians in California acute care hospitals.
+
+You operate under these non-negotiable constraints:
+- NEVER fabricate clinical data, medications, lab values, or diagnoses not present in the source notes
+- NEVER include information that could identify a patient beyond what is explicitly provided
+- ALWAYS flag missing critical information rather than inventing it
+- ALWAYS use plain-language patient instructions alongside clinical terminology
+- ALWAYS include California-specific regulatory elements: CDPH CoP compliance, Livanta QIO appeal rights, Medi-Cal auth status where applicable
+- Output must be structured JSON matching the schema provided — no prose, no markdown fences, no preamble
+
+Your output will be parsed programmatically and rendered into a printable, legally defensible discharge document. Accuracy and completeness take precedence over brevity."""
+
+    user_prompt = f"""Generate a complete, CMS-compliant discharge summary from the clinical notes below.
+
+## Patient Context
+- Admission date: {ctx.get('admissionDate', 'Not provided')}
+- Discharge date: {ctx.get('dischargeDate', 'Not provided')}
+- Attending physician: {ctx.get('attending', 'Not provided')}
+- Unit / service: {ctx.get('unit', 'Not provided')}
+- Insurance / payer: {ctx.get('payer', 'Not provided')}
+- Patient preferred language: {ctx.get('language', 'English')}
+- LACE risk score: {ctx.get('laceScore', 'Not calculated')} ({ctx.get('laceTier', 'Unknown')})
+- HRRP flagged condition: {ctx.get('hrrpFlag', 'None')}
+
+## Source Clinical Notes
+{clinical_notes}
+
+## Instructions
+Return a single valid JSON object with these top-level keys: summary_metadata, patient_summary, medications, follow_up, patient_education, post_acute_plan, california_compliance, liability_documentation, readmission_risk.
+
+Rules:
+1. If source notes lack data for a field, set it to null and add to summary_metadata.missing_fields
+2. If any high-alert medication (warfarin, insulin, opioids, anticoagulants, digoxin) is present, set requires_physician_review to true
+3. If LACE score >= 10, set follow_up_call_cadence to "24h + 72h + 7d + 14d"
+4. All patient_instruction fields must be written at a 6th-grade reading level
+5. warning_signs must include at minimum: fever, worsening pain, signs of infection, medication side effects
+6. Do not wrap output in markdown fences"""
+
+    def _call_api():
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            temperature=0,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
+
+    loop = asyncio.get_event_loop()
+    try:
+        raw_text = await loop.run_in_executor(None, _call_api)
+    except anthropic.APIError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    # Strip markdown fences defensively
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = clean.split("\n", 1)[-1]
+        if clean.endswith("```"):
+            clean = clean.rsplit("```", 1)[0]
+    clean = clean.strip()
+
+    try:
+        summary = json.loads(clean)
+        # Enforce CA compliance rules server-side
+        if summary.get("california_compliance", {}).get("hrrp_condition_flagged"):
+            if "readmission_risk" in summary:
+                summary["readmission_risk"]["follow_up_call_cadence"] = "24h + 72h + 7d + 14d"
+        return JSONResponse({"success": True, "summary": summary})
+    except json.JSONDecodeError:
+        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+
+
 @app.post("/api/plan/stream")
 async def create_plan(request: Request):
     if not get_current_user(request):
