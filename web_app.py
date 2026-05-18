@@ -388,6 +388,15 @@ async def summary_generator_page(request: Request):
         return f.read()
 
 
+@app.get("/imm-prompt-system", response_class=HTMLResponse)
+async def imm_prompt_system_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "imm-prompt-system.html", encoding="utf-8") as f:
+        return f.read()
+
+
 @app.post("/api/summary/generate")
 async def generate_summary(request: Request):
     if not get_current_user(request):

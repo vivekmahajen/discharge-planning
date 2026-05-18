@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IMM Compliance Module — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #F8F6F2; }
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header .logo { font-size: 1.8rem; }
+    header h1 { font-size: 1.1rem; font-weight: 700; }
+    header p { font-size: .75rem; opacity: .85; margin-top: 2px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85);
+      text-decoration: none;
+      font-size: .8rem;
+      padding: 6px 14px;
+      border-radius: 6px;
+      background: rgba(255,255,255,.15);
+      margin-left: 8px;
+      transition: background .15s;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+    #root { min-height: calc(100vh - 72px); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>IMM Compliance Module · Prompt Engineering Reference</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Back to Planner</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  }).catch(() => { window.location.href = '/login'; });
+</script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const SYSTEM_PROMPT = `You are a Medicare compliance specialist embedded in a HIPAA-compliant hospital discharge planning system in California. Your role is to assist discharge planners in accurately documenting the delivery of the Important Message from Medicare (IMM), tracking appeal rights, and maintaining a legally defensible audit trail that satisfies CMS Conditions of Participation (42 CFR §482.13(e)) and California CDPH requirements.
+
+The IMM (CMS-R-193) is a federally mandated document that must be:
+1. Delivered to every Medicare inpatient beneficiary (or their representative) within 2 days of admission
+2. Re-delivered no more than 2 days before discharge
+3. Signed by the patient or authorized representative at each delivery
+4. Re-delivery triggered any time a new discharge date is set
+
+Livanta is the Beneficiary and Family Centered Care Quality Improvement Organization (BFCC-QIO) for California. When a patient exercises their right to appeal, Livanta must be notified BEFORE the discharge occurs. The hospital may not discharge until Livanta issues its determination unless the patient withdraws their appeal.
+
+You operate under these non-negotiable constraints:
+- NEVER record a delivery that did not occur — you log what the planner reports, and flag inconsistencies
+- NEVER create, edit, or delete a completed IMM log entry — all records are append-only after attestation
+- ALWAYS compute deadline timestamps server-side from the provided delivery timestamp — never trust user-entered deadlines
+- ALWAYS surface the Livanta phone number (1-888-524-9900) and fax (1-888-985-8775) when appeal rights are invoked
+- ALWAYS flag when re-delivery is overdue (within 2 days of planned discharge date)
+- Output must be structured JSON — no prose, no markdown fences, no preamble`;
+
+const USER_PROMPT_TEMPLATE = `Log an IMM delivery event and compute all required compliance fields.
+
+## Delivery Event Details
+- Event type: {{EVENT_TYPE}}
+  (options: initial_delivery | re_delivery | appeal_filed | appeal_withdrawn | appeal_determination | re_delivery_overdue_flag)
+- Delivered by (staff name + role): {{DELIVERED_BY}}
+- Delivery timestamp: {{DELIVERY_TIMESTAMP}}
+- Delivery method: {{DELIVERY_METHOD}}
+  (options: in_person | via_representative | via_interpreter | telephone_only)
+- Signed by: {{SIGNED_BY}}
+  (options: patient | authorized_representative | patient_declined | patient_incapacitated)
+- Representative name (if applicable): {{REPRESENTATIVE_NAME}}
+- Representative relationship: {{REPRESENTATIVE_RELATIONSHIP}}
+- Interpreter used: {{INTERPRETER_USED}} (true/false)
+- Interpreter language: {{INTERPRETER_LANGUAGE}}
+- Interpreter type: {{INTERPRETER_TYPE}}
+  (options: professional_in_person | professional_telephone | staff | family_member | null)
+- Patient verbalized understanding: {{PATIENT_UNDERSTANDING}} (true/false/unable_to_assess)
+- Patient questions or concerns noted: {{PATIENT_CONCERNS}}
+- Planned discharge date: {{PLANNED_DISCHARGE_DATE}}
+- Patient Medicare number (last 4 digits only for logging): {{MEDICARE_LAST4}}
+- Payer type: {{PAYER_TYPE}}
+  (options: medicare_fee_for_service | medicare_advantage | dual_eligible | other — IMM required only for Medicare)
+
+## Appeal Event Details (complete only if event_type includes appeal)
+- Appeal filed: {{APPEAL_FILED}} (true/false)
+- Appeal filed timestamp: {{APPEAL_TIMESTAMP}}
+- Livanta notified: {{LIVANTA_NOTIFIED}} (true/false)
+- Livanta notification timestamp: {{LIVANTA_NOTIFICATION_TIMESTAMP}}
+- Livanta case number: {{LIVANTA_CASE_NUMBER}}
+- Livanta determination: {{LIVANTA_DETERMINATION}}
+  (options: upheld_discharge | overturned_discharge | pending | null)
+- Determination timestamp: {{DETERMINATION_TIMESTAMP}}
+
+## Prior IMM History for This Encounter
+{{PRIOR_IMM_HISTORY}}
+(Paste the JSON array of prior log entries for this admission, or "none" if first delivery)
+
+## Instructions
+Return a single valid JSON object. Do not wrap in markdown fences.
+
+{
+  "log_entry": {
+    "entry_id": "<UUID v4 — generate a placeholder; replace with DB-assigned ID>",
+    "encounter_id": "{{ENCOUNTER_ID}}",
+    "event_type": "{{EVENT_TYPE}}",
+    "delivery_timestamp": "{{DELIVERY_TIMESTAMP}}",
+    "delivered_by_name": "{{DELIVERED_BY}}",
+    "delivery_method": "{{DELIVERY_METHOD}}",
+    "signed_by": "{{SIGNED_BY}}",
+    "representative_name": "{{REPRESENTATIVE_NAME}}",
+    "representative_relationship": "{{REPRESENTATIVE_RELATIONSHIP}}",
+    "interpreter_used": {{INTERPRETER_USED}},
+    "interpreter_language": "{{INTERPRETER_LANGUAGE}}",
+    "interpreter_type": "{{INTERPRETER_TYPE}}",
+    "patient_verbalized_understanding": "{{PATIENT_UNDERSTANDING}}",
+    "patient_concerns": "{{PATIENT_CONCERNS}}",
+    "immutable": true,
+    "created_at": "<ISO timestamp of log creation>",
+    "attestation_pending": true
+  },
+  "compliance_status": {
+    "imm_required": true,
+    "initial_delivery_complete": true | false,
+    "initial_delivery_timestamp": "<ISO or null>",
+    "initial_delivery_within_2_days_of_admission": true | false | "unknown",
+    "re_delivery_required": true | false,
+    "re_delivery_complete": true | false,
+    "re_delivery_timestamp": "<ISO or null>",
+    "re_delivery_deadline": "<ISO — 2 days before planned_discharge_date>",
+    "re_delivery_overdue": true | false,
+    "re_delivery_hours_remaining": "<integer hours or null>",
+    "all_signatures_obtained": true | false,
+    "overall_status": "compliant | re_delivery_due | re_delivery_overdue | appeal_pending | non_compliant",
+    "compliance_notes": "<plain English summary of any gaps>"
+  },
+  "appeal_record": {
+    "appeal_filed": false,
+    "appeal_filed_timestamp": null,
+    "appeal_deadline": "<ISO — 24 hours after re-delivery timestamp>",
+    "appeal_window_open": true | false,
+    "livanta_notified": false,
+    "livanta_notification_timestamp": null,
+    "livanta_case_number": null,
+    "livanta_determination": null,
+    "determination_timestamp": null,
+    "discharge_hold_active": false,
+    "discharge_hold_reason": null,
+    "livanta_contact": {
+      "phone": "1-888-524-9900",
+      "fax": "1-888-985-8775",
+      "website": "https://www.livantaqio.org",
+      "hours": "24/7 for urgent appeals"
+    }
+  },
+  "alerts": [],
+  "planner_checklist": [],
+  "documentation_flags": {
+    "family_member_interpreter_used": false,
+    "family_interpreter_warning": "Using family members as interpreters does not meet California Title 22 language access standards for informed consent. A professional interpreter is strongly recommended and may be legally required.",
+    "patient_declined_signature": false,
+    "declined_signature_guidance": "Document the refusal in detail: who refused, why stated, staff witnesses present. The IMM must still be provided even if patient refuses to sign.",
+    "patient_incapacitated": false,
+    "incapacitated_guidance": "Deliver IMM to authorized representative. If no representative available, document the attempt and contact social work and risk management.",
+    "telephone_delivery_warning": "Telephone delivery is permissible but suboptimal. Document the reason in-person delivery was not possible and ensure a written copy is provided or mailed same day."
+  },
+  "audit_trail": {
+    "action": "IMM_LOG_CREATED",
+    "performed_by": "{{DELIVERED_BY}}",
+    "timestamp": "<ISO>",
+    "ip_note": "Record staff user ID from session — do not log IP in PHI system",
+    "record_locked_after_attestation": true,
+    "tamper_evident": true
+  }
+}`;
+
+const REDELIVERY_PROMPT = `You are a Medicare compliance specialist. Based on the encounter data below, determine whether an IMM re-delivery is required and generate a re-delivery alert with exact deadline.
+
+## Encounter Data
+- Patient admission date: {{ADMISSION_DATE}}
+- Initial IMM delivery date: {{INITIAL_DELIVERY_DATE}}
+- Planned discharge date: {{PLANNED_DISCHARGE_DATE}}
+- Discharge date changed: {{DISCHARGE_DATE_CHANGED}} (true/false)
+- Previous discharge date: {{PREVIOUS_DISCHARGE_DATE}}
+- Re-delivery completed: {{REDELIVERY_COMPLETE}} (true/false)
+- Re-delivery date: {{REDELIVERY_DATE}}
+
+## Rules
+- Re-delivery is required no more than 2 calendar days before the planned discharge date
+- If the discharge date changes, a new re-delivery is required regardless of prior re-delivery
+- If planned discharge is today, re-delivery is immediately overdue if not completed
+- Appeal window opens at re-delivery and closes 24 hours later
+
+Return JSON only:
+{
+  "re_delivery_required": true | false,
+  "re_delivery_reason": "<plain English>",
+  "re_delivery_deadline": "<ISO timestamp — midnight 2 days before discharge>",
+  "re_delivery_overdue": true | false,
+  "hours_until_deadline": "<integer>",
+  "appeal_window_closes": "<ISO — 24h after re_delivery_timestamp or null>",
+  "alert_severity": "critical | warning | info | none",
+  "alert_message": "<message for planner dashboard>",
+  "recommended_action": "<specific next step for planner>"
+}`;
+
+const APPEAL_PROMPT = `You are a Medicare compliance specialist. A patient has filed or is considering filing an IMM appeal. Generate a complete appeal workflow record and action checklist for the discharge planner.
+
+## Appeal Context
+- Patient name (initials only): {{PATIENT_INITIALS}}
+- Re-delivery timestamp: {{REDELIVERY_TIMESTAMP}}
+- Appeal filed: {{APPEAL_FILED}} (true/false)
+- Appeal filed timestamp: {{APPEAL_TIMESTAMP}}
+- Stated reason for appeal: {{APPEAL_REASON}}
+- Livanta notified: {{LIVANTA_NOTIFIED}} (true/false)
+- Current time: {{CURRENT_TIMESTAMP}}
+- Planned discharge time: {{PLANNED_DISCHARGE_TIME}}
+- Attending physician notified: {{PHYSICIAN_NOTIFIED}} (true/false)
+- Risk management notified: {{RISK_NOTIFIED}} (true/false)
+
+## Rules
+- Livanta must be notified BEFORE the patient is discharged
+- Once an appeal is filed, a discharge hold is automatically active
+- Livanta has until midnight of the day following the appeal to issue a determination for standard appeals
+- The hospital may not discharge until determination is received unless the patient withdraws the appeal
+- If Livanta upholds discharge, the patient may be discharged; if overturned, the stay must continue
+- Financial liability notice must be issued if patient continues stay after Livanta upholds discharge
+
+Return JSON only:
+{
+  "appeal_status": {
+    "filed": true | false,
+    "filed_timestamp": "<ISO>",
+    "appeal_deadline": "<ISO — 24h after re-delivery>",
+    "appeal_within_window": true | false,
+    "discharge_hold_active": true | false,
+    "livanta_determination_deadline": "<ISO — midnight after appeal day>",
+    "hours_until_determination_deadline": "<integer>"
+  },
+  "immediate_actions": [
+    {
+      "step": "<integer>",
+      "action": "<specific action>",
+      "responsible_party": "discharge_planner | attending_physician | risk_management | charge_nurse | all",
+      "deadline": "<ISO or 'immediately'>",
+      "complete": false
+    }
+  ],
+  "livanta_notification": {
+    "required": true,
+    "completed": false,
+    "phone": "1-888-524-9900",
+    "fax": "1-888-985-8775",
+    "website": "https://www.livantaqio.org",
+    "hours": "24/7",
+    "information_to_provide": [
+      "Patient name and Medicare number",
+      "Hospital name and NPI",
+      "Admission date",
+      "Planned discharge date",
+      "Reason for discharge",
+      "Patient's stated reason for appeal"
+    ]
+  },
+  "financial_liability_notice": {
+    "required_if_determination_upholds": true,
+    "notice_form": "Hospital-Issued Notice of Non-coverage (HINN)",
+    "timing": "Issue HINN on first day patient is liable for continued stay costs",
+    "guidance": "Patient is not liable for costs until day after Livanta upholds discharge"
+  },
+  "documentation_required": ["<document or note required>"],
+  "alerts": [
+    {
+      "severity": "critical | warning",
+      "message": "<alert text>",
+      "action": "<required action>"
+    }
+  ]
+}`;
+
+const INTEGRATION_CODE = `// api/imm/log.js — IMM delivery logging endpoint
+// Handles: create, re-delivery check, appeal filing
+
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY // server-side only — never expose to client
+);
+
+export async function POST(req) {
+  const { action, payload, staffId } = await req.json();
+
+  switch (action) {
+
+    // ── Log a new IMM delivery event ──────────────────────────────────────
+    case 'log_delivery': {
+      const userPrompt = buildDeliveryPrompt(payload);
+
+      const ai = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 3000,
+          temperature: 0,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userPrompt }]
+        })
+      });
+
+      const aiData = await ai.json();
+      const raw = aiData.content[0].text
+        .replace(/^\`\`\`json\\n?/, '').replace(/\\n?\`\`\`$/, '').trim();
+      const result = JSON.parse(raw);
+
+      const { data: logEntry, error } = await supabase
+        .from('imm_delivery_logs')
+        .insert({
+          encounter_id:         payload.encounterId,
+          patient_id:           payload.patientId,
+          event_type:           result.log_entry.event_type,
+          delivery_timestamp:   result.log_entry.delivery_timestamp,
+          delivered_by_name:    result.log_entry.delivered_by_name,
+          delivered_by_id:      staffId,
+          delivery_method:      result.log_entry.delivery_method,
+          signed_by:            result.log_entry.signed_by,
+          representative_name:  result.log_entry.representative_name,
+          interpreter_used:     result.log_entry.interpreter_used,
+          interpreter_language: result.log_entry.interpreter_language,
+          interpreter_type:     result.log_entry.interpreter_type,
+          patient_understanding: result.log_entry.patient_verbalized_understanding,
+          patient_concerns:     result.log_entry.patient_concerns,
+          compliance_status:    result.compliance_status,
+          appeal_record:        result.appeal_record,
+          alerts:               result.alerts,
+          audit_trail:          result.audit_trail,
+          immutable:            true,
+          attestation_pending:  true,
+          created_at:           new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabase.from('audit_log').insert({
+        action:       'IMM_LOG_CREATED',
+        table_name:   'imm_delivery_logs',
+        record_id:    logEntry.id,
+        performed_by: staffId,
+        timestamp:    new Date().toISOString(),
+        summary:      \`IMM \${result.log_entry.event_type} logged for encounter \${payload.encounterId}\`
+      });
+
+      const criticalAlerts = result.alerts.filter(a => a.severity === 'critical');
+      if (criticalAlerts.length > 0) {
+        await supabase.from('planner_alerts').insert(
+          criticalAlerts.map(a => ({
+            encounter_id: payload.encounterId,
+            alert_type:   a.category,
+            severity:     a.severity,
+            message:      a.message,
+            action:       a.action_required,
+            deadline:     a.deadline,
+            resolved:     false,
+            created_at:   new Date().toISOString()
+          }))
+        );
+      }
+
+      return Response.json({ success: true, logEntry, result });
+    }
+
+    case 'check_redelivery': {
+      const { data: encounters } = await supabase
+        .from('encounters')
+        .select(\`
+          id, admission_date, planned_discharge_date,
+          imm_delivery_logs(event_type, delivery_timestamp, created_at)
+        \`)
+        .eq('status', 'active')
+        .eq('imm_required', true);
+
+      const overdue = [];
+      const dueSoon = [];
+
+      for (const enc of encounters) {
+        const logs     = enc.imm_delivery_logs || [];
+        const initial  = logs.find(l => l.event_type === 'initial_delivery');
+        const reDel    = logs.find(l => l.event_type === 're_delivery');
+        const discharge = new Date(enc.planned_discharge_date);
+        const deadline  = new Date(discharge.getTime() - 2 * 24 * 60 * 60 * 1000);
+        const now       = new Date();
+        const hoursLeft = (deadline - now) / 3600000;
+
+        if (initial && !reDel) {
+          if (now > deadline)       overdue.push({ ...enc, hoursLeft });
+          else if (hoursLeft <= 24) dueSoon.push({ ...enc, hoursLeft });
+        }
+      }
+
+      return Response.json({ overdue, dueSoon });
+    }
+
+    case 'attest': {
+      const { logId } = payload;
+
+      const { data: log } = await supabase
+        .from('imm_delivery_logs')
+        .select('delivered_by_id, attestation_pending')
+        .eq('id', logId)
+        .single();
+
+      if (log.delivered_by_id !== staffId)
+        return Response.json({ error: 'Only the original logger may attest' }, { status: 403 });
+      if (!log.attestation_pending)
+        return Response.json({ error: 'Record already attested' }, { status: 400 });
+
+      await supabase
+        .from('imm_delivery_logs')
+        .update({ attestation_pending: false, attested_at: new Date().toISOString(), attested_by: staffId })
+        .eq('id', logId);
+
+      await supabase.from('audit_log').insert({
+        action: 'IMM_LOG_ATTESTED', table_name: 'imm_delivery_logs',
+        record_id: logId, performed_by: staffId,
+        timestamp: new Date().toISOString(), summary: 'IMM log entry attested and locked'
+      });
+
+      return Response.json({ success: true, locked: true });
+    }
+
+    default:
+      return Response.json({ error: 'Unknown action' }, { status: 400 });
+  }
+}`;
+
+const DB_SCHEMA = `-- IMM delivery log (append-only, immutable after attestation)
+CREATE TABLE imm_delivery_logs (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  encounter_id          uuid NOT NULL REFERENCES encounters(id),
+  patient_id            uuid NOT NULL REFERENCES patients(id),
+
+  event_type            text NOT NULL CHECK (event_type IN (
+                          'initial_delivery','re_delivery','appeal_filed',
+                          'appeal_withdrawn','appeal_determination','re_delivery_overdue_flag')),
+  delivery_timestamp    timestamptz NOT NULL,
+  delivered_by_name     text NOT NULL,
+  delivered_by_id       uuid NOT NULL REFERENCES staff(id),
+  delivery_method       text NOT NULL CHECK (delivery_method IN (
+                          'in_person','via_representative',
+                          'via_interpreter','telephone_only')),
+  signed_by             text NOT NULL CHECK (signed_by IN (
+                          'patient','authorized_representative',
+                          'patient_declined','patient_incapacitated')),
+  representative_name        text,
+  representative_relationship text,
+
+  interpreter_used      boolean NOT NULL DEFAULT false,
+  interpreter_language  text,
+  interpreter_type      text CHECK (interpreter_type IN (
+                          'professional_in_person','professional_telephone',
+                          'staff','family_member')),
+
+  patient_understanding text CHECK (patient_understanding IN (
+                          'true','false','unable_to_assess')),
+  patient_concerns      text,
+
+  compliance_status     jsonb,
+  appeal_record         jsonb,
+  alerts                jsonb,
+  audit_trail           jsonb,
+
+  immutable             boolean NOT NULL DEFAULT true,
+  attestation_pending   boolean NOT NULL DEFAULT true,
+  attested_at           timestamptz,
+  attested_by           uuid REFERENCES staff(id),
+  created_at            timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT no_edit_after_attestation CHECK (
+    attestation_pending = true OR attested_at IS NOT NULL
+  )
+);
+
+CREATE TABLE audit_log (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  action       text NOT NULL,
+  table_name   text,
+  record_id    uuid,
+  performed_by uuid REFERENCES staff(id),
+  timestamp    timestamptz NOT NULL DEFAULT now(),
+  summary      text
+);
+
+CREATE TABLE planner_alerts (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  encounter_id uuid NOT NULL REFERENCES encounters(id),
+  log_id       uuid REFERENCES imm_delivery_logs(id),
+  alert_type   text NOT NULL,
+  severity     text NOT NULL CHECK (severity IN ('critical','warning','info')),
+  message      text NOT NULL,
+  action       text,
+  deadline     timestamptz,
+  resolved     boolean NOT NULL DEFAULT false,
+  resolved_by  uuid REFERENCES staff(id),
+  resolved_at  timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Row-Level Security: lock records after attestation
+ALTER TABLE imm_delivery_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY imm_immutable_after_attest ON imm_delivery_logs
+  FOR UPDATE USING (attestation_pending = true);
+
+CREATE INDEX idx_imm_encounter ON imm_delivery_logs(encounter_id, event_type);
+CREATE INDEX idx_imm_alerts    ON planner_alerts(encounter_id, severity, resolved);`;
+
+const RULES = [
+  {
+    title: "Delivery timing (CMS §482.13(e))",
+    color: "#C04028", bg: "#FAECE7",
+    items: [
+      "Initial IMM must be delivered within 2 calendar days of admission — not 48 hours, calendar days",
+      "Re-delivery must occur no more than 2 calendar days before the planned discharge date",
+      "If the planned discharge date changes, a new re-delivery is required even if re-delivery was already done",
+      "Both deliveries require a patient or representative signature — verbal acknowledgment alone is not sufficient",
+      "If patient refuses to sign, document the refusal in detail — the IMM must still be provided",
+    ],
+  },
+  {
+    title: "Signature & representative rules",
+    color: "#0C447C", bg: "#E6F1FB",
+    items: [
+      "Authorized representative may sign only if patient lacks decision-making capacity or has designated an agent via DPOA",
+      "Family member signature is not valid unless they are a documented authorized representative or DPOA",
+      "If patient is incapacitated and no representative is available: document the attempt, contact social work, and notify risk management",
+      "Patient declining to sign is not the same as lacking capacity — document the refusal clearly and have a witness",
+      "Telephone delivery is permissible but document why in-person was not possible and mail a written copy same day",
+    ],
+  },
+  {
+    title: "Language access requirements",
+    color: "#0F6E56", bg: "#E1F5EE",
+    items: [
+      "California Title 22 and CMS require professional interpreter services for patients with limited English proficiency",
+      "Family members should NOT be used as interpreters for informed consent or rights notification — flag this in documentation",
+      "Document interpreter's name, agency/service, and language every time an interpreter is used",
+      "If professional interpreter was not available, document why, what alternative was used, and what steps were taken to obtain professional services",
+      "Sacramento County priority languages: Spanish, Vietnamese, Hmong, Russian, Tagalog, Cantonese/Mandarin",
+    ],
+  },
+  {
+    title: "Appeal & Livanta (BFCC-QIO) rules",
+    color: "#5F3F8A", bg: "#EEEDFE",
+    items: [
+      "Patient has until midnight of the day after re-delivery to file an appeal — the 24-hour window starts at re-delivery timestamp",
+      "Livanta (1-888-524-9900) must be called BEFORE the patient is discharged once an appeal is filed",
+      "Once appeal is filed, a discharge hold is active — hospital CANNOT discharge until Livanta issues determination",
+      "Livanta has until midnight of the day following the appeal to issue a determination for standard reviews",
+      "If Livanta upholds the discharge and patient stays anyway, issue a Hospital-Issued Notice of Non-coverage (HINN) — patient becomes liable for continued stay costs the next day",
+      "If Livanta overturns the discharge, document the determination and update the discharge plan immediately",
+    ],
+  },
+  {
+    title: "Audit trail & immutability",
+    color: "#6B4A10", bg: "#FAEEDA",
+    items: [
+      "IMM log entries must be append-only — no edits or deletions after attestation under any circumstances",
+      "Use Postgres Row-Level Security to enforce immutability at the database level, not just application logic",
+      "Every log entry requires a staff ID, not just a name — names can be duplicated, IDs cannot",
+      "Audit log entries (separate table) must record who created, attested, and viewed sensitive records",
+      "In a Livanta audit or litigation, your audit trail is your primary defense — treat it as evidence from day one",
+      "Never store patient's full Medicare Beneficiary Identifier (MBI) in logs — last 4 digits only for reference",
+    ],
+  },
+];
+
+const tabs = [
+  { id: "system",      label: "System prompt" },
+  { id: "delivery",    label: "Delivery log prompt" },
+  { id: "redelivery",  label: "Re-delivery check" },
+  { id: "appeal",      label: "Appeal workflow" },
+  { id: "integration", label: "API + DB schema" },
+  { id: "rules",       label: "Compliance rules" },
+];
+
+const CONTENT = {
+  system:      SYSTEM_PROMPT,
+  delivery:    USER_PROMPT_TEMPLATE,
+  redelivery:  REDELIVERY_PROMPT,
+  appeal:      APPEAL_PROMPT,
+  integration: INTEGRATION_CODE,
+};
+
+const headerMeta = {
+  system:      { title: "System prompt", sub: "Role, constraints, and CMS/CDPH rules. Sent with every API call — never modify between requests." },
+  delivery:    { title: "Delivery log prompt", sub: "20 template variables covering delivery, appeal, interpreter, and prior history. Returns full compliance status + alerts." },
+  redelivery:  { title: "Re-delivery check prompt", sub: "Lightweight scheduled check. Run as a cron job every 6 hours against all active Medicare encounters." },
+  appeal:      { title: "Appeal workflow prompt", sub: "Triggered when a patient files or considers filing an appeal. Generates Livanta action checklist and discharge hold status." },
+  integration: { title: "Next.js API route / Postgres schema", sub: "Three actions: log_delivery, check_redelivery, attest. Includes audit trail and alert surfacing." },
+  rules:       { title: "Compliance rules reference", sub: "CMS §482.13(e), California Title 22, Livanta BFCC-QIO procedures, and audit trail requirements." },
+};
+
+function IMMPromptSystem() {
+  const [activeTab, setActiveTab] = useState("system");
+  const [copied, setCopied] = useState(null);
+  const [dbView, setDbView] = useState("api");
+
+  const copy = (text, id) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  const getContent = () => {
+    if (activeTab === "integration") return dbView === "api" ? INTEGRATION_CODE : DB_SCHEMA;
+    return CONTENT[activeTab] || "";
+  };
+
+  const getFilename = () => {
+    if (activeTab === "system")      return "imm_system_prompt.txt";
+    if (activeTab === "delivery")    return "imm_delivery_log_prompt.txt";
+    if (activeTab === "redelivery")  return "imm_redelivery_check_prompt.txt";
+    if (activeTab === "appeal")      return "imm_appeal_workflow_prompt.txt";
+    if (activeTab === "integration" && dbView === "api") return "api/imm/log.js";
+    if (activeTab === "integration" && dbView === "db")  return "schema/imm_tables.sql";
+    return "";
+  };
+
+  return (
+    <div style={{ fontFamily: "'Charter','Georgia',serif", background: "#F8F6F2", minHeight: "100vh", color: "#1C1B19" }}>
+
+      {/* Module header */}
+      <div style={{ background: "#1C1B19", padding: "26px 30px 22px", borderBottom: "3px solid #378ADD" }}>
+        <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#666", textTransform: "uppercase", marginBottom: 8 }}>
+          Discharge Planning AI · IMM Compliance Module
+        </div>
+        <h1 style={{ fontFamily: "'Charter','Georgia',serif", fontSize: 22, fontWeight: 700, color: "#F2F0EC", margin: "0 0 5px" }}>
+          IMM Delivery Logging · Prompt System
+        </h1>
+        <p style={{ fontSize: 12, color: "#888", margin: 0, lineHeight: 1.5 }}>
+          CMS §482.13(e) · California CDPH · Livanta BFCC-QIO · Append-only audit trail · HIPAA-compliant
+        </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          {[
+            { label: "2 days",   sub: "Initial delivery window" },
+            { label: "2 days",   sub: "Re-delivery before DC" },
+            { label: "24 hrs",   sub: "Patient appeal window" },
+            { label: "Livanta",  sub: "1-888-524-9900" },
+          ].map((s, i) => (
+            <div key={i} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 12px", display: "flex", gap: 6, alignItems: "baseline" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#378ADD" }}>{s.label}</span>
+              <span style={{ fontSize: 10, color: "#666" }}>{s.sub}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ background: "#111", display: "flex", overflowX: "auto", borderBottom: "1px solid #252522" }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+            background: activeTab === t.id ? "#1C1B19" : "transparent",
+            border: "none", borderBottom: activeTab === t.id ? "2px solid #378ADD" : "2px solid transparent",
+            color: activeTab === t.id ? "#F2F0EC" : "#555",
+            padding: "10px 18px", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+            whiteSpace: "nowrap", letterSpacing: "0.02em", transition: "all .15s",
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      <div style={{ padding: "22px 28px", maxWidth: 900 }}>
+
+        {activeTab !== "rules" && (
+          <div>
+            {activeTab === "integration" && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                {[["api","API route"],["db","DB schema"]].map(([v, label]) => (
+                  <button key={v} onClick={() => setDbView(v)} style={{
+                    background: dbView === v ? "#378ADD" : "transparent",
+                    color: dbView === v ? "#fff" : "#888",
+                    border: "1px solid " + (dbView === v ? "#378ADD" : "#333"),
+                    padding: "4px 14px", borderRadius: 4, fontSize: 11,
+                    cursor: "pointer", fontFamily: "inherit",
+                  }}>{label}</button>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1C1B19", marginBottom: 3 }}>
+                  {headerMeta[activeTab]?.title}
+                </div>
+                <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5, maxWidth: 560 }}>
+                  {headerMeta[activeTab]?.sub}
+                </div>
+              </div>
+              <button onClick={() => copy(getContent(), activeTab)} style={{
+                background: copied === activeTab ? "#1D9E75" : "#378ADD",
+                color: "#fff", border: "none", padding: "7px 16px", borderRadius: 4,
+                fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                flexShrink: 0, marginLeft: 12, transition: "background .2s",
+              }}>
+                {copied === activeTab ? "✓ Copied" : "Copy"}
+              </button>
+            </div>
+
+            {activeTab === "delivery" && (
+              <div style={{ background: "#E6F1FB", border: "1px solid #B5D4F4", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#0C447C", lineHeight: 1.6 }}>
+                <strong>20 template variables</strong> — replace all <code style={{ background: "rgba(0,0,0,0.07)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>{"{{VARIABLE}}"}</code> tokens server-side before the API call. Pass prior IMM history as a JSON array to enable re-delivery gap detection.
+              </div>
+            )}
+            {activeTab === "redelivery" && (
+              <div style={{ background: "#FAEEDA", border: "1px solid #FAC775", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#6B4A10", lineHeight: 1.6 }}>
+                <strong>Run as a cron job</strong> every 6 hours against all active Medicare encounters. Surface <code style={{ background: "rgba(0,0,0,0.07)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>overdue</code> alerts immediately in the planner dashboard. At 24 hours before the deadline, escalate to the charge nurse.
+              </div>
+            )}
+            {activeTab === "appeal" && (
+              <div style={{ background: "#FAECE7", border: "1px solid #F5C4B3", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#C04028", lineHeight: 1.6 }}>
+                <strong>Critical:</strong> Discharge hold is active the moment an appeal is filed. Livanta (<strong>1-888-524-9900</strong>) must be called before any discharge action. This prompt surfaces every required step and responsible party.
+              </div>
+            )}
+            {activeTab === "integration" && dbView === "db" && (
+              <div style={{ background: "#E1F5EE", border: "1px solid #9FE1CB", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#0F6E56", lineHeight: 1.6 }}>
+                <strong>Immutability enforced at DB level</strong> via Postgres Row-Level Security — not just application logic. The RLS policy prevents any UPDATE to attested records even if application code is compromised. Sign a BAA with Supabase before storing real PHI.
+              </div>
+            )}
+
+            <div style={{ background: "#111", borderRadius: 8, border: "1px solid #252522", overflow: "hidden" }}>
+              <div style={{ background: "#1C1B19", padding: "8px 14px", display: "flex", gap: 6, alignItems: "center", borderBottom: "1px solid #252522" }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#C04028" }}></span>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#BA7517" }}></span>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#1D9E75" }}></span>
+                <span style={{ fontSize: 10, color: "#444", marginLeft: 8 }}>{getFilename()}</span>
+              </div>
+              <pre style={{
+                margin: 0, padding: "18px 20px",
+                color: "#B8B4AC", fontFamily: "'Menlo','Monaco','Courier New',monospace",
+                fontSize: 11, lineHeight: 1.75, overflow: "auto", maxHeight: 500,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>{getContent()}</pre>
+            </div>
+
+            <div style={{ marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
+              {activeTab === "system"     && <><span style={{ fontSize: 11, color: "#999" }}>~{Math.round(SYSTEM_PROMPT.length / 4)} tokens</span><span style={{ fontSize: 11, color: "#999" }}>temperature: 0 · Sent with every call</span></>}
+              {activeTab === "delivery"   && <><span style={{ fontSize: 11, color: "#999" }}>~{Math.round(USER_PROMPT_TEMPLATE.length / 4)} tokens base</span><span style={{ fontSize: 11, color: "#999" }}>max_tokens: 3000 · temperature: 0</span></>}
+              {activeTab === "redelivery" && <><span style={{ fontSize: 11, color: "#999" }}>Lightweight check · max_tokens: 500</span><span style={{ fontSize: 11, color: "#999" }}>Run every 6 hours via cron</span></>}
+              {activeTab === "appeal"     && <><span style={{ fontSize: 11, color: "#999" }}>Triggered on appeal event · max_tokens: 2000</span><span style={{ fontSize: 11, color: "#999" }}>temperature: 0</span></>}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "rules" && (
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#1C1B19", marginBottom: 4 }}>Compliance rules reference</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 20 }}>Apply when building, extending, or auditing the IMM logging feature.</div>
+
+            <div style={{ background: "#1C1B19", borderRadius: 8, padding: "14px 18px", marginBottom: 20, display: "flex", gap: 24, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Livanta BFCC-QIO · California</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#378ADD" }}>1-888-524-9900</div>
+                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>24/7 · Urgent appeals</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Fax</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#F2F0EC" }}>1-888-985-8775</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Website</div>
+                <div style={{ fontSize: 12, color: "#378ADD" }}>livantaqio.org</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>IMM Form</div>
+                <div style={{ fontSize: 12, color: "#F2F0EC" }}>CMS-R-193</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {RULES.map((section, i) => (
+                <div key={i} style={{ background: "#fff", border: "1px solid #E5E2DC", borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ background: section.bg, padding: "10px 16px", borderBottom: `1px solid ${section.color}22` }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: section.color, letterSpacing: "0.05em", textTransform: "uppercase" }}>{section.title}</div>
+                  </div>
+                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {section.items.map((item, j) => (
+                      <div key={j} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: section.bg, color: section.color, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>{j + 1}</span>
+                        <span style={{ fontSize: 12, color: "#444", lineHeight: 1.6 }}>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: "1px solid #E5E2DC", padding: "14px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 11, color: "#aaa" }}>CMS §482.13(e) · California Title 22 · Livanta BFCC-QIO · HIPAA-compliant</span>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[["system","System"],["delivery","Delivery"],["appeal","Appeal"],["integration","API"]].map(([id, label]) => (
+            <button key={id} onClick={() => copy(CONTENT[id] || INTEGRATION_CODE, `f-${id}`)} style={{
+              background: copied === `f-${id}` ? "#1D9E75" : "transparent",
+              color: copied === `f-${id}` ? "#fff" : "#999",
+              border: "1px solid #ddd", padding: "4px 10px", borderRadius: 4,
+              fontSize: 10, cursor: "pointer", fontFamily: "inherit",
+              textTransform: "uppercase", letterSpacing: "0.05em", transition: "all .2s"
+            }}>{copied === `f-${id}` ? "✓" : label}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<IMMPromptSystem />);
+</script>
+</body>
+</html>
