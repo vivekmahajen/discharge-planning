@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Discharge Summary Generator — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #F5F3EF; }
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header .logo { font-size: 1.5rem; }
+    header h1 { font-size: 1rem; font-weight: 700; }
+    header p { font-size: .7rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85);
+      text-decoration: none;
+      font-size: .75rem;
+      padding: 5px 11px;
+      border-radius: 5px;
+      background: rgba(255,255,255,.15);
+      margin-left: 6px;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+    #root { min-height: calc(100vh - 58px); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes progress { 0%{width:0%} 50%{width:70%} 100%{width:100%} }
+    @media print {
+      header, button, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Discharge Summary Generator</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/summary-generator">Prompts</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  }).catch(() => { window.location.href = '/login'; });
+</script>
+
+<script type="text/babel">
+const { useState, useRef } = React;
+
+// Routes through our backend — API key never exposed to browser
+const callClaude = async (ctx, notes) => {
+  const res = await fetch("/api/discharge-summary/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ctx, notes }),
+  });
+  if (!res.ok) {
+    let msg = `Server error ${res.status}`;
+    try { const d = await res.json(); msg = d.error || msg; } catch(_) {}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Generation failed");
+  return data.summary;
+};
+
+const URGENCY_COLORS = {
+  life_threatening: { bg: "#FEE2E2", border: "#F87171", text: "#991B1B", dot: "#EF4444" },
+  emergent:         { bg: "#FEF3C7", border: "#FCD34D", text: "#92400E", dot: "#F59E0B" },
+  urgent:           { bg: "#DBEAFE", border: "#93C5FD", text: "#1E40AF", dot: "#3B82F6" },
+};
+const ACTION_ICON = { call_911: "🚨", go_to_er: "🏥", call_doctor: "📞" };
+
+const Badge = ({ children, color = "#1A8A6E", bg = "#D1FAE5" }) => (
+  <span style={{
+    display: "inline-block", fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+    textTransform: "uppercase", padding: "2px 9px", borderRadius: 3,
+    background: bg, color,
+  }}>{children}</span>
+);
+
+const SectionCard = ({ icon, title, accent = "#1A8A6E", children, badge }) => (
+  <div style={{
+    background: "#fff", borderRadius: 10,
+    border: "1px solid #E8E6E0",
+    borderTop: `3px solid ${accent}`,
+    marginBottom: 16, overflow: "hidden",
+  }}>
+    <div style={{
+      padding: "14px 18px 12px",
+      borderBottom: "1px solid #F0EDE8",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <span style={{
+          fontFamily: "'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif",
+          fontSize: 14, fontWeight: 700, color: "#1A1917", letterSpacing: "-0.2px",
+        }}>{title}</span>
+      </div>
+      {badge}
+    </div>
+    <div style={{ padding: "14px 18px" }}>{children}</div>
+  </div>
+);
+
+const Field = ({ label, value, mono = false }) => (
+  value ? (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#2A2927", lineHeight: 1.6, fontFamily: mono ? "'Courier New',monospace" : "inherit" }}>{value}</div>
+    </div>
+  ) : null
+);
+
+const MedCard = ({ med }) => (
+  <div style={{
+    background: med.is_high_alert ? "#FFF7ED" : "#F9F8F6",
+    border: `1px solid ${med.is_high_alert ? "#FED7AA" : "#E8E6E0"}`,
+    borderRadius: 8, padding: "12px 14px", marginBottom: 10,
+  }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+      <div>
+        <span style={{ fontFamily: "'Courier New',monospace", fontSize: 13, fontWeight: 700, color: "#1A1917" }}>{med.name}</span>
+        {" "}
+        <span style={{ fontSize: 12, color: "#7A7570" }}>{med.dose} · {med.route} · {med.frequency}</span>
+      </div>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+        {med.is_new      && <Badge color="#166534" bg="#DCFCE7">New</Badge>}
+        {med.is_changed  && <Badge color="#1D4ED8" bg="#DBEAFE">Changed</Badge>}
+        {med.is_high_alert && <Badge color="#9A3412" bg="#FED7AA">⚠ High alert</Badge>}
+      </div>
+    </div>
+    <div style={{ fontSize: 12, color: "#5A5550", marginBottom: 6 }}>
+      <span style={{ fontWeight: 600 }}>For: </span>{med.indication}
+      {med.duration && med.duration !== "ongoing" && <> · <span style={{ fontWeight: 600 }}>Duration: </span>{med.duration}</>}
+    </div>
+    <div style={{ background: "#fff", border: "1px solid #E8E6E0", borderRadius: 6, padding: "8px 11px", fontSize: 12, color: "#2A4A3A" }}>
+      <span style={{ fontWeight: 700 }}>Patient instruction: </span>{med.patient_instruction}
+    </div>
+    {med.special_instructions && (
+      <div style={{ fontSize: 11, color: "#9A3412", marginTop: 6, fontStyle: "italic" }}>⚠ {med.special_instructions}</div>
+    )}
+  </div>
+);
+
+const WarnRow = ({ w }) => {
+  const c = URGENCY_COLORS[w.urgency] || URGENCY_COLORS.urgent;
+  return (
+    <div style={{
+      display: "flex", gap: 12, alignItems: "flex-start",
+      background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 7, padding: "10px 13px", marginBottom: 8,
+    }}>
+      <span style={{ fontSize: 18, flexShrink: 0 }}>{ACTION_ICON[w.action]}</span>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 2 }}>{w.sign}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: c.text, textTransform: "uppercase", letterSpacing: "0.06em" }}>→ {w.action_label}</div>
+      </div>
+    </div>
+  );
+};
+
+const DEMO_NOTES = `74F admitted 05/14 with 3-day hx worsening SOB and bilateral LE edema. PMH: CHF (EF 35%), T2DM, HTN.
+Echo: EF 30%, B-lines on lung US. BNP 2800. Cr 1.4 (baseline 1.1).
+Tx: IV furosemide 40mg bid x2 days, transitioned to oral furosemide 40mg daily. Net -4.2L fluid.
+Home meds: Lisinopril 10mg daily (hold 48h for Cr bump then restart), Metoprolol succinate 50mg daily (continue), Metformin 1000mg bid (hold — AKI), Warfarin 5mg daily (INR 2.4 on dc). New: Spironolactone 25mg daily added. Stopped: HCTZ (switched to furosemide).
+F/U: Cardiology Dr. Patel within 7 days (916-555-0142). PCP within 3 days. Repeat BMP in 5 days. INR check in 1 week.
+Home health ordered: nursing for weight monitoring, med compliance. Scale ordered (DME).
+Discharge wt 182 lbs (dry wt). Ambulating with mild exertional dyspnea. O2 sat 95% RA.`;
+
+function DischargeSummaryGenerator() {
+  const [notes, setNotes]     = useState(DEMO_NOTES);
+  const [ctx, setCtx]         = useState({
+    admissionDate: "2026-05-14", dischargeDate: "2026-05-18",
+    attending: "Dr. Sarah Chen, MD", unit: "Cardiology — 4W",
+    payer: "Medicare Fee-for-Service", laceScore: "11",
+    hrrpFlag: "Heart Failure",
+  });
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
+  const [copied, setCopied]   = useState(false);
+  const [activeTab, setActiveTab] = useState("input");
+  const printRef = useRef();
+
+  const generate = async () => {
+    setLoading(true); setError(null); setSummary(null);
+    try {
+      const result = await callClaude(ctx, notes);
+      setSummary(result);
+      setActiveTab("summary");
+    } catch (e) {
+      setError(e.message || "Generation failed — try again");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyJSON = () => {
+    navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  const LACE      = summary?.meta?.lace_score;
+  const TIER      = summary?.meta?.lace_tier;
+  const tierColor = { high: "#DC2626", moderate: "#D97706", low: "#16A34A", unknown: "#6B7280" }[TIER] || "#6B7280";
+  const tierBg    = { high: "#FEE2E2", moderate: "#FEF3C7", low: "#DCFCE7", unknown: "#F3F4F6" }[TIER] || "#F3F4F6";
+
+  return (
+    <div style={{ fontFamily: "'Segoe UI',system-ui,-apple-system,sans-serif", background: "#F5F3EF", minHeight: "100vh", color: "#1A1917" }}>
+
+      {/* Tool top-bar */}
+      <div style={{
+        background: "#0A1628", padding: "0 20px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        height: 46, borderBottom: "2px solid #1A8A6E",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'Palatino Linotype',Palatino,Georgia,serif", fontSize: 13, fontWeight: 700, color: "#EFF4F8" }}>
+            Auto Discharge Summary
+          </span>
+          <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 3, background: "rgba(26,138,110,0.25)", color: "#6EE7B7", fontWeight: 700, letterSpacing: "0.08em" }}>
+            LIVE TOOL
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 7 }}>
+          {summary && (
+            <>
+              <button onClick={copyJSON} style={{
+                background: copied ? "#1A8A6E" : "rgba(255,255,255,0.08)",
+                color: "#B0C8DA", border: "1px solid rgba(255,255,255,0.12)",
+                padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer", transition: "all .2s",
+              }}>{copied ? "✓ Copied JSON" : "Copy JSON"}</button>
+              <button onClick={() => window.print()} style={{
+                background: "#1A8A6E", color: "#fff", border: "none",
+                padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer",
+              }}>🖨 Print</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Tab switcher */}
+      <div style={{ display: "flex", background: "#0A1628", borderBottom: "1px solid #1A3050" }}>
+        {["input","summary"].map(t => (
+          <button key={t} onClick={() => setActiveTab(t)} style={{
+            flex: 1, padding: "8px", fontSize: 12, fontWeight: 500,
+            background: activeTab === t ? "#F5F3EF" : "transparent",
+            color: activeTab === t ? "#0A1628" : "#6A8FAA",
+            border: "none", cursor: "pointer", transition: "all .15s",
+          }}>
+            {t === "input" ? "📋 Input" : `📄 Summary${summary ? " ✓" : ""}`}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Input Panel ── */}
+      {activeTab === "input" && (
+        <div style={{ padding: "18px 20px 32px" }}>
+
+          {/* Patient context */}
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E0", borderTop: "3px solid #0A1628", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Palatino Linotype',Palatino,Georgia,serif", fontSize: 13, fontWeight: 700, color: "#1A1917", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <span>👤</span> Patient context
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              {[
+                ["Admission date",     "admissionDate",  "date"],
+                ["Discharge date",     "dischargeDate",  "date"],
+                ["Attending physician","attending",      "text"],
+                ["Unit / service",     "unit",           "text"],
+                ["Insurance / payer",  "payer",          "text"],
+                ["LACE risk score",    "laceScore",      "number"],
+                ["HRRP condition",     "hrrpFlag",       "text"],
+              ].map(([label, key, type]) => (
+                <div key={key} style={{ gridColumn: ["attending","payer","hrrpFlag"].includes(key) ? "1 / -1" : "auto" }}>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 3 }}>{label}</label>
+                  <input
+                    type={type} value={ctx[key]}
+                    onChange={e => setCtx(p => ({ ...p, [key]: e.target.value }))}
+                    style={{
+                      width: "100%", padding: "6px 9px", fontSize: 12,
+                      border: "1px solid #DDD9D0", borderRadius: 6,
+                      background: "#FAF9F7", color: "#1A1917",
+                      fontFamily: type === "number" ? "'Courier New',monospace" : "inherit",
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Clinical notes */}
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E0", borderTop: "3px solid #5A3F8A", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Palatino Linotype',Palatino,Georgia,serif", fontSize: 13, fontWeight: 700, color: "#1A1917", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+              <span>📝</span> Clinical notes
+            </div>
+            <div style={{ fontSize: 11, color: "#9A9580", marginBottom: 8 }}>
+              Paste progress notes, H&amp;P, nursing notes, or any clinical documentation. Claude extracts and structures the relevant fields.
+            </div>
+            <textarea
+              value={notes} onChange={e => setNotes(e.target.value)} rows={13}
+              placeholder="Paste clinical notes here…"
+              style={{
+                width: "100%", padding: "11px", fontSize: 12,
+                fontFamily: "'Courier New',monospace",
+                border: "1px solid #DDD9D0", borderRadius: 6,
+                background: "#FAFAF8", color: "#1A1917",
+                lineHeight: 1.7, resize: "vertical", boxSizing: "border-box",
+              }}
+            />
+            <div style={{ fontSize: 10, color: "#B0A898", marginTop: 4, textAlign: "right" }}>
+              {notes.trim().split(/\s+/).filter(Boolean).length} words
+            </div>
+          </div>
+
+          {error && (
+            <div style={{ background: "#FEE2E2", border: "1px solid #F87171", borderRadius: 7, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991B1B" }}>
+              ⚠ {error}
+            </div>
+          )}
+
+          <button
+            onClick={generate} disabled={loading || !notes.trim()}
+            style={{
+              width: "100%", padding: "13px", fontSize: 14, fontWeight: 700,
+              background: loading ? "#94A3B8" : "#0A1628",
+              color: "#fff", border: "none", borderRadius: 8,
+              cursor: loading ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              transition: "all .2s",
+            }}
+          >
+            {loading
+              ? <><span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⟳</span> Generating summary…</>
+              : "✦ Generate Discharge Summary"}
+          </button>
+          <div style={{ fontSize: 11, color: "#B0A898", textAlign: "center", marginTop: 7 }}>
+            Powered by Claude · HIPAA-safe · temperature 0 · API key server-side only
+          </div>
+        </div>
+      )}
+
+      {/* ── Summary Panel ── */}
+      {activeTab === "summary" && (
+        <div style={{ padding: "18px 20px 40px" }} ref={printRef}>
+
+          {!summary && !loading && (
+            <div style={{ textAlign: "center", padding: "60px 20px", color: "#B0A898" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#7A7570" }}>No summary yet</div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>Fill in the input panel and click Generate</div>
+              <button onClick={() => setActiveTab("input")} style={{ marginTop: 16, padding: "9px 20px", background: "#0A1628", color: "#fff", border: "none", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                ← Go to Input
+              </button>
+            </div>
+          )}
+
+          {loading && (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: 36, marginBottom: 14, animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#0A1628" }}>Generating summary…</div>
+              <div style={{ fontSize: 12, marginTop: 6, color: "#7A7570" }}>Extracting diagnosis · medications · follow-up · warning signs</div>
+              <div style={{ marginTop: 20, height: 4, background: "#E8E6E0", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: "#1A8A6E", borderRadius: 2, animation: "progress 2s ease-in-out infinite" }} />
+              </div>
+            </div>
+          )}
+
+          {summary && (
+            <>
+              {/* Summary header */}
+              <div style={{ background: "#0A1628", borderRadius: 10, padding: "14px 16px", marginBottom: 14, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                <div>
+                  <div style={{ fontFamily: "'Palatino Linotype',Palatino,Georgia,serif", fontSize: 15, fontWeight: 700, color: "#EFF4F8", marginBottom: 3 }}>Discharge Summary</div>
+                  <div style={{ fontSize: 11, color: "#6A8FAA" }}>{ctx.attending} · {ctx.unit} · {ctx.dischargeDate}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {LACE != null && (
+                    <div style={{ background: tierBg, border: `1px solid ${tierColor}40`, borderRadius: 7, padding: "5px 11px", textAlign: "center" }}>
+                      <div style={{ fontSize: 10, color: tierColor, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>LACE</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: tierColor, lineHeight: 1 }}>{LACE}</div>
+                      <div style={{ fontSize: 9, color: tierColor, textTransform: "uppercase", letterSpacing: "0.06em" }}>{TIER} risk</div>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {summary.meta?.hrrp_flagged && <Badge color="#9A3412" bg="#FED7AA">⚠ HRRP: {summary.meta.hrrp_condition}</Badge>}
+                    {summary.meta?.requires_physician_review && <Badge color="#1D4ED8" bg="#DBEAFE">MD Review Required</Badge>}
+                    <Badge
+                      color={summary.meta?.confidence === "high" ? "#166534" : "#9A3412"}
+                      bg={summary.meta?.confidence === "high" ? "#DCFCE7" : "#FEE2E2"}
+                    >{(summary.meta?.confidence || "unknown").toUpperCase()} CONFIDENCE</Badge>
+                  </div>
+                </div>
+              </div>
+
+              {summary.meta?.requires_physician_review && (
+                <div style={{ background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: 7, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#1E40AF" }}>
+                  <strong>Physician review required:</strong> {summary.meta.review_reason}
+                </div>
+              )}
+
+              {summary.meta?.missing_fields?.length > 0 && (
+                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 7, padding: "8px 12px", marginBottom: 12, fontSize: 11, color: "#92400E" }}>
+                  ⚠ Missing from source notes: {summary.meta.missing_fields.join(", ")}
+                </div>
+              )}
+
+              {/* DIAGNOSIS */}
+              <SectionCard icon="🔬" title="Diagnosis & Hospital Course" accent="#0A1628">
+                <Field label="Primary Diagnosis" value={summary.diagnosis?.primary} mono />
+                {summary.diagnosis?.secondary?.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Secondary Diagnoses</div>
+                    {summary.diagnosis.secondary.map((d, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#4A4740", fontFamily: "'Courier New',monospace", marginBottom: 2 }}>· {d}</div>
+                    ))}
+                  </div>
+                )}
+                <Field label="Reason for Admission" value={summary.diagnosis?.admission_reason} />
+                <Field label="Hospital Course" value={summary.diagnosis?.hospital_course} />
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 4 }}>
+                  {summary.diagnosis?.condition_at_discharge && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Condition at Discharge</div>
+                      <Badge
+                        color={summary.diagnosis.condition_at_discharge === "improved" ? "#166534" : summary.diagnosis.condition_at_discharge === "declined" ? "#991B1B" : "#1D4ED8"}
+                        bg={summary.diagnosis.condition_at_discharge === "improved" ? "#DCFCE7" : summary.diagnosis.condition_at_discharge === "declined" ? "#FEE2E2" : "#DBEAFE"}
+                      >{summary.diagnosis.condition_at_discharge}</Badge>
+                    </div>
+                  )}
+                  {summary.diagnosis?.functional_status && (
+                    <div style={{ flex: 1, minWidth: 140 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Functional Status</div>
+                      <div style={{ fontSize: 12, color: "#2A2927" }}>{summary.diagnosis.functional_status}</div>
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+
+              {/* MEDICATIONS */}
+              <SectionCard icon="💊" title="Medications" accent="#7C3AED"
+                badge={
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {summary.medications?.filter(m => m.is_high_alert).length > 0 && (
+                      <Badge color="#9A3412" bg="#FED7AA">⚠ {summary.medications.filter(m => m.is_high_alert).length} high-alert</Badge>
+                    )}
+                    {summary.reconciliation_complete && <Badge color="#166534" bg="#DCFCE7">Reconciled</Badge>}
+                  </div>
+                }>
+                {summary.medications?.map((med, i) => <MedCard key={i} med={med} />)}
+                {summary.medications_stopped?.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Stopped at discharge</div>
+                    {summary.medications_stopped.map((m, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#7A7570", padding: "5px 0", borderBottom: "1px solid #F0EDE8", display: "flex", gap: 8 }}>
+                        <span style={{ fontFamily: "'Courier New',monospace", color: "#5A5550", textDecoration: "line-through" }}>{m.name}</span>
+                        <span>— {m.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* FOLLOW-UP */}
+              <SectionCard icon="📅" title="Follow-Up Plan" accent="#1A8A6E"
+                badge={summary.follow_up?.tcm_applicable ? <Badge color="#166534" bg="#DCFCE7">TCM Applicable</Badge> : null}>
+                {summary.follow_up?.appointments?.map((apt, i) => (
+                  <div key={i} style={{ background: "#F0FAF6", border: "1px solid #A7F3D0", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, flexWrap: "wrap", gap: 5 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#064E3B" }}>{apt.provider}</div>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        <Badge color="#065F46" bg="#D1FAE5">{apt.timeframe}</Badge>
+                        {apt.scheduled && <Badge color="#1D4ED8" bg="#DBEAFE">Scheduled</Badge>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#047857", marginBottom: 5 }}>{apt.reason}</div>
+                    <div style={{ fontSize: 11, color: "#065F46", background: "#fff", borderRadius: 5, padding: "5px 8px" }}>{apt.patient_instruction}</div>
+                    {apt.phone && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 5 }}>📞 {apt.phone}</div>}
+                  </div>
+                ))}
+                {(summary.follow_up?.labs_pending?.length > 0 || summary.follow_up?.imaging_pending?.length > 0) && (
+                  <div style={{ marginTop: 4 }}>
+                    {summary.follow_up.labs_pending?.map((l, i) => <div key={i} style={{ fontSize: 12, color: "#4A4740", marginBottom: 3 }}>🧪 {l}</div>)}
+                    {summary.follow_up.imaging_pending?.map((img, i) => <div key={i} style={{ fontSize: 12, color: "#4A4740", marginBottom: 3 }}>🩻 {img}</div>)}
+                  </div>
+                )}
+                {summary.follow_up?.call_cadence && summary.follow_up.call_cadence !== "none" && (
+                  <div style={{ background: "#F0FAF6", border: "1px solid #A7F3D0", borderRadius: 6, padding: "8px 11px", marginTop: 8, fontSize: 11, color: "#065F46" }}>
+                    📞 Follow-up call cadence: <strong>{summary.follow_up.call_cadence}</strong>
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* WARNING SIGNS */}
+              <SectionCard icon="⚠️" title="Warning Signs" accent="#DC2626">
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>
+                  Contact your care team or seek emergency care if you experience any of the following:
+                </div>
+                {summary.warning_signs?.map((w, i) => <WarnRow key={i} w={w} />)}
+              </SectionCard>
+
+              {/* PATIENT EDUCATION */}
+              {summary.patient_education && (
+                <SectionCard icon="📖" title="Patient Education" accent="#2563EB">
+                  <Field label="Understanding Your Condition" value={summary.patient_education?.diagnosis_explained} />
+                  {summary.patient_education?.teach_back_topics?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Teach-back required</div>
+                      {summary.patient_education.teach_back_topics.map((t, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 9px", background: "#EFF6FF", borderRadius: 5, marginBottom: 5, fontSize: 12, color: "#1E40AF" }}>
+                          <input type="checkbox" style={{ flexShrink: 0 }} /> {t}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+                    {summary.activity_restrictions && (
+                      <div style={{ flex: 1, minWidth: 140 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Activity Restrictions</div>
+                        <div style={{ fontSize: 12, color: "#2A2927", lineHeight: 1.6 }}>{summary.activity_restrictions}</div>
+                      </div>
+                    )}
+                    {summary.diet_instructions && (
+                      <div style={{ flex: 1, minWidth: 140 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Diet</div>
+                        <div style={{ fontSize: 12, color: "#2A2927", lineHeight: 1.6 }}>{summary.diet_instructions}</div>
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* POST-ACUTE */}
+              {summary.post_acute && (
+                <SectionCard icon="🏠" title="Post-Acute Plan" accent="#D97706">
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <Badge color="#92400E" bg="#FEF3C7">Destination: {(summary.post_acute.destination || "").replace(/_/g, " ")}</Badge>
+                    {summary.post_acute.home_health && <Badge color="#166534" bg="#DCFCE7">Home Health Ordered</Badge>}
+                  </div>
+                  {summary.post_acute.home_health_services?.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#4A4740" }}>Services: {summary.post_acute.home_health_services.join(", ")}</div>
+                  )}
+                  {summary.post_acute.dme?.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#4A4740", marginTop: 5 }}>DME ordered: {summary.post_acute.dme.join(", ")}</div>
+                  )}
+                </SectionCard>
+              )}
+
+              {/* ATTESTATION */}
+              <div style={{ background: "#F9F8F6", border: "1px solid #E8E6E0", borderRadius: 8, padding: "11px 15px", fontSize: 11, color: "#7A7570", lineHeight: 1.7, fontStyle: "italic" }}>
+                <strong style={{ fontStyle: "normal", color: "#4A4740" }}>Planner attestation required: </strong>
+                {summary.attestation}
+              </div>
+
+              {/* Action row */}
+              <div style={{ display: "flex", gap: 9, marginTop: 14, flexWrap: "wrap" }}>
+                <button onClick={() => setActiveTab("input")} style={{ flex: 1, minWidth: 110, padding: "10px", fontSize: 12, fontWeight: 600, background: "#fff", color: "#0A1628", border: "1px solid #0A1628", borderRadius: 7, cursor: "pointer" }}>
+                  ← Edit Input
+                </button>
+                <button onClick={copyJSON} style={{ flex: 1, minWidth: 110, padding: "10px", fontSize: 12, fontWeight: 600, background: copied ? "#1A8A6E" : "#5A3F8A", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer" }}>
+                  {copied ? "✓ Copied" : "Copy JSON"}
+                </button>
+                <button onClick={() => { setSummary(null); setActiveTab("input"); }} style={{ flex: 1, minWidth: 110, padding: "10px", fontSize: 12, fontWeight: 600, background: "#0A1628", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer" }}>
+                  ↺ New Summary
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<DischargeSummaryGenerator />);
+</script>
+</body>
+</html>

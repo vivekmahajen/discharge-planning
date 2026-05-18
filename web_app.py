@@ -406,6 +406,169 @@ async def multilingual_prompt_system_page(request: Request):
         return f.read()
 
 
+@app.get("/discharge-summary-generator", response_class=HTMLResponse)
+async def discharge_summary_generator_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "discharge-summary-generator.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/discharge-summary/generate")
+async def generate_discharge_summary_v2(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    ctx = body.get("ctx", {})
+    notes = body.get("notes", "")
+    if not notes.strip():
+        return JSONResponse({"error": "notes is required"}, status_code=400)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "Server not configured"}, status_code=500)
+
+    system_prompt = (
+        "You are an expert clinical documentation specialist embedded in a HIPAA-compliant "
+        "hospital discharge planning system serving California acute care hospitals. Your role "
+        "is to generate accurate, structured, CMS-compliant discharge summaries from clinical "
+        "notes provided by discharge planners and case managers.\n\n"
+        "NON-NEGOTIABLE RULES:\n"
+        "- NEVER fabricate clinical data, medications, lab values, or diagnoses not present in the source notes\n"
+        "- If data is missing for a field, use null — never guess or invent\n"
+        "- All patient_instruction text must be written at a 6th-grade reading level\n"
+        "- Warning signs must include a specific action for each: 'call your doctor', 'go to the emergency room', or 'call 911'\n"
+        "- Medication names are kept as-is (generic + brand). NEVER alter drug names\n"
+        "- Flag if physician review is required (high-alert meds, complex discharge, ambiguous instructions)\n"
+        "- Return ONLY valid JSON — no prose, no markdown fences, no preamble"
+    )
+
+    user_prompt = (
+        f"Generate a complete discharge summary from the clinical notes below.\n\n"
+        f"PATIENT CONTEXT:\n"
+        f"- Admission date: {ctx.get('admissionDate') or 'not provided'}\n"
+        f"- Discharge date: {ctx.get('dischargeDate') or 'not provided'}\n"
+        f"- Attending physician: {ctx.get('attending') or 'not provided'}\n"
+        f"- Service / unit: {ctx.get('unit') or 'not provided'}\n"
+        f"- Insurance / payer: {ctx.get('payer') or 'not provided'}\n"
+        f"- LACE risk score: {ctx.get('laceScore') or 'not calculated'}\n"
+        f"- HRRP flagged condition: {ctx.get('hrrpFlag') or 'none'}\n\n"
+        f"CLINICAL NOTES:\n{notes}\n\n"
+        'Return a single valid JSON object with this exact structure:\n\n'
+        '{\n'
+        '  "meta": {\n'
+        '    "confidence": "high | medium | low",\n'
+        '    "requires_physician_review": true | false,\n'
+        '    "review_reason": "<reason or null>",\n'
+        '    "missing_fields": ["<field name>"],\n'
+        '    "generated_at": "<ISO timestamp>",\n'
+        '    "hrrp_flagged": true | false,\n'
+        '    "hrrp_condition": "<condition or null>",\n'
+        '    "lace_score": "<integer or null>",\n'
+        '    "lace_tier": "high | moderate | low | unknown"\n'
+        '  },\n'
+        '  "diagnosis": {\n'
+        '    "primary": "<ICD-10 code — Plain English name>",\n'
+        '    "secondary": ["<ICD-10 — name>"],\n'
+        '    "admission_reason": "<1-2 sentence plain English>",\n'
+        '    "hospital_course": "<3-5 sentence narrative of stay>",\n'
+        '    "condition_at_discharge": "stable | improved | unchanged | declined",\n'
+        '    "functional_status": "<ADL and mobility status at discharge>"\n'
+        '  },\n'
+        '  "medications": [\n'
+        '    {\n'
+        '      "name": "<generic (Brand)>",\n'
+        '      "dose": "<dose and units>",\n'
+        '      "route": "<oral | IV | topical | inhaled | subcut>",\n'
+        '      "frequency": "<plain English>",\n'
+        '      "duration": "<X days | ongoing | as needed>",\n'
+        '      "indication": "<why patient takes it>",\n'
+        '      "is_new": true,\n'
+        '      "is_changed": false,\n'
+        '      "is_high_alert": false,\n'
+        '      "patient_instruction": "<one sentence>",\n'
+        '      "special_instructions": "<or null>"\n'
+        '    }\n'
+        '  ],\n'
+        '  "medications_stopped": [{ "name": "<med>", "reason": "<reason>" }],\n'
+        '  "reconciliation_complete": true,\n'
+        '  "follow_up": {\n'
+        '    "appointments": [\n'
+        '      {\n'
+        '        "provider": "<name or specialty>",\n'
+        '        "timeframe": "<within X days>",\n'
+        '        "reason": "<plain English>",\n'
+        '        "scheduled": true,\n'
+        '        "phone": "<or null>",\n'
+        '        "patient_instruction": "<what to do>"\n'
+        '      }\n'
+        '    ],\n'
+        '    "labs_pending": ["<lab — expected turnaround>"],\n'
+        '    "imaging_pending": ["<imaging — expected turnaround>"],\n'
+        '    "tcm_applicable": true,\n'
+        '    "follow_up_call_scheduled": false,\n'
+        '    "call_cadence": "<24h | 24h+72h | 24h+72h+7d+14d | none>"\n'
+        '  },\n'
+        '  "warning_signs": [\n'
+        '    {\n'
+        '      "sign": "<symptom in plain English>",\n'
+        '      "action": "call_doctor | go_to_er | call_911",\n'
+        '      "action_label": "<Call your doctor | Go to the emergency room | Call 911 immediately>",\n'
+        '      "urgency": "urgent | emergent | life_threatening"\n'
+        '    }\n'
+        '  ],\n'
+        '  "activity_restrictions": "<concrete instructions or null>",\n'
+        '  "diet_instructions": "<specific guidance or null>",\n'
+        '  "wound_care": "<step-by-step or null>",\n'
+        '  "patient_education": {\n'
+        '    "diagnosis_explained": "<2-3 sentences a patient can understand>",\n'
+        '    "teach_back_topics": ["<topic>"]'
+        '  },\n'
+        '  "post_acute": {\n'
+        '    "destination": "home | SNF | IRF | LTACH | hospice | assisted_living | other",\n'
+        '    "home_health": true,\n'
+        '    "home_health_services": ["<nursing | PT | OT | SLP | aide>"],\n'
+        '    "dme": ["<equipment ordered>"]\n'
+        '  },\n'
+        '  "attestation": "I certify this discharge plan was developed in collaboration with the patient '
+        'and/or authorized representative in compliance with CMS CoP 42 CFR §482.43 and California CDPH '
+        'discharge planning requirements."\n'
+        '}'
+    )
+
+    def _call_api():
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            temperature=0,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
+
+    loop = asyncio.get_event_loop()
+    try:
+        raw_text = await loop.run_in_executor(None, _call_api)
+    except anthropic.APIError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = clean.split("\n", 1)[-1]
+        if clean.endswith("```"):
+            clean = clean.rsplit("```", 1)[0]
+    clean = clean.strip()
+
+    try:
+        summary = json.loads(clean)
+        return JSONResponse({"success": True, "summary": summary})
+    except json.JSONDecodeError:
+        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+
+
 @app.post("/api/summary/generate")
 async def generate_summary(request: Request):
     if not get_current_user(request):
