@@ -234,6 +234,14 @@ async def logout():
     return response
 
 
+@app.get("/api/me")
+async def me(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"email": user})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     redirect = require_login(request)
