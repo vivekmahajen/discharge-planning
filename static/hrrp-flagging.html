@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HRRP Flagging — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --font-sans:  "Source Sans 3", system-ui, sans-serif;
+      --font-serif: "Lora", Georgia, serif;
+      --font-mono:  "Source Code Pro", "Courier New", monospace;
+
+      --color-background-primary:   #FFFFFF;
+      --color-background-secondary: #F5F3EE;
+      --color-background-success:   #E8F5EE;
+      --color-background-warning:   #FEF0DC;
+      --color-background-danger:    #FAEBE8;
+      --color-background-info:      #E8F0F8;
+
+      --color-text-primary:   #1A1917;
+      --color-text-secondary: #6A6560;
+      --color-text-success:   #1B4332;
+      --color-text-warning:   #B86B0C;
+      --color-text-danger:    #B03020;
+      --color-text-info:      #1A5276;
+
+      --color-border-tertiary:  #E8E4DA;
+      --color-border-secondary: #DDD8CE;
+      --color-border-success:   #A7DFC4;
+      --color-border-warning:   #F0D99A;
+      --color-border-danger:    #F5C4B3;
+      --color-border-info:      #B5D4F4;
+
+      --border-radius-lg: 10px;
+      --border-radius-md: 6px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: #F5F3EE;
+      color: var(--color-text-primary);
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+
+    input[type="text"], input[type="number"], select {
+      padding: 6px 9px; font-size: 12px; font-family: var(--font-sans);
+      border: 0.5px solid var(--color-border-secondary);
+      border-radius: var(--border-radius-md);
+      background: var(--color-background-primary);
+      color: var(--color-text-primary);
+      width: 100%;
+    }
+    input[type="range"] { accent-color: #1D9E75; width: 100%; }
+    input:focus, select:focus { outline: 2px solid #1D9E75; outline-offset: 1px; }
+
+    #root { padding: 16px 20px 40px; }
+
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:.55} }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>HRRP &amp; TEAM Financial Risk Monitor</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/teachback-checklist">Teach-back</a>
+  <a href="/cdph-compliance">CDPH</a>
+  <a href="/summary-generator">Prompts</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/post-acute-directory">Facilities</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  });
+</script>
+
+<script type="text/babel">
+const { useState, useMemo, useCallback } = React;
+
+/* ══════════════════════════════════════════════════════════════════
+   CMS DATA — HRRP CONDITIONS
+══════════════════════════════════════════════════════════════════ */
+const HRRP_CONDITIONS = [
+  {
+    id: "chf", code: "I50", label: "Heart Failure",
+    icd_prefix: ["I50"], drg_avg: 8_200,
+    penalty_per_readmit: 2_150, readmit_rate_nat: 0.227,
+    color: "#C04028", bg: "#FAECE7", border: "#F5C4B3",
+    icon: "ti-heart",
+    checklist: [
+      { id:"chf_1",  p:"critical", text:"Daily weight scale ordered — patient demonstrates use with teach-back" },
+      { id:"chf_2",  p:"critical", text:"Fluid restriction counseled: daily limit ≤2L documented in instructions" },
+      { id:"chf_3",  p:"critical", text:"Low-sodium diet (<2,000mg/day) with specific food examples reviewed" },
+      { id:"chf_4",  p:"critical", text:"Diuretic titration instructions: when to take extra dose, when to call doctor" },
+      { id:"chf_5",  p:"critical", text:"Cardiology follow-up within 7 days — appointment confirmed before discharge" },
+      { id:"chf_6",  p:"high",     text:"BMP + BNP ordered at follow-up visit (order placed pre-discharge)" },
+      { id:"chf_7",  p:"high",     text:"Warning signs documented: weight gain ≥2 lbs/night, worsening SOB, ankle swelling" },
+      { id:"chf_8",  p:"high",     text:"Medications reconciled: new/changed/stopped diuretics reviewed with pharmacist" },
+      { id:"chf_9",  p:"high",     text:"Home health ordered for weight monitoring and medication compliance" },
+      { id:"chf_10", p:"standard", text:"Post-discharge call scheduled at 24h and 72h (high-risk LACE protocol)" },
+    ],
+  },
+  {
+    id: "ami", code: "I21", label: "Acute Myocardial Infarction",
+    icd_prefix: ["I21","I22"], drg_avg: 12_400,
+    penalty_per_readmit: 2_800, readmit_rate_nat: 0.162,
+    color: "#C04028", bg: "#FAECE7", border: "#F5C4B3",
+    icon: "ti-heart-broken",
+    checklist: [
+      { id:"ami_1",  p:"critical", text:"Dual antiplatelet therapy (aspirin + P2Y12) counseled — duration documented" },
+      { id:"ami_2",  p:"critical", text:"Cardiology follow-up within 7 days — appointment confirmed" },
+      { id:"ami_3",  p:"critical", text:"Cardiac rehabilitation referral completed (reduces mortality 26%)" },
+      { id:"ami_4",  p:"critical", text:"Statin therapy confirmed — LDL target <70 mg/dL documented" },
+      { id:"ami_5",  p:"critical", text:"Beta-blocker compliance verified — dose, timing, side effects reviewed" },
+      { id:"ami_6",  p:"high",     text:"ACE inhibitor / ARB prescribed if EF <40% (document contraindication if not)" },
+      { id:"ami_7",  p:"high",     text:"Smoking cessation counseling documented — NRT/varenicline offered" },
+      { id:"ami_8",  p:"high",     text:"Blood pressure target <130/80 reviewed with patient" },
+      { id:"ami_9",  p:"high",     text:"Activity restrictions clearly documented: when to return to work, driving, sex" },
+      { id:"ami_10", p:"standard", text:"Repeat EKG and troponin ordered at follow-up visit" },
+    ],
+  },
+  {
+    id: "pna", code: "J18", label: "Pneumonia",
+    icd_prefix: ["J18","J15","J13","J14","J16"], drg_avg: 6_800,
+    penalty_per_readmit: 1_600, readmit_rate_nat: 0.186,
+    color: "#185FA5", bg: "#E6F1FB", border: "#B5D4F4",
+    icon: "ti-lungs",
+    checklist: [
+      { id:"pna_1",  p:"critical", text:"Oral antibiotics prescribed if course incomplete — doses + duration documented" },
+      { id:"pna_2",  p:"critical", text:"Pneumococcal vaccine status verified — administered or documented contraindication" },
+      { id:"pna_3",  p:"critical", text:"Influenza vaccine offered (if in season)" },
+      { id:"pna_4",  p:"critical", text:"Follow-up chest X-ray ordered at 4–6 weeks (malignancy screen)" },
+      { id:"pna_5",  p:"high",     text:"PCP follow-up within 7 days — appointment confirmed" },
+      { id:"pna_6",  p:"high",     text:"Return precautions documented: worsening cough, fever >101°F, SOB at rest" },
+      { id:"pna_7",  p:"high",     text:"Hydration and rest instructions in patient's preferred language" },
+      { id:"pna_8",  p:"high",     text:"Smoking cessation counseling if applicable" },
+      { id:"pna_9",  p:"standard", text:"Pulmonology referral if recurrent (≥2nd episode in 12 months)" },
+      { id:"pna_10", p:"standard", text:"Post-discharge call at 24h for high-risk patients (LACE ≥7)" },
+    ],
+  },
+  {
+    id: "copd", code: "J44", label: "COPD Exacerbation",
+    icd_prefix: ["J44","J41","J42","J43"], drg_avg: 7_100,
+    penalty_per_readmit: 1_900, readmit_rate_nat: 0.201,
+    color: "#0F6E56", bg: "#E1F5EE", border: "#9FE1CB",
+    icon: "ti-lungs",
+    checklist: [
+      { id:"copd_1",  p:"critical", text:"Inhaler technique demonstrated and verified with teach-back (SABA + LABA/ICS)" },
+      { id:"copd_2",  p:"critical", text:"Written COPD action plan provided (green/yellow/red zones)" },
+      { id:"copd_3",  p:"critical", text:"Pulmonology follow-up within 2 weeks — appointment confirmed" },
+      { id:"copd_4",  p:"critical", text:"Oral steroids course prescribed if applicable — taper documented" },
+      { id:"copd_5",  p:"high",     text:"Home oxygen therapy initiated if O2 sat ≤88% on room air" },
+      { id:"copd_6",  p:"high",     text:"Pulmonary rehabilitation referral completed" },
+      { id:"copd_7",  p:"high",     text:"Pneumococcal and influenza vaccines verified" },
+      { id:"copd_8",  p:"high",     text:"Smoking cessation counseling and pharmacotherapy offered" },
+      { id:"copd_9",  p:"standard", text:"Spirometry ordered at follow-up if not done in past 12 months" },
+      { id:"copd_10", p:"standard", text:"Air quality alert plan provided (relevant for Sacramento wildfire season)" },
+    ],
+  },
+  {
+    id: "tha", code: "Z96.6", label: "Hip / Knee Arthroplasty",
+    icd_prefix: ["Z96.6","Z96.4","M16","M17"], drg_avg: 18_500,
+    penalty_per_readmit: 3_200, readmit_rate_nat: 0.048,
+    color: "#854F0B", bg: "#FAEEDA", border: "#FAC775",
+    icon: "ti-walk",
+    checklist: [
+      { id:"tha_1",  p:"critical", text:"Weight-bearing status clearly documented: FWB / TTWB / NWB with timeline" },
+      { id:"tha_2",  p:"critical", text:"DVT prophylaxis prescribed — agent, dose, duration documented (TEAM requirement)" },
+      { id:"tha_3",  p:"critical", text:"Orthopedic follow-up within 2 weeks — appointment confirmed" },
+      { id:"tha_4",  p:"critical", text:"PT/OT home therapy confirmed — first visit within 48h of discharge" },
+      { id:"tha_5",  p:"critical", text:"Hip/knee precautions taught to patient AND caregiver with teach-back" },
+      { id:"tha_6",  p:"high",     text:"Wound care instructions: inspection schedule, signs of infection" },
+      { id:"tha_7",  p:"high",     text:"Assistive device provided and patient demonstrates safe use" },
+      { id:"tha_8",  p:"high",     text:"Home safety assessment completed (trip hazards, grab bars, shower bench)" },
+      { id:"tha_9",  p:"high",     text:"TEAM model: SNF star rating ≥3 verified if SNF placement chosen" },
+      { id:"tha_10", p:"standard", text:"TEAM bundle coordinator notified — 30-day episode tracking initiated" },
+    ],
+  },
+  {
+    id: "cabg", code: "Z95.1", label: "CABG Surgery",
+    icd_prefix: ["Z95.1","I25"], drg_avg: 42_000,
+    penalty_per_readmit: 5_800, readmit_rate_nat: 0.142,
+    color: "#854F0B", bg: "#FAEEDA", border: "#FAC775",
+    icon: "ti-heart-plus",
+    checklist: [
+      { id:"cabg_1",  p:"critical", text:"Cardiac rehabilitation referral — TEAM model mandatory, document enrollment" },
+      { id:"cabg_2",  p:"critical", text:"Sternal precautions documented: no lifting >5 lbs, no driving 4–6 weeks" },
+      { id:"cabg_3",  p:"critical", text:"Cardiothoracic surgery follow-up within 2 weeks — appointment confirmed" },
+      { id:"cabg_4",  p:"critical", text:"Anticoagulation / antiplatelet management clearly documented" },
+      { id:"cabg_5",  p:"critical", text:"Incision care instructions provided — wound check scheduled" },
+      { id:"cabg_6",  p:"high",     text:"Cardiac diet counseling — Mediterranean diet or equivalent documented" },
+      { id:"cabg_7",  p:"high",     text:"Medications: beta-blocker, statin, aspirin, ACEI/ARB reviewed with pharmacist" },
+      { id:"cabg_8",  p:"high",     text:"Depression screening completed — CABG patients have 3× higher depression risk" },
+      { id:"cabg_9",  p:"high",     text:"TEAM bundle: financial counselor notified of episode bundle enrollment" },
+      { id:"cabg_10", p:"standard", text:"Smoking cessation: pharmacotherapy started or refusal documented" },
+    ],
+  },
+];
+
+/* ══════════════════════════════════════════════════════════════════
+   TEAM MODEL EPISODES (CMS 2026 mandatory)
+══════════════════════════════════════════════════════════════════ */
+const TEAM_EPISODES = [
+  { id:"lejr",  label:"Lower Extremity Joint Replacement", hrrp_id:"tha",
+    bundle_low:22_000, bundle_high:27_000, period_days:30,
+    codes:["Z96.641","Z96.642","Z96.651","Z96.652","PROCEDURE: THA/TKA"] },
+  { id:"shfft", label:"Surgical Hip/Femur Fracture Treatment", hrrp_id:null,
+    bundle_low:27_000, bundle_high:35_000, period_days:30,
+    codes:["S72","M84.65","ORIF hip fracture"] },
+  { id:"sf",    label:"Spinal Fusion", hrrp_id:null,
+    bundle_low:24_000, bundle_high:32_000, period_days:30,
+    codes:["M47","M51","M48.06","PROCEDURE: fusion"] },
+  { id:"cabg",  label:"Coronary Artery Bypass Graft", hrrp_id:"cabg",
+    bundle_low:55_000, bundle_high:75_000, period_days:30,
+    codes:["Z95.1","I25.10","PROCEDURE: CABG"] },
+  { id:"mbp",   label:"Major Bowel Procedure", hrrp_id:null,
+    bundle_low:18_000, bundle_high:28_000, period_days:30,
+    codes:["K57","K63","PROCEDURE: bowel resection"] },
+];
+
+/* ── Backend proxy — never calls Anthropic from the browser ──────── */
+const callClaude = async (hrrpFlags, teamFlags, lace, exposure) => {
+  const prompt = `HRRP conditions flagged: ${hrrpFlags.map(c => c.label).join(", ")}
+TEAM episodes flagged: ${teamFlags.map(e => e.label).join(", ")}
+Patient LACE score: ${lace}
+Total estimated financial exposure: $${exposure.toLocaleString()}
+
+Return JSON:
+{
+  "risk_headline": "<1 sentence — urgency and total exposure>",
+  "hrrp_insight": "<2 sentences — specific to conditions flagged, penalty mechanism>",
+  "team_insight": "<2 sentences — bundle risk, 30-day accountability period>",
+  "top_discharge_priorities": [
+    {"priority": 1, "action": "<specific action>", "why": "<financial/clinical rationale>"},
+    {"priority": 2, "action": "<specific action>", "why": "<rationale>"},
+    {"priority": 3, "action": "<specific action>", "why": "<rationale>"}
+  ],
+  "california_specific": "<1 sentence about CA-specific considerations — Medi-Cal, CDPH, TEAM metro area>",
+  "fy2027_warning": "<1 sentence about Medicare Advantage joining HRRP in FY2027>"
+}`;
+
+  const res = await fetch("/api/hrrp/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Server error");
+  return data.result;
+};
+
+/* ── Helpers ─────────────────────────────────────────────────────── */
+const fmt$ = n => "$" + Math.round(n).toLocaleString();
+const PRIORITY_META = {
+  critical: { label: "Required",  bg: "#FAECE7", c: "#C04028" },
+  high:     { label: "Important", bg: "#FAEEDA", c: "#854F0B" },
+  standard: { label: "Standard",  bg: "#E1F5EE", c: "#0F6E56" },
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════════════ */
+function HRRPFlagging() {
+  const [dx, setDx] = useState(["I50.9","Z95.1"]);
+  const [dxInput, setDxInput] = useState("");
+  const [lace, setLace] = useState(11);
+  const [payer, setPayer] = useState("medicare");
+  const [annualDischarges, setAnnualDischarges] = useState(420);
+  const [hospitalPenaltyPct, setHospitalPenaltyPct] = useState(1.4);
+
+  const [checked, setChecked] = useState({});
+  const [activeCondition, setActiveCondition] = useState(null);
+
+  const [brief, setBrief] = useState(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefErr, setBriefErr] = useState(null);
+
+  const hrrpFlags = useMemo(() =>
+    HRRP_CONDITIONS.filter(c =>
+      dx.some(d => c.icd_prefix.some(p => d.startsWith(p)))
+    ), [dx]);
+
+  const teamFlags = useMemo(() =>
+    TEAM_EPISODES.filter(e =>
+      dx.some(d => e.codes.some(c => d.startsWith(c.split(":")[0].trim()))) ||
+      (e.hrrp_id && hrrpFlags.some(h => h.id === e.hrrp_id))
+    ), [dx, hrrpFlags]);
+
+  const financials = useMemo(() => {
+    const hrrpPenaltyTotal = hrrpFlags.reduce((s, c) => s + c.penalty_per_readmit, 0);
+    const teamExposure     = teamFlags.reduce((s, e) => s + (e.bundle_high - e.bundle_low), 0);
+    const hospitalAnnualRisk = (annualDischarges * 12400 * (hospitalPenaltyPct / 100));
+    return { hrrpPenaltyTotal, teamExposure, hospitalAnnualRisk, total: hrrpPenaltyTotal + teamExposure };
+  }, [hrrpFlags, teamFlags, annualDischarges, hospitalPenaltyPct]);
+
+  const addCode = (code) => {
+    const c = code.trim().toUpperCase();
+    if (c && !dx.includes(c)) { setDx(p => [...p, c]); setDxInput(""); }
+  };
+
+  const allItems    = (activeCondition ? [activeCondition] : hrrpFlags).flatMap(c => c.checklist);
+  const doneCount   = allItems.filter(i => checked[i.id]).length;
+  const critItems   = allItems.filter(i => i.p === "critical");
+  const critDone    = critItems.filter(i => checked[i.id]).length;
+  const completePct = allItems.length ? Math.round(doneCount / allItems.length * 100) : 0;
+
+  const generateBrief = useCallback(async () => {
+    setBriefLoading(true); setBriefErr(null);
+    try { setBrief(await callClaude(hrrpFlags, teamFlags, lace, financials.total)); }
+    catch (e) { setBriefErr(e.message); }
+    finally { setBriefLoading(false); }
+  }, [hrrpFlags, teamFlags, lace, financials.total]);
+
+  const hasFlaggedHRRP = hrrpFlags.length > 0;
+  const hasFlaggedTEAM = teamFlags.length > 0;
+
+  return (
+    <div style={{ fontFamily: "var(--font-sans)", color: "var(--color-text-primary)" }}>
+
+      {/* ══ ALERT HEADER ════════════════════════════════════════════ */}
+      <div style={{
+        background: hasFlaggedHRRP || hasFlaggedTEAM ? "#1C0A08" : "#111827",
+        borderRadius: "var(--border-radius-lg)", padding: "18px 20px", marginBottom: 14,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 5, flexWrap: "wrap" }}>
+              {hasFlaggedHRRP && (
+                <span style={{ fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 3,
+                  background: "#C04028", color: "#fff", letterSpacing: "0.05em",
+                  animation: "pulse 2s ease infinite" }}>
+                  ⚠ HRRP FLAGGED — {hrrpFlags.length} condition{hrrpFlags.length > 1 ? "s" : ""}
+                </span>
+              )}
+              {hasFlaggedTEAM && (
+                <span style={{ fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 3,
+                  background: "#C8920A", color: "#1A0A00", letterSpacing: "0.05em" }}>
+                  TEAM 2026 EPISODE — {teamFlags.length} bundle{teamFlags.length > 1 ? "s" : ""}
+                </span>
+              )}
+              {!hasFlaggedHRRP && !hasFlaggedTEAM && (
+                <span style={{ fontSize: 11, color: "#9CA3AF" }}>No HRRP / TEAM conditions detected — enter ICD-10 codes below</span>
+              )}
+            </div>
+            <div style={{ fontFamily: "var(--font-serif)", fontSize: 15, fontWeight: 500, color: "#F9FAFB" }}>
+              HRRP &amp; TEAM Model Financial Exposure Monitor
+            </div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+              CMS FY2026 · Sacramento MSA (mandatory TEAM area) · HRRP max penalty 3.0%
+            </div>
+          </div>
+          {(hasFlaggedHRRP || hasFlaggedTEAM) && (
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 2 }}>Est. financial exposure</div>
+              <div style={{ fontSize: 32, fontWeight: 500, fontFamily: "var(--font-mono)",
+                color: financials.total > 5000 ? "#EF4444" : "#F59E0B" }}>
+                {fmt$(financials.total)}
+              </div>
+              <div style={{ fontSize: 10, color: "#6B7280" }}>per this discharge episode</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14 }}>
+
+        {/* ══ LEFT: INPUTS ══════════════════════════════════════════ */}
+        <div>
+          {/* ICD-10 input */}
+          <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>
+              <i className="ti ti-file-medical" aria-hidden="true" style={{ marginRight: 6, fontSize: 14, verticalAlign: -2 }}></i>
+              ICD-10 codes
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <input value={dxInput} onChange={e => setDxInput(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === "Enter" && addCode(dxInput)}
+                placeholder="e.g. I50.9" style={{ flex: 1, fontSize: 12, fontFamily: "var(--font-mono)" }} />
+              <button onClick={() => addCode(dxInput)} style={{ fontSize: 11, padding: "0 12px", borderRadius: "var(--border-radius-md)",
+                background: "var(--color-background-info)", color: "var(--color-text-info)", border: "0.5px solid var(--color-border-info)", cursor: "pointer" }}>+</button>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
+              {dx.map(code => (
+                <span key={code} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11,
+                  padding: "2px 8px", borderRadius: 3, fontFamily: "var(--font-mono)",
+                  background: HRRP_CONDITIONS.some(c => c.icd_prefix.some(p => code.startsWith(p))) ? "#FAECE7" : "var(--color-background-secondary)",
+                  color: HRRP_CONDITIONS.some(c => c.icd_prefix.some(p => code.startsWith(p))) ? "#C04028" : "var(--color-text-secondary)",
+                  border: "0.5px solid var(--color-border-secondary)" }}>
+                  {code}
+                  <button onClick={() => setDx(p => p.filter(d => d !== code))} style={{
+                    background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1,
+                    color: "inherit", opacity: .6 }}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 5 }}>Quick-add HRRP conditions:</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {HRRP_CONDITIONS.map(c => (
+                <button key={c.id} onClick={() => addCode(c.icd_prefix[0])} style={{
+                  fontSize: 10, padding: "2px 7px", borderRadius: 3, cursor: "pointer",
+                  background: hrrpFlags.some(f => f.id === c.id) ? c.bg : "var(--color-background-secondary)",
+                  color: hrrpFlags.some(f => f.id === c.id) ? c.color : "var(--color-text-secondary)",
+                  border: `0.5px solid ${hrrpFlags.some(f => f.id === c.id) ? c.color : "var(--color-border-secondary)"}`,
+                }}>{c.code}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Patient context */}
+          <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>Patient &amp; hospital context</div>
+            {[
+              { label: "LACE score", val: lace, set: setLace, type: "number", min: 0, max: 19 },
+              { label: "Annual Medicare discharges", val: annualDischarges, set: setAnnualDischarges, type: "number" },
+            ].map(({ label, val, set, type, min, max }) => (
+              <div key={label} style={{ marginBottom: 8 }}>
+                <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 3 }}>{label}</label>
+                <input type={type} value={val} min={min} max={max}
+                  onChange={e => set(type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
+                  style={{ width: "100%", fontSize: 12, fontFamily: "var(--font-mono)", boxSizing: "border-box" }} />
+              </div>
+            ))}
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 3 }}>
+                Hospital HRRP penalty rate — <span style={{ color: "#C04028" }}>{hospitalPenaltyPct.toFixed(1)}%</span>
+              </label>
+              <input type="range" min="0" max="3" step="0.1" value={hospitalPenaltyPct}
+                onChange={e => setHospitalPenaltyPct(parseFloat(e.target.value))} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--color-text-secondary)" }}><span>0%</span><span>FY2026 max: 3.0%</span></div>
+            </div>
+            <div style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 3 }}>Payer</label>
+              <select value={payer} onChange={e => setPayer(e.target.value)} style={{ width: "100%", fontSize: 12 }}>
+                <option value="medicare">Medicare FFS</option>
+                <option value="mcare_adv">Medicare Advantage</option>
+                <option value="medi_cal">Medi-Cal managed care</option>
+                <option value="commercial">Commercial</option>
+              </select>
+            </div>
+            {payer === "mcare_adv" && (
+              <div style={{ fontSize: 11, color: "#C8920A", background: "#FAEEDA", border: "0.5px solid #FAC775", borderRadius: "var(--border-radius-md)", padding: "6px 9px", marginTop: 6 }}>
+                ⚠ FY2027: Medicare Advantage patients join HRRP cohort. Prepare now.
+              </div>
+            )}
+          </div>
+
+          {/* Hospital annual risk */}
+          {hasFlaggedHRRP && (
+            <div style={{ background: "#1C0A08", border: "0.5px solid #C04028", borderRadius: "var(--border-radius-lg)", padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Hospital annual HRRP risk</div>
+              <div style={{ fontSize: 24, fontWeight: 500, color: "#F87171", fontFamily: "var(--font-mono)" }}>{fmt$(financials.hospitalAnnualRisk)}</div>
+              <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>Based on {annualDischarges} discharges × {hospitalPenaltyPct.toFixed(1)}% penalty rate</div>
+            </div>
+          )}
+        </div>
+
+        {/* ══ RIGHT: FLAGS + CHECKLIST ══════════════════════════════ */}
+        <div>
+
+          {/* HRRP FLAG CARDS */}
+          {hasFlaggedHRRP && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                HRRP conditions — {hrrpFlags.length} flagged
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(195px,1fr))", gap: 10 }}>
+                {hrrpFlags.map(c => (
+                  <div key={c.id} style={{
+                    background: "var(--color-background-primary)",
+                    border: `1px solid ${c.border}`,
+                    borderTop: `3px solid ${c.color}`,
+                    borderRadius: "var(--border-radius-lg)", padding: "12px 14px", cursor: "pointer",
+                    outline: activeCondition?.id === c.id ? `2px solid ${c.color}` : "none",
+                    transition: "outline .15s",
+                  }} onClick={() => setActiveCondition(activeCondition?.id === c.id ? null : c)}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>{c.label}</div>
+                      <i className={`ti ${c.icon}`} aria-hidden="true" style={{ fontSize: 18, color: c.color }}></i>
+                    </div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 8 }}>{c.code}·x</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {[
+                        ["Readmit penalty", fmt$(c.penalty_per_readmit)],
+                        ["National readmit", (c.readmit_rate_nat * 100).toFixed(1) + "%"],
+                        ["Avg DRG", fmt$(c.drg_avg)],
+                        ["Checklist items", c.checklist.length],
+                      ].map(([l, v]) => (
+                        <div key={l} style={{ background: c.bg, borderRadius: "var(--border-radius-md)", padding: "5px 8px" }}>
+                          <div style={{ fontSize: 9, color: c.color, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 1 }}>{l}</div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: c.color, fontFamily: "var(--font-mono)" }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 10, color: c.color, textAlign: "center", opacity: .7 }}>
+                      {activeCondition?.id === c.id ? "▲ Hide checklist" : "▼ Show checklist"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TEAM FLAG CARDS */}
+          {hasFlaggedTEAM && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                TEAM 2026 mandatory episodes — {teamFlags.length} flagged
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(225px,1fr))", gap: 10 }}>
+                {teamFlags.map(e => (
+                  <div key={e.id} style={{
+                    background: "var(--color-background-primary)",
+                    border: "1px solid #FAC775", borderTop: "3px solid #C8920A",
+                    borderRadius: "var(--border-radius-lg)", padding: "12px 14px",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)" }}>{e.label}</div>
+                      <span style={{ fontSize: 9, fontWeight: 500, padding: "2px 7px", borderRadius: 3,
+                        background: "#C8920A", color: "#1A0A00" }}>MANDATORY</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
+                      {[
+                        ["Bundle range", `${fmt$(e.bundle_low)}–${fmt$(e.bundle_high)}`],
+                        ["Episode period", `${e.period_days} days`],
+                        ["Risk window", "Post-discharge"],
+                      ].map(([l, v]) => (
+                        <div key={l} style={{ background: "#FAEEDA", borderRadius: "var(--border-radius-md)", padding: "5px 7px" }}>
+                          <div style={{ fontSize: 9, color: "#854F0B", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 1 }}>{l}</div>
+                          <div style={{ fontSize: 11, fontWeight: 500, color: "#854F0B", fontFamily: "var(--font-mono)" }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--color-text-secondary)", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "5px 8px" }}>
+                      Sacramento MSA = mandatory participation. Hospital accountable for 30-day total cost of care. Target based on historical benchmark pricing.
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ENHANCED DISCHARGE CHECKLIST */}
+          {hasFlaggedHRRP && (
+            <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>
+                    Enhanced discharge checklist
+                    {activeCondition && <span style={{ fontWeight: 400, color: "var(--color-text-secondary)", marginLeft: 6 }}>— {activeCondition.label}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 2 }}>
+                    {doneCount}/{allItems.length} items · {critDone}/{critItems.length} required
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {hrrpFlags.map(c => (
+                    <button key={c.id} onClick={() => setActiveCondition(activeCondition?.id === c.id ? null : c)} style={{
+                      fontSize: 11, padding: "4px 11px", borderRadius: "var(--border-radius-md)", cursor: "pointer",
+                      background: activeCondition?.id === c.id ? c.bg : "var(--color-background-secondary)",
+                      color: activeCondition?.id === c.id ? c.color : "var(--color-text-secondary)",
+                      border: `0.5px solid ${activeCondition?.id === c.id ? c.color : "var(--color-border-secondary)"}`,
+                    }}>{c.label.split(" ")[0]}</button>
+                  ))}
+                  {activeCondition && (
+                    <button onClick={() => setActiveCondition(null)} style={{
+                      fontSize: 11, padding: "4px 10px", borderRadius: "var(--border-radius-md)", cursor: "pointer",
+                      background: "var(--color-background-secondary)", color: "var(--color-text-secondary)",
+                      border: "0.5px solid var(--color-border-secondary)",
+                    }}>All</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ height: 5, background: "var(--color-background-secondary)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
+                <div style={{ height: "100%", background: completePct === 100 ? "#1D9E75" : completePct >= 60 ? "#C8920A" : "#C04028",
+                  borderRadius: 3, width: `${completePct}%`, transition: "width .4s ease" }} />
+              </div>
+
+              {/* Items by priority */}
+              <div>
+                {["critical","high","standard"].map(priority => {
+                  const items = allItems.filter(i => i.p === priority);
+                  if (!items.length) return null;
+                  const meta = PRIORITY_META[priority];
+                  return (
+                    <div key={priority} style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 500, color: meta.c, textTransform: "uppercase",
+                        letterSpacing: "0.07em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ padding: "1px 7px", borderRadius: 3, background: meta.bg, color: meta.c }}>{meta.label}</span>
+                        <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>{items.filter(i => checked[i.id]).length}/{items.length}</span>
+                      </div>
+                      {items.map(item => (
+                        <div key={item.id} style={{
+                          display: "flex", gap: 10, padding: "8px 10px", marginBottom: 5, borderRadius: "var(--border-radius-md)",
+                          background: checked[item.id] ? "var(--color-background-success)" : "var(--color-background-secondary)",
+                          border: `0.5px solid ${checked[item.id] ? "var(--color-border-success)" : "var(--color-border-tertiary)"}`,
+                          transition: "all .2s",
+                        }}>
+                          <input type="checkbox" checked={!!checked[item.id]}
+                            onChange={() => setChecked(p => ({ ...p, [item.id]: !p[item.id] }))}
+                            style={{ accentColor: "#1D9E75", flexShrink: 0, marginTop: 2 }} />
+                          <div style={{ fontSize: 12, color: checked[item.id] ? "var(--color-text-success)" : "var(--color-text-primary)",
+                            textDecoration: checked[item.id] ? "line-through" : "none", lineHeight: 1.5, opacity: checked[item.id] ? .7 : 1 }}>
+                            {item.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* AI RISK BRIEFING */}
+          {hasFlaggedHRRP && (
+            <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>
+                  <i className="ti ti-sparkles" aria-hidden="true" style={{ marginRight: 6, fontSize: 15, verticalAlign: -2, color: "#C8920A" }}></i>
+                  AI financial risk briefing
+                </div>
+                <button onClick={generateBrief} disabled={briefLoading} style={{
+                  fontSize: 11, padding: "5px 13px", borderRadius: "var(--border-radius-md)", cursor: briefLoading ? "default" : "pointer",
+                  background: "var(--color-background-info)", color: "var(--color-text-info)",
+                  border: "0.5px solid var(--color-border-info)", display: "flex", alignItems: "center", gap: 5,
+                }}>
+                  <i className={`ti ti-${briefLoading ? "loader" : "sparkles"}`} aria-hidden="true"
+                    style={{ fontSize: 13, animation: briefLoading ? "spin 1s linear infinite" : "none" }}></i>
+                  {briefLoading ? "Analyzing…" : brief ? "Re-analyze" : "Generate briefing"}
+                </button>
+              </div>
+              {briefErr && (
+                <div style={{ fontSize: 12, color: "var(--color-text-danger)", marginBottom: 8 }}>⚠ {briefErr}</div>
+              )}
+              {!brief && !briefLoading && (
+                <div style={{ fontSize: 12, color: "var(--color-text-secondary)", fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>
+                  Click "Generate briefing" for an AI-powered analysis of HRRP exposure, TEAM bundle risk, and priority discharge actions for this specific patient.
+                </div>
+              )}
+              {brief && (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#C04028", marginBottom: 10, padding: "8px 12px",
+                    background: "#FAECE7", borderRadius: "var(--border-radius-md)", lineHeight: 1.5 }}>{brief.risk_headline}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                    {[["HRRP insight", brief.hrrp_insight, "#C04028", "#FAECE7"],
+                      ["TEAM insight",  brief.team_insight,  "#854F0B", "#FAEEDA"]].map(([l, v, c, bg]) => (
+                      v && (
+                        <div key={l} style={{ background: bg, borderRadius: "var(--border-radius-md)", padding: "10px 12px" }}>
+                          <div style={{ fontSize: 10, fontWeight: 500, color: c, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{l}</div>
+                          <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{v}</div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                  {brief.top_discharge_priorities && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>Top 3 priority actions</div>
+                      {brief.top_discharge_priorities.map(p => (
+                        <div key={p.priority} style={{ display: "flex", gap: 10, padding: "8px 11px", marginBottom: 6,
+                          background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)",
+                          borderLeft: `3px solid ${p.priority === 1 ? "#C04028" : p.priority === 2 ? "#C8920A" : "#1D9E75"}` }}>
+                          <div style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                            background: p.priority === 1 ? "#FAECE7" : p.priority === 2 ? "#FAEEDA" : "#E1F5EE",
+                            color: p.priority === 1 ? "#C04028" : p.priority === 2 ? "#854F0B" : "#0F6E56",
+                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 500 }}>
+                            {p.priority}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 2 }}>{p.action}</div>
+                            <div style={{ fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>{p.why}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[["California-specific", brief.california_specific, "#0F6E56", "#E1F5EE"],
+                      ["FY2027 warning",      brief.fy2027_warning,      "#0C447C", "#E6F1FB"]].map(([l, v, c, bg]) => (
+                      v && (
+                        <div key={l} style={{ background: bg, borderRadius: "var(--border-radius-md)", padding: "8px 10px" }}>
+                          <div style={{ fontSize: 9, fontWeight: 500, color: c, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{l}</div>
+                          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.55 }}>{v}</div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* EMPTY STATE */}
+          {!hasFlaggedHRRP && !hasFlaggedTEAM && (
+            <div style={{ textAlign: "center", padding: "50px 20px", background: "var(--color-background-primary)",
+              border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)" }}>
+              <i className="ti ti-shield-check" aria-hidden="true" style={{ fontSize: 36, display: "block", marginBottom: 12, color: "#1D9E75" }}></i>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>No HRRP / TEAM conditions detected</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary)", maxWidth: 360, margin: "0 auto", lineHeight: 1.7 }}>
+                Add ICD-10 codes from the left panel or click a quick-add button. HRRP conditions (CHF, AMI, Pneumonia, COPD, Hip/Knee, CABG) and TEAM 2026 episodes will be auto-detected and financial exposure calculated.
+              </div>
+              <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {[["I50.9","Heart Failure"],["I21.0","AMI"],["J44.1","COPD"],["Z96.641","Hip Replace"]].map(([code, label]) => (
+                  <button key={code} onClick={() => addCode(code)} style={{
+                    fontSize: 11, padding: "5px 12px", borderRadius: "var(--border-radius-md)", cursor: "pointer",
+                    background: "var(--color-background-info)", color: "var(--color-text-info)",
+                    border: "0.5px solid var(--color-border-info)",
+                  }}>{code} — {label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<HRRPFlagging />);
+</script>
+</body>
+</html>
