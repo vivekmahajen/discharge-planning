@@ -933,3 +933,46 @@ async def create_plan(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+import httpx
+import secrets
+import hashlib
+import base64
+from urllib.parse import urlencode
+from fastapi import Request
+from fastapi.responses import RedirectResponse
+
+EPIC_CLIENT_ID = os.environ.get("NEXT_PUBLIC_EPIC_CLIENT_ID", "")
+APP_URL        = os.environ.get("NEXT_PUBLIC_APP_URL", "https://discharge-planning.vercel.app")
+
+@app.get("/launch")
+async def epic_launch(request: Request, iss: str, launch: str = None):
+    async with httpx.AsyncClient() as client:
+        config = (await client.get(f"{iss}/.well-known/smart-configuration")).json()
+    verifier  = secrets.token_urlsafe(32)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state     = secrets.token_urlsafe(16)
+    params    = {"response_type":"code","client_id":EPIC_CLIENT_ID,"redirect_uri":f"{APP_URL}/api/auth/epic/callback","scope":"launch patient/Patient.read patient/MedicationRequest.read patient/Condition.read patient/AllergyIntolerance.read patient/Encounter.read openid fhirUser","state":state,"aud":iss,"code_challenge":challenge,"code_challenge_method":"S256"}
+    if launch: params["launch"] = launch
+    r = RedirectResponse(url=config["authorization_endpoint"] + "?" + urlencode(params))
+    r.set_cookie("pkce_verifier",  verifier,                  max_age=300, httponly=True,  samesite="lax")
+    r.set_cookie("epic_token_url", config["token_endpoint"],  max_age=300, httponly=True,  samesite="lax")
+    r.set_cookie("epic_iss",       iss,                       max_age=300, httponly=False, samesite="lax")
+    r.set_cookie("oauth_state",    state,                     max_age=300, httponly=True,  samesite="lax")
+    return r
+
+@app.get("/api/auth/epic/callback")
+async def epic_callback(request: Request, code: str, state: str):
+    verifier  = request.cookies.get("pkce_verifier")
+    token_url = request.cookies.get("epic_token_url")
+    epic_iss  = request.cookies.get("epic_iss", "")
+    if not verifier or not token_url: return RedirectResponse(url="/login?error=session_expired")
+    if state != request.cookies.get("oauth_state"):  return RedirectResponse(url="/login?error=state_mismatch")
+    async with httpx.AsyncClient() as client:
+        tokens = (await client.post(token_url, data={"grant_type":"authorization_code","code":code,"redirect_uri":f"{APP_URL}/api/auth/epic/callback","client_id":EPIC_CLIENT_ID,"code_verifier":verifier}, headers={"Content-Type":"application/x-www-form-urlencoded"})).json()
+    if not tokens.get("access_token"): return RedirectResponse(url="/login?error=token_failed")
+    r = RedirectResponse(url=f"/?patient={tokens.get('patient','')}&source=epic")
+    r.set_cookie("epic_token",     tokens.get("access_token",""), max_age=tokens.get("expires_in",480), httponly=True,  samesite="lax")
+    r.set_cookie("epic_patient",   tokens.get("patient",""),      max_age=tokens.get("expires_in",480), httponly=False, samesite="lax")
+    r.set_cookie("epic_fhir_base", epic_iss,                      max_age=tokens.get("expires_in",480), httponly=False, samesite="lax")
+    return r
