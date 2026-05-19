@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -462,7 +463,7 @@ async def generate_teachback(request: Request):
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4000,
+            max_tokens=6000,
             temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -476,17 +477,19 @@ async def generate_teachback(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
     clean = raw_text.strip()
+    # Strip markdown fences regardless of language tag (```json, ```JSON, etc.)
     if clean.startswith("```"):
-        clean = clean.split("\n", 1)[-1]
-        if clean.endswith("```"):
-            clean = clean.rsplit("```", 1)[0]
+        clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+        clean = re.sub(r"\n?```$", "", clean)
     clean = clean.strip()
 
     try:
         result = json.loads(clean)
+        if not isinstance(result.get("categories"), list):
+            return JSONResponse({"success": False, "error": "Response missing 'categories' field", "raw": raw_text}, status_code=500)
         return JSONResponse({"success": True, "result": result})
-    except json.JSONDecodeError:
-        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"success": False, "error": f"JSON parse failed: {exc}", "raw": raw_text}, status_code=500)
 
 
 @app.post("/api/discharge-summary/generate")
