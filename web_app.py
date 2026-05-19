@@ -434,6 +434,15 @@ async def cdph_compliance_page(request: Request):
         return f.read()
 
 
+@app.get("/post-acute-directory", response_class=HTMLResponse)
+async def post_acute_directory_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "post-acute-directory.html", encoding="utf-8") as f:
+        return f.read()
+
+
 @app.post("/api/cdph-compliance/analyze")
 async def analyze_cdph_compliance(request: Request):
     if not get_current_user(request):
