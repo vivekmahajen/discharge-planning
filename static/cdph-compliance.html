@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CDPH Compliance — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Source Sans 3", system-ui, sans-serif; background: #FAF8F3; }
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+    #root { min-height: calc(100vh - 52px); }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>CDPH Compliance Tracker</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/teachback-checklist">Teach-back</a>
+  <a href="/summary-generator">Prompts</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  }).catch(() => { window.location.href = '/login'; });
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+const C = {
+  forest:  "#1B4332", forestLt: "#2D6A4F", forestPale: "#E8F5EE",
+  gold:    "#C8920A", goldPale: "#FEF5DC",
+  red:     "#B03020", redPale: "#FAEBE8",
+  amber:   "#B86B0C", amberPale: "#FEF0DC",
+  blue:    "#1A5276", bluePale: "#E8F0F8",
+  ink:     "#1A1917", muted: "#6A6560", border: "#DDD8CE",
+  cream:   "#FAF8F3", surface: "#FFFFFF",
+};
+
+/* ── California Medi-Cal managed care plans ────────────────────────────────── */
+const MEDI_CAL_PLANS = [
+  { id:"anthem",  name:"Anthem Blue Cross",          phone:"1-800-407-4627", authFax:"1-855-597-6247", counties:"LA, Riverside, San Bernardino" },
+  { id:"bhcs",    name:"Blue Shield Promise",        phone:"1-855-547-7542", authFax:"1-855-547-7543", counties:"LA, San Diego" },
+  { id:"calopti", name:"CalOptima",                  phone:"1-888-587-8088", authFax:"1-714-246-8660", counties:"Orange" },
+  { id:"hnet",    name:"Health Net",                 phone:"1-800-675-6110", authFax:"1-800-586-5298", counties:"Statewide" },
+  { id:"iehp",    name:"IEHP (Inland Empire)",       phone:"1-800-440-4347", authFax:"1-909-890-5087", counties:"Riverside, San Bernardino" },
+  { id:"lacare",  name:"LA Care",                    phone:"1-888-839-9909", authFax:"1-213-438-5779", counties:"Los Angeles" },
+  { id:"molina",  name:"Molina Healthcare",          phone:"1-888-665-4621", authFax:"1-800-801-0837", counties:"Statewide" },
+  { id:"sfhp",    name:"San Francisco Health Plan",  phone:"1-415-547-7800", authFax:"1-415-547-7826", counties:"San Francisco" },
+  { id:"scfhp",   name:"Santa Clara Family Health",  phone:"1-408-376-3800", authFax:"1-408-376-3814", counties:"Santa Clara" },
+  { id:"gold",    name:"Gold Coast Health Plan",     phone:"1-888-301-1228", authFax:"1-805-437-5732", counties:"Ventura" },
+  { id:"other",   name:"Other / Fee-for-service",    phone:"DHCS: 1-916-552-9200", authFax:"",         counties:"Varies" },
+];
+
+/* ── CDPH checklist items ───────────────────────────────────────────────────── */
+const CHECKLIST = [
+  { id:"a1", phase:"admission",  label:"Discharge planning assessment initiated within 24 hours of admission",              cite:"42 CFR §482.43(c)(1)",        priority:"critical", medicare:false },
+  { id:"a2", phase:"admission",  label:"Patient (or representative) involved in planning from admission",                   cite:"42 CFR §482.43(c)(7)",        priority:"critical", medicare:false },
+  { id:"a3", phase:"admission",  label:"IMM (CMS-R-193) delivered within 2 calendar days of admission",                    cite:"42 CFR §422.622(b)",          priority:"critical", medicare:true  },
+  { id:"a4", phase:"admission",  label:"AB 1195 patient rights and responsibilities provided in writing",                   cite:"CA H&S §1262.8",              priority:"critical", medicare:false },
+  { id:"a5", phase:"admission",  label:"HIPAA Notice of Privacy Practices provided",                                        cite:"45 CFR §164.520",             priority:"required", medicare:false },
+  { id:"a6", phase:"admission",  label:"Language access offered — interpreter documented if LEP patient",                  cite:"CA H&S §1259 / Title 22",     priority:"critical", medicare:false },
+  { id:"a7", phase:"admission",  label:"HRRP condition flagged (CHF, AMI, COPD, pneumonia, hip/knee, CABG)",               cite:"ACA §3025 / CMS HRRP",        priority:"required", medicare:true  },
+  { id:"p1", phase:"planning",   label:"Social/functional/cultural needs assessed (SDOH screening)",                       cite:"42 CFR §482.43(b)(1)",        priority:"required", medicare:false },
+  { id:"p2", phase:"planning",   label:"Post-acute care options presented without steering to affiliated facility",         cite:"42 CFR §482.43(c)(8)",        priority:"critical", medicare:false },
+  { id:"p3", phase:"planning",   label:"Patient/family preferences for post-acute setting documented",                     cite:"42 CFR §482.43(c)(7)",        priority:"critical", medicare:false },
+  { id:"p4", phase:"planning",   label:"Medi-Cal prior authorization initiated on Day 1 (if Medi-Cal managed care)",       cite:"DHCS Contract Exhibit E",     priority:"critical", medicare:false },
+  { id:"p5", phase:"planning",   label:"Three-day inpatient rule eligibility verified before SNF referral",                cite:"42 CFR §409.30",              priority:"critical", medicare:true  },
+  { id:"p6", phase:"planning",   label:"Readmission risk assessed (LACE/HOSPITAL or equivalent tool)",                    cite:"CMS HRRP / CDPH QI",          priority:"required", medicare:false },
+  { id:"p7", phase:"planning",   label:"Anticipated discharge date established and communicated to care team",             cite:"42 CFR §482.43(c)",           priority:"required", medicare:false },
+  { id:"d1", phase:"pre_dc",     label:"IMM re-delivered no more than 2 calendar days before discharge",                   cite:"42 CFR §422.622(b)(2)",       priority:"critical", medicare:true  },
+  { id:"d2", phase:"pre_dc",     label:"Livanta QIO rights explained — 24-hour appeal window communicated",               cite:"42 CFR §422.622(c)",          priority:"critical", medicare:true  },
+  { id:"d3", phase:"pre_dc",     label:"Follow-up appointments scheduled (not just advised) before discharge",             cite:"42 CFR §482.43(c)(7)",        priority:"critical", medicare:false },
+  { id:"d4", phase:"pre_dc",     label:"Medication reconciliation completed and reviewed with patient",                    cite:"TJC NPSG.03.06.01",           priority:"critical", medicare:false },
+  { id:"d5", phase:"pre_dc",     label:"Discharge summary completed — diagnoses, meds, follow-up, warning signs",         cite:"42 CFR §482.24(c)(2)(viii)",  priority:"critical", medicare:false },
+  { id:"d6", phase:"pre_dc",     label:"Medi-Cal auth approved before patient leaves (or documented exception)",           cite:"DHCS Contract / Title 22",    priority:"critical", medicare:false },
+  { id:"d7", phase:"pre_dc",     label:"Home health / DME ordered and confirmed (if applicable)",                         cite:"42 CFR §482.43(c)(7)",        priority:"required", medicare:false },
+  { id:"e1", phase:"at_dc",      label:"Teach-back completed and documented for medications and warning signs",            cite:"CDPH QI Standard / HRET",     priority:"critical", medicare:false },
+  { id:"e2", phase:"at_dc",      label:"Written discharge instructions provided in patient's preferred language",          cite:"CA H&S §1259 / Title 22",     priority:"critical", medicare:false },
+  { id:"e3", phase:"at_dc",      label:"Patient / representative signature on discharge instructions obtained",            cite:"CDPH Survey Standard",        priority:"required", medicare:false },
+  { id:"e4", phase:"at_dc",      label:"SNF / receiving facility confirmed bed availability before patient leaves",        cite:"42 CFR §482.43(c)(7)",        priority:"required", medicare:false },
+  { id:"e5", phase:"at_dc",      label:"Clinical summary / transfer form sent to receiving provider",                     cite:"42 CFR §482.43(c)(7)",        priority:"required", medicare:false },
+  { id:"e6", phase:"at_dc",      label:"Post-discharge follow-up call scheduled (24h/72h per LACE risk tier)",            cite:"CMS TCM / HRRP Best Practice",priority:"required", medicare:false },
+  { id:"e7", phase:"at_dc",      label:"Planner attestation signed — discharge plan meets CMS CoP §482.43",               cite:"42 CFR §482.43",              priority:"critical", medicare:false },
+];
+
+const PHASE_META = {
+  admission: { label:"Admission",     color:C.blue,   bg:C.bluePale,   icon:"🏥" },
+  planning:  { label:"Planning",      color:C.forest, bg:C.forestPale, icon:"📋" },
+  pre_dc:    { label:"Pre-discharge", color:C.amber,  bg:C.amberPale,  icon:"⏰" },
+  at_dc:     { label:"At discharge",  color:C.gold,   bg:C.goldPale,   icon:"🚪" },
+};
+
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
+const dateDiff = (a, b) => {
+  if (!a || !b) return null;
+  return Math.floor((new Date(b) - new Date(a)) / 86400000);
+};
+
+const addDays = (d, n) => {
+  if (!d) return null;
+  const dt = new Date(d); dt.setDate(dt.getDate() + n);
+  return dt.toISOString().split("T")[0];
+};
+
+const fmt = d => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" }) : "—";
+
+/* Routes through backend — API key never exposed to browser */
+const callClaude = async (prompt) => {
+  const res = await fetch("/api/cdph-compliance/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    let msg = `Server error ${res.status}`;
+    try { const d = await res.json(); msg = d.error || msg; } catch(_) {}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Analysis failed");
+  if (!data.result || typeof data.result !== "object") throw new Error("Unexpected response format — try again");
+  return data.result;
+};
+
+/* ── Sub-components ─────────────────────────────────────────────────────────── */
+const StatusBadge = ({ status }) => {
+  const map = {
+    approved:  { bg:"#D1FAE5", c:"#065F46", t:"Approved ✓" },
+    pending:   { bg:C.amberPale, c:C.amber, t:"Pending ⏳" },
+    denied:    { bg:C.redPale,   c:C.red,   t:"Denied ✗" },
+    not_req:   { bg:"#F3F4F6",   c:"#6B7280",t:"Not required" },
+    not_init:  { bg:C.redPale,   c:C.red,   t:"Not initiated ⚠" },
+    urgent:    { bg:C.amberPale, c:C.amber, t:"Urgent request" },
+  };
+  const s = map[status] || map.not_init;
+  return <span style={{ fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:3, background:s.bg, color:s.c, letterSpacing:"0.05em", textTransform:"uppercase" }}>{s.t}</span>;
+};
+
+const Field = ({ label, value, onChange, type="text", small=false }) => (
+  <div style={{ marginBottom:small?6:10 }}>
+    {label && <label style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:3 }}>{label}</label>}
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} style={{
+      width:"100%", padding:"7px 10px", fontSize:12, fontFamily:"'Source Code Pro',monospace",
+      border:`1px solid ${C.border}`, borderRadius:5, background:C.cream, color:C.ink, boxSizing:"border-box",
+    }}/>
+  </div>
+);
+
+const Sel = ({ label, value, onChange, options }) => (
+  <div style={{ marginBottom:10 }}>
+    {label && <label style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:3 }}>{label}</label>}
+    <select value={value} onChange={e=>onChange(e.target.value)} style={{
+      width:"100%", padding:"7px 10px", fontSize:12, border:`1px solid ${C.border}`,
+      borderRadius:5, background:C.cream, color:C.ink, boxSizing:"border-box",
+    }}>
+      {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  </div>
+);
+
+/* ── Countdown timer ────────────────────────────────────────────────────────── */
+const Countdown = ({ deadlineDate, label }) => {
+  const [remaining, setRemaining] = useState("");
+  const [urgent, setUrgent] = useState(false);
+  useEffect(()=>{
+    if (!deadlineDate) return;
+    const tick = () => {
+      const diff = new Date(deadlineDate + "T23:59:59") - Date.now();
+      if (diff <= 0) { setRemaining("EXPIRED"); setUrgent(true); return; }
+      const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000);
+      setUrgent(diff < 86400000);
+      setRemaining(`${h}h ${m}m remaining`);
+    };
+    tick(); const id = setInterval(tick, 30000);
+    return ()=>clearInterval(id);
+  },[deadlineDate]);
+  if (!deadlineDate || !remaining) return null;
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", borderRadius:6, background:urgent?C.redPale:C.amberPale, border:`1px solid ${urgent?"#F5C4B3":"#F0D99A"}`, marginBottom:10 }}>
+      <span style={{ fontSize:14 }}>{urgent?"🚨":"⏱"}</span>
+      <div>
+        <div style={{ fontSize:10, color:urgent?C.red:C.amber, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em" }}>{label}</div>
+        <div style={{ fontSize:12, color:urgent?C.red:C.amber, fontWeight:600, fontFamily:"'Source Code Pro',monospace" }}>{remaining}</div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════════════════════════ */
+function CDPHComplianceChecklist() {
+  const [tab, setTab] = useState("cdph");
+  const [patient, setPatient] = useState({
+    initials:"E.M.", mrn:"****4821", admitDate:"2026-05-14", dcDate:"2026-05-18",
+    payer:"medi_cal_managed", planId:"anthem", medicare:true, lace:"11",
+    diagnosis:"Heart Failure (I50.9)", attending:"Dr. Chen",
+  });
+  const setPt = (k,v) => setPatient(p=>({...p,[k]:v}));
+
+  const [checked, setChecked] = useState({});
+  const [notes,   setNotes]   = useState({});
+  const toggleCheck = id => setChecked(p=>({...p,[id]:!p[id]}));
+
+  const [authItems, setAuthItems] = useState([
+    { id:"snf", service:"SNF placement",        status:"pending",  authNum:"",               expiry:"",          requested:"2026-05-14" },
+    { id:"hh",  service:"Home health (HHA)",    status:"approved", authNum:"MC-2024-88121",  expiry:"2026-06-18",requested:"2026-05-14" },
+    { id:"dme", service:"DME — scale + walker", status:"approved", authNum:"MC-2024-88122",  expiry:"2026-06-18",requested:"2026-05-14" },
+  ]);
+  const updateAuth = (id,k,v) => setAuthItems(prev=>prev.map(a=>a.id===id?{...a,[k]:v}:a));
+  const addAuth    = () => setAuthItems(p=>[...p,{ id:Date.now()+"", service:"", status:"not_init", authNum:"", expiry:"", requested:"" }]);
+
+  const [livanta, setLivanta] = useState({
+    immDate:"2026-05-14", immTime:"10:30", immSigned:true,
+    redelivDate:"2026-05-17", redelivTime:"09:15", redelivSigned:true,
+    appealFiled:false, appealDate:"", appealTime:"",
+    livantaCalled:false, livantaCallTime:"", livantaCaseNum:"",
+    determination:"", determinationDate:"",
+  });
+  const setL = (k,v) => setLivanta(p=>({...p,[k]:v}));
+
+  const [snf, setSnf] = useState({
+    admitStatus:"inpatient", admitDate:"2026-05-14",
+    obsStart:"", obsEnd:"", dcDate:"2026-05-18",
+    snfAdmitDate:"2026-05-18", teamModel:false, cahSwingBed:false,
+  });
+  const setS = (k,v) => setSnf(p=>({...p,[k]:v}));
+
+  const [report,     setReport]     = useState(null);
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError,   setGenError]   = useState(null);
+
+  /* ── Computed values ──────────────────────────────────────────────────────── */
+  const plan         = MEDI_CAL_PLANS.find(p=>p.id===patient.planId) || MEDI_CAL_PLANS[0];
+  const totalItems   = CHECKLIST.length;
+  const checkedCount = Object.values(checked).filter(Boolean).length;
+  const critItems    = CHECKLIST.filter(i=>i.priority==="critical");
+  const critChecked  = critItems.filter(i=>checked[i.id]).length;
+  const compliancePct= Math.round((checkedCount/totalItems)*100);
+
+  const appealDeadline    = livanta.redelivDate ? addDays(livanta.redelivDate, 1)   : null;
+  const livantaDetDeadline= livanta.appealDate  ? addDays(livanta.appealDate,  1)   : null;
+
+  const snfCalc = () => {
+    if (snf.teamModel && snf.cahSwingBed)
+      return { eligible:true,  days:"N/A", reason:"TEAM model 2026 exception — CAH swing bed arrangement, 3-day rule waived", color:C.forest };
+    if (snf.admitStatus === "observation")
+      return { eligible:false, days:0,     reason:"Patient in observation status — does NOT qualify as inpatient days for Medicare SNF benefit", color:C.red };
+    const inpDays = dateDiff(snf.admitDate, snf.dcDate);
+    if (inpDays === null)
+      return { eligible:false, days:"?",   reason:"Enter admission and discharge dates", color:C.muted };
+    if (inpDays >= 3)
+      return { eligible:true,  days:inpDays, reason:`${inpDays} qualifying inpatient days — Medicare SNF benefit available`, color:C.forest };
+    return { eligible:false, days:inpDays, reason:`Only ${inpDays} qualifying inpatient day${inpDays===1?"":"s"} — minimum 3 required for Medicare SNF benefit`, color:C.red };
+  };
+  const snfResult = snfCalc();
+
+  /* ── Compliance report ────────────────────────────────────────────────────── */
+  const generateReport = async () => {
+    setGenLoading(true); setGenError(null);
+    try {
+      const prompt = `Analyze this California hospital discharge for compliance gaps.
+
+PATIENT: ${patient.initials}, Admit: ${patient.admitDate}, Discharge: ${patient.dcDate}
+PAYER: ${patient.payer === "medi_cal_managed" ? `Medi-Cal Managed (${plan.name})` : patient.payer}, Medicare: ${patient.medicare}
+DIAGNOSIS: ${patient.diagnosis}, LACE: ${patient.lace}
+
+CDPH CHECKLIST: ${checkedCount}/${totalItems} items complete. Unchecked: ${CHECKLIST.filter(i=>!checked[i.id]).map(i=>i.label).join("; ")}
+
+MEDI-CAL AUTH: ${authItems.map(a=>`${a.service}: ${a.status}${a.authNum?" ("+a.authNum+")":""}`).join("; ")}
+
+LIVANTA: IMM delivered ${livanta.immDate||"not recorded"}, Re-delivery ${livanta.redelivDate||"not recorded"}, Appeal filed: ${livanta.appealFiled}, Livanta called: ${livanta.livantaCalled}
+
+3-DAY SNF RULE: Admission status ${snf.admitStatus}, qualifying days: ${snfResult.days}, eligible: ${snfResult.eligible}, TEAM model exception: ${snf.teamModel}
+
+Return JSON:
+{
+  "overall_status": "compliant | at_risk | non_compliant",
+  "compliance_score": <0-100>,
+  "critical_gaps": [{ "issue": "<description>", "citation": "<CFR/CA code>", "action": "<required action>", "urgency": "immediate | today | before_dc" }],
+  "warnings": [{ "issue": "<description>", "recommendation": "<action>" }],
+  "california_specific_notes": ["<CA-specific observation>"],
+  "livanta_status": "<one sentence on Livanta compliance>",
+  "medi_cal_status": "<one sentence on auth status>",
+  "snf_status": "<one sentence on 3-day rule status>",
+  "attestation_ready": true | false,
+  "attestation_blockers": ["<item blocking attestation>"]
+}`;
+      const result = await callClaude(prompt);
+      setReport(result);
+      setTab("report");
+    } catch(e) {
+      setGenError(e.message);
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
+  /* ── Styles ───────────────────────────────────────────────────────────────── */
+  const cardStyle  = { background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"16px 18px", marginBottom:14 };
+  const sectionHead= { fontFamily:"'Lora',Georgia,serif", fontSize:14, fontWeight:600, color:C.forest, marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${C.border}` };
+
+  return (
+    <div style={{ fontFamily:"'Source Sans 3',sans-serif", background:C.cream, minHeight:"100vh", color:C.ink }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}} @media print{.no-print{display:none!important}}`}</style>
+
+      {/* ── Top bar ────────────────────────────────────────────────────────── */}
+      <div style={{ background:C.forest, padding:"14px 22px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, borderBottom:`3px solid ${C.gold}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ width:38, height:38, borderRadius:8, background:"rgba(255,255,255,0.1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🏛</div>
+          <div>
+            <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:16, fontWeight:600, color:"#EFF4F8" }}>California CDPH Discharge Compliance</div>
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.5)", fontWeight:300 }}>CDPH · CMS CoP §482.43 · Medi-Cal Managed Care · Livanta BFCC-QIO</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:22, fontWeight:700, color:compliancePct===100?C.gold:compliancePct>=70?"#7FD1AE":"#F4A79D", fontFamily:"'Source Code Pro',monospace" }}>{compliancePct}%</div>
+            <div style={{ fontSize:9, color:"rgba(255,255,255,0.5)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Complete</div>
+          </div>
+          <button onClick={generateReport} disabled={genLoading} className="no-print" style={{
+            background:C.gold, color:"#1A1000", border:"none", padding:"8px 16px", borderRadius:6,
+            fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit",
+            display:"flex", alignItems:"center", gap:6,
+          }}>
+            {genLoading
+              ? <><span style={{ animation:"spin 1s linear infinite", display:"inline-block" }}>⟳</span> Analyzing…</>
+              : "⚡ Compliance report"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Patient context bar ────────────────────────────────────────────── */}
+      <div style={{ background:"#1A3A2A", padding:"10px 22px", display:"flex", gap:20, flexWrap:"wrap", alignItems:"center" }} className="no-print">
+        {[
+          ["Patient", patient.initials], ["MRN", patient.mrn],
+          ["Admit", fmt(patient.admitDate)], ["DC", fmt(patient.dcDate)],
+          ["Diagnosis", patient.diagnosis], ["LACE", patient.lace],
+        ].map(([k,v])=>(
+          <div key={k} style={{ display:"flex", gap:5, alignItems:"baseline" }}>
+            <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", textTransform:"uppercase", letterSpacing:"0.08em" }}>{k}</span>
+            <span style={{ fontSize:12, color:"#C5E8D5", fontFamily:(k==="LACE"||k==="Admit"||k==="DC")?"'Source Code Pro',monospace":"inherit", fontWeight:500 }}>{v}</span>
+          </div>
+        ))}
+        {patient.medicare && <span style={{ fontSize:10, padding:"2px 8px", borderRadius:3, background:"rgba(200,146,10,0.2)", color:C.gold, fontWeight:700 }}>MEDICARE</span>}
+        <span style={{ fontSize:10, padding:"2px 8px", borderRadius:3, background:"rgba(255,255,255,0.1)", color:"#9ABCAA", fontWeight:600 }}>{plan.name}</span>
+      </div>
+
+      {/* ── Tabs ──────────────────────────────────────────────────────────── */}
+      <div style={{ background:"#fff", display:"flex", overflowX:"auto", borderBottom:`1px solid ${C.border}` }} className="no-print">
+        {[
+          { id:"cdph",    label:"CDPH Checklist",   icon:"✅" },
+          { id:"medcal",  label:"Medi-Cal Auth",     icon:"💳" },
+          { id:"livanta", label:"Livanta QIO",       icon:"⚖️" },
+          { id:"snfrule", label:"3-Day SNF Rule",    icon:"🏥" },
+          { id:"report",  label:"Compliance Report", icon:"📊" },
+        ].map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{
+            padding:"10px 18px", fontSize:12, fontWeight:500, whiteSpace:"nowrap",
+            background:tab===t.id?C.cream:"transparent",
+            color:tab===t.id?C.forest:C.muted,
+            border:"none", borderBottom:`2px solid ${tab===t.id?C.forest:"transparent"}`,
+            cursor:"pointer", display:"flex", alignItems:"center", gap:6, transition:"all .15s",
+          }}><span>{t.icon}</span>{t.label}</button>
+        ))}
+      </div>
+
+      <div style={{ padding:"20px 22px 40px", maxWidth:900 }}>
+
+        {/* ── TAB: CDPH CHECKLIST ─────────────────────────────────────────── */}
+        {tab==="cdph" && (
+          <div style={{ animation:"fade .3s ease" }}>
+            <div style={{ ...cardStyle, background:C.forest, border:"none", marginBottom:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+                <div>
+                  <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:16, fontWeight:600, color:"#EFF4F8" }}>California CDPH Discharge Compliance</div>
+                  <div style={{ fontSize:12, color:"rgba(255,255,255,0.5)", marginTop:2 }}>42 CFR §482.43 · CDPH Title 22 · California Health & Safety Code</div>
+                </div>
+                <div style={{ display:"flex", gap:14 }}>
+                  {[["Complete",checkedCount,C.gold],["Critical",critChecked+"/"+critItems.length,"#7FD1AE"],["Remaining",totalItems-checkedCount,"#F4A79D"]].map(([l,v,c])=>(
+                    <div key={l} style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:22, fontWeight:700, color:c, fontFamily:"'Source Code Pro',monospace" }}>{v}</div>
+                      <div style={{ fontSize:9, color:"rgba(255,255,255,0.4)", textTransform:"uppercase", letterSpacing:"0.1em" }}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ height:5, background:"rgba(255,255,255,0.1)", borderRadius:3, overflow:"hidden", marginTop:14 }}>
+                <div style={{ height:"100%", background:C.gold, borderRadius:3, width:`${compliancePct}%`, transition:"width .5s ease" }}/>
+              </div>
+            </div>
+
+            {Object.entries(PHASE_META).map(([phase, meta])=>{
+              const items = CHECKLIST.filter(i=>i.phase===phase);
+              const phaseChecked = items.filter(i=>checked[i.id]).length;
+              return (
+                <div key={phase} style={{ ...cardStyle, borderTop:`3px solid ${meta.color}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:18 }}>{meta.icon}</span>
+                      <span style={{ fontFamily:"'Lora',Georgia,serif", fontSize:14, fontWeight:600, color:meta.color }}>{meta.label}</span>
+                    </div>
+                    <span style={{ fontSize:11, fontWeight:600, padding:"2px 9px", borderRadius:3, background:meta.bg, color:meta.color, fontFamily:"'Source Code Pro',monospace" }}>{phaseChecked}/{items.length}</span>
+                  </div>
+                  {items.map(item=>{
+                    const done = !!checked[item.id];
+                    return (
+                      <div key={item.id} style={{
+                        display:"flex", gap:10, padding:"9px 10px", marginBottom:5, borderRadius:7,
+                        background:done?"#F4FAF7":"#FAFAF4",
+                        border:`1px solid ${done?"#C8E8DC":C.border}`,
+                        transition:"all .2s",
+                      }}>
+                        <div style={{ paddingTop:1, flexShrink:0 }}>
+                          <input type="checkbox" checked={done} onChange={()=>toggleCheck(item.id)} style={{ width:16, height:16, cursor:"pointer", accentColor:C.forest }}/>
+                        </div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, color:done?"#3A6A4A":C.ink, lineHeight:1.5, textDecoration:done?"line-through":"none", opacity:done?.75:1 }}>{item.label}</div>
+                          <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap", alignItems:"center" }}>
+                            <span style={{ fontSize:10, fontFamily:"'Source Code Pro',monospace", color:C.muted }}>{item.cite}</span>
+                            {item.priority==="critical" && <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:2, background:C.redPale, color:C.red, textTransform:"uppercase", letterSpacing:"0.06em" }}>Required</span>}
+                            {item.medicare && <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:2, background:C.bluePale, color:C.blue, textTransform:"uppercase", letterSpacing:"0.06em" }}>Medicare</span>}
+                          </div>
+                          {done && (
+                            <input placeholder="Optional note…" value={notes[item.id]||""} onChange={e=>setNotes(p=>({...p,[item.id]:e.target.value}))}
+                              style={{ marginTop:5, width:"100%", fontSize:11, padding:"4px 7px", border:`1px solid ${C.border}`, borderRadius:4, background:"rgba(255,255,255,0.7)", boxSizing:"border-box", fontFamily:"inherit" }}/>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── TAB: MEDI-CAL AUTH ──────────────────────────────────────────── */}
+        {tab==="medcal" && (
+          <div style={{ animation:"fade .3s ease" }}>
+            <div style={cardStyle}>
+              <div style={sectionHead}>Managed Medi-Cal plan</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <Sel label="Health plan" value={patient.planId} onChange={v=>setPt("planId",v)} options={MEDI_CAL_PLANS.map(p=>({value:p.id,label:p.name}))}/>
+                <Field label="Member ID (last 6)" value={patient.mrn} onChange={v=>setPt("mrn",v)}/>
+              </div>
+              <div style={{ background:C.forestPale, border:`1px solid #A7DFC4`, borderRadius:8, padding:"12px 14px" }}>
+                <div style={{ fontSize:12, fontWeight:600, color:C.forest, marginBottom:6 }}>{plan.name} — Authorization Contacts</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
+                  {[["Phone",plan.phone],["Auth fax",plan.authFax],["Counties",plan.counties]].map(([l,v])=>(
+                    <div key={l}>
+                      <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:2 }}>{l}</div>
+                      <div style={{ fontSize:12, fontFamily:"'Source Code Pro',monospace", color:C.forest, fontWeight:500 }}>{v||"—"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ marginTop:10, fontSize:11, color:C.amber }}>⏱ Standard auth: 3–5 business days · Urgent: 72 hours · Emergent: 24 hours · <strong>Initiate on Day 1 of admission</strong></div>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={{ ...sectionHead, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>Authorization tracker</span>
+                <button onClick={addAuth} style={{ fontSize:11, padding:"4px 11px", background:C.forest, color:"#fff", border:"none", borderRadius:5, cursor:"pointer" }}>+ Add service</button>
+              </div>
+              {authItems.map(auth=>(
+                <div key={auth.id} style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px", marginBottom:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
+                    <input value={auth.service} onChange={e=>updateAuth(auth.id,"service",e.target.value)} placeholder="Service description"
+                      style={{ fontSize:13, fontWeight:600, color:C.ink, border:"none", background:"transparent", padding:0, flex:1, minWidth:120, fontFamily:"inherit" }}/>
+                    <StatusBadge status={auth.status}/>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:8 }}>
+                    <div>
+                      <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:2 }}>Status</div>
+                      <select value={auth.status} onChange={e=>updateAuth(auth.id,"status",e.target.value)} style={{ fontSize:12, border:`1px solid ${C.border}`, borderRadius:4, padding:"4px 8px", background:C.cream, width:"100%" }}>
+                        {[["not_init","Not initiated"],["pending","Pending"],["urgent","Urgent request"],["approved","Approved"],["denied","Denied"],["not_req","Not required"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:2 }}>Requested</div>
+                      <input type="date" value={auth.requested} onChange={e=>updateAuth(auth.id,"requested",e.target.value)} style={{ fontSize:12, border:`1px solid ${C.border}`, borderRadius:4, padding:"5px 8px", background:C.cream, width:"100%", boxSizing:"border-box", fontFamily:"'Source Code Pro',monospace" }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:2 }}>Auth number</div>
+                      <input value={auth.authNum} onChange={e=>updateAuth(auth.id,"authNum",e.target.value)} placeholder="MC-XXXX-XXXXX" style={{ fontSize:12, fontFamily:"'Source Code Pro',monospace", border:`1px solid ${C.border}`, borderRadius:4, padding:"5px 8px", width:"100%", boxSizing:"border-box", background:C.cream }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:2 }}>Auth expires</div>
+                      <input type="date" value={auth.expiry} onChange={e=>updateAuth(auth.id,"expiry",e.target.value)} style={{ fontSize:12, border:`1px solid ${C.border}`, borderRadius:4, padding:"5px 8px", background:C.cream, width:"100%", boxSizing:"border-box", fontFamily:"'Source Code Pro',monospace" }}/>
+                    </div>
+                  </div>
+                  {auth.status==="denied" && (
+                    <div style={{ marginTop:8, background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:5, padding:"7px 10px", fontSize:11, color:C.red }}>
+                      ⚠ Auth denied — contact plan's utilization management at {plan.phone}. Document appeal process. Do not discharge until alternative plan is confirmed.
+                    </div>
+                  )}
+                </div>
+              ))}
+              {authItems.filter(a=>a.status==="not_init"||a.status==="pending").length > 0 && (
+                <div style={{ background:C.amberPale, border:`1px solid #F0D99A`, borderRadius:7, padding:"9px 12px", fontSize:12, color:C.amber, marginTop:4 }}>
+                  ⏳ <strong>{authItems.filter(a=>a.status==="not_init"||a.status==="pending").length} authorization(s) pending.</strong> Patient cannot be placed without approved auth. Contact {plan.name} at {plan.phone}.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: LIVANTA QIO ────────────────────────────────────────────── */}
+        {tab==="livanta" && (
+          <div style={{ animation:"fade .3s ease" }}>
+            <div style={{ background:C.blue, borderRadius:10, padding:"14px 18px", marginBottom:14, display:"flex", gap:20, flexWrap:"wrap", alignItems:"center" }}>
+              {[["Livanta phone","1-888-524-9900"],["Livanta fax","1-888-985-8775"],["Hours","24/7 urgent appeals"],["Website","livantaqio.org"]].map(([l,v])=>(
+                <div key={l}>
+                  <div style={{ fontSize:9, color:"rgba(255,255,255,0.5)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:2 }}>{l}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#B3D4F0", fontFamily:"'Source Code Pro',monospace" }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={cardStyle}>
+              <div style={sectionHead}>IMM delivery timeline</div>
+              {[
+                { key:"imm1", label:"Initial IMM delivery",           date:livanta.immDate,    signed:livanta.immSigned,    deadline:`Within 2 days of admit (${fmt(addDays(patient.admitDate,2))})` },
+                { key:"imm2", label:"IMM re-delivery before discharge",date:livanta.redelivDate,signed:livanta.redelivSigned,deadline:`By ${fmt(addDays(patient.dcDate,-2))} (2 days before DC)` },
+              ].map((step,i)=>(
+                <div key={step.key} style={{ display:"flex", gap:14, marginBottom:16, alignItems:"flex-start" }}>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", flexShrink:0 }}>
+                    <div style={{ width:32, height:32, borderRadius:"50%", background:step.date&&step.signed?C.forestPale:step.date?C.amberPale:C.redPale, border:`2px solid ${step.date&&step.signed?C.forest:step.date?C.amber:C.red}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:step.date&&step.signed?C.forest:step.date?C.amber:C.red }}>
+                      {step.date&&step.signed?"✓":step.date?"↺":"!"}
+                    </div>
+                    {i===0 && <div style={{ width:2, height:20, background:C.border, marginTop:4 }}/>}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:C.ink, marginBottom:4 }}>{step.label}</div>
+                    <div style={{ fontSize:11, color:C.muted, marginBottom:8 }}>{step.deadline}</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:8, alignItems:"end" }}>
+                      <Field label="Date" value={step.key==="imm1"?livanta.immDate:livanta.redelivDate} onChange={v=>setL(step.key==="imm1"?"immDate":"redelivDate",v)} type="date"/>
+                      <Field label="Time" value={step.key==="imm1"?livanta.immTime:livanta.redelivTime} onChange={v=>setL(step.key==="imm1"?"immTime":"redelivTime",v)} type="time"/>
+                      <label style={{ display:"flex", gap:5, alignItems:"center", fontSize:12, marginBottom:2, cursor:"pointer" }}>
+                        <input type="checkbox" checked={step.key==="imm1"?livanta.immSigned:livanta.redelivSigned} onChange={e=>setL(step.key==="imm1"?"immSigned":"redelivSigned",e.target.checked)} style={{ accentColor:C.forest }}/>
+                        Signed
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...cardStyle, borderTop:`3px solid ${livanta.appealFiled?C.red:C.amber}` }}>
+              <div style={sectionHead}>Patient appeal rights</div>
+              {appealDeadline && <Countdown deadlineDate={appealDeadline} label="Appeal window closes"/>}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div style={{ ...cardStyle, padding:"10px 12px", marginBottom:0 }}>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Appeal window</div>
+                  <div style={{ fontSize:13, fontFamily:"'Source Code Pro',monospace", color:C.amber }}>24 hrs after re-delivery</div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Opens: {livanta.redelivDate?`${livanta.redelivDate} ${livanta.redelivTime}`:"after re-delivery"}</div>
+                  <div style={{ fontSize:11, color:C.muted }}>Closes: {appealDeadline ? `${appealDeadline} 23:59` : "—"}</div>
+                </div>
+                <div style={{ ...cardStyle, padding:"10px 12px", marginBottom:0, background:livanta.appealFiled?C.redPale:C.cream }}>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Appeal status</div>
+                  <label style={{ display:"flex", gap:6, alignItems:"center", fontSize:13, cursor:"pointer", marginBottom:8 }}>
+                    <input type="checkbox" checked={livanta.appealFiled} onChange={e=>setL("appealFiled",e.target.checked)} style={{ accentColor:C.red, width:16, height:16 }}/>
+                    <span style={{ fontWeight:600, color:livanta.appealFiled?C.red:C.ink }}>Appeal filed</span>
+                  </label>
+                  {livanta.appealFiled && (
+                    <>
+                      <div style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:6, padding:"8px 10px", marginBottom:8, fontSize:12, color:C.red }}>
+                        🚨 <strong>DISCHARGE HOLD ACTIVE.</strong> Call Livanta at <strong>1-888-524-9900</strong> BEFORE discharging patient.
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                        <Field label="Appeal date" value={livanta.appealDate} onChange={v=>setL("appealDate",v)} type="date" small/>
+                        <Field label="Appeal time" value={livanta.appealTime} onChange={v=>setL("appealTime",v)} type="time" small/>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={sectionHead}>Livanta QIO notification</div>
+              {livanta.appealFiled && !livanta.livantaCalled && (
+                <div style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:7, padding:"10px 13px", marginBottom:12, fontSize:12, color:C.red }}>
+                  ⚠ Appeal filed but Livanta not yet notified. Call <strong>1-888-524-9900</strong> NOW before any discharge action.
+                </div>
+              )}
+              {livantaDetDeadline && livanta.appealFiled && <Countdown deadlineDate={livantaDetDeadline} label="Livanta determination deadline (midnight)"/>}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:10 }}>
+                <div>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Livanta called</div>
+                  <label style={{ display:"flex", gap:6, alignItems:"center", fontSize:13, cursor:"pointer" }}>
+                    <input type="checkbox" checked={livanta.livantaCalled} onChange={e=>setL("livantaCalled",e.target.checked)} style={{ accentColor:C.forest, width:16, height:16 }}/>
+                    <span style={{ color:livanta.livantaCalled?C.forest:C.ink }}>Confirmed called</span>
+                  </label>
+                </div>
+                <Field label="Call timestamp" value={livanta.livantaCallTime} onChange={v=>setL("livantaCallTime",v)} type="datetime-local" small/>
+                <Field label="Livanta case #" value={livanta.livantaCaseNum} onChange={v=>setL("livantaCaseNum",v)} small/>
+              </div>
+              <div style={{ marginTop:10, display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Determination</div>
+                  <select value={livanta.determination} onChange={e=>setL("determination",e.target.value)} style={{ fontSize:12, border:`1px solid ${C.border}`, borderRadius:4, padding:"6px 10px", background:C.cream, width:"100%" }}>
+                    {[["","Not yet issued"],["pending","Pending review"],["upheld","Discharge upheld — issue HINN"],["overturned","Overturned — revise plan"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <Field label="Determination date" value={livanta.determinationDate} onChange={v=>setL("determinationDate",v)} type="date" small/>
+              </div>
+              {livanta.determination==="upheld" && (
+                <div style={{ marginTop:8, background:C.amberPale, border:`1px solid #F0D99A`, borderRadius:6, padding:"9px 12px", fontSize:12, color:C.amber }}>
+                  📋 Determination upheld — issue Hospital-Issued Notice of Non-Coverage (HINN) on Day 1 patient is financially liable for continued stay. Patient may request expedited appeal from Livanta.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: 3-DAY SNF RULE ─────────────────────────────────────────── */}
+        {tab==="snfrule" && (
+          <div style={{ animation:"fade .3s ease" }}>
+            <div style={{ ...cardStyle, background:snfResult.eligible?C.forestPale:C.redPale, border:`2px solid ${snfResult.eligible?C.forest:C.red}` }}>
+              <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                <div style={{ width:56, height:56, borderRadius:"50%", background:snfResult.eligible?C.forest:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>
+                  {snfResult.eligible?"✓":"✗"}
+                </div>
+                <div>
+                  <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:16, fontWeight:600, color:snfResult.eligible?C.forest:C.red }}>
+                    {snfResult.eligible?"Medicare SNF benefit: Eligible":"Medicare SNF benefit: Not eligible"}
+                  </div>
+                  <div style={{ fontSize:13, color:snfResult.eligible?"#2D6A4F":"#8B2010", marginTop:3 }}>{snfResult.reason}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={sectionHead}>Admission status</div>
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                {[["inpatient","Inpatient admission"],["observation","Observation status"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setS("admitStatus",v)} style={{
+                    flex:1, padding:"10px", fontSize:12, fontWeight:600, cursor:"pointer",
+                    background:snf.admitStatus===v?(v==="inpatient"?C.forest:C.red):"transparent",
+                    color:snf.admitStatus===v?"#fff":C.muted,
+                    border:`1.5px solid ${snf.admitStatus===v?(v==="inpatient"?C.forest:C.red):C.border}`,
+                    borderRadius:6, transition:"all .15s", fontFamily:"inherit",
+                  }}>{l}</button>
+                ))}
+              </div>
+              {snf.admitStatus==="observation" && (
+                <div style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:7, padding:"10px 13px", marginBottom:12, fontSize:12, color:C.red, lineHeight:1.7 }}>
+                  ⚠ <strong>Observation status does NOT count toward the 3-day qualifying inpatient stay.</strong> Consider:
+                  <ul style={{ margin:"6px 0 0 16px", padding:0 }}>
+                    <li>Requesting retroactive inpatient order from attending physician</li>
+                    <li>Hospital-issued notice of observation status (MOON notice)</li>
+                    <li>Discussing Medicare Advantage coverage differences with patient</li>
+                    <li>TEAM model CAH swing-bed exception (see below)</li>
+                  </ul>
+                </div>
+              )}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <Field label="Inpatient admission date"   value={snf.admitDate}    onChange={v=>setS("admitDate",v)}    type="date"/>
+                <Field label="Hospital discharge date"    value={snf.dcDate}       onChange={v=>setS("dcDate",v)}       type="date"/>
+                <Field label="Planned SNF admission date" value={snf.snfAdmitDate} onChange={v=>setS("snfAdmitDate",v)} type="date"/>
+              </div>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={sectionHead}>Qualifying day calculation</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10, marginBottom:12 }}>
+                {[
+                  ["Inpatient days", snfResult.days, snfResult.eligible?C.forest:C.red],
+                  ["Days required",  3,              C.muted],
+                  ["SNF gap (days)", snf.snfAdmitDate&&snf.dcDate?dateDiff(snf.dcDate,snf.snfAdmitDate)||0:"—", C.blue],
+                ].map(([l,v,c])=>(
+                  <div key={l} style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:7, padding:"10px 12px", textAlign:"center" }}>
+                    <div style={{ fontSize:26, fontWeight:700, color:c, fontFamily:"'Source Code Pro',monospace" }}>{v}</div>
+                    <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.07em", marginTop:2 }}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ background:C.bluePale, border:`1px solid #B5D4F4`, borderRadius:7, padding:"10px 13px", fontSize:12, color:C.blue, lineHeight:1.7 }}>
+                <strong>3-day rule mechanics:</strong> Patient must have 3 consecutive days as a formal inpatient (admitted before midnight, not in observation). The discharge day does NOT count. An inpatient order must be signed by the physician. SNF admission must occur within 30 days of hospital discharge.
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, borderTop:`3px solid ${C.gold}` }}>
+              <div style={sectionHead}>TEAM model 2026 exception</div>
+              <div style={{ background:C.goldPale, border:`1px solid #F0D99A`, borderRadius:7, padding:"10px 13px", marginBottom:12, fontSize:12, color:"#6B4A10", lineHeight:1.7 }}>
+                <strong>New in 2026:</strong> Starting January 1, 2026, hospitals participating in CMS's Transforming Episode Accountability Model (TEAM) may discharge patients to a participating Critical Access Hospital (CAH) swing-bed arrangement without the 3-day inpatient stay. <em>(CMS MLN006400, December 2025)</em>
+              </div>
+              <div style={{ display:"flex", gap:12 }}>
+                <label style={{ display:"flex", gap:7, alignItems:"center", fontSize:13, cursor:"pointer" }}>
+                  <input type="checkbox" checked={snf.teamModel} onChange={e=>setS("teamModel",e.target.checked)} style={{ accentColor:C.gold, width:16, height:16 }}/>
+                  <span>Hospital participates in TEAM model</span>
+                </label>
+                <label style={{ display:"flex", gap:7, alignItems:"center", fontSize:13, cursor:"pointer" }}>
+                  <input type="checkbox" checked={snf.cahSwingBed} onChange={e=>setS("cahSwingBed",e.target.checked)} style={{ accentColor:C.gold, width:16, height:16 }}/>
+                  <span>Receiving facility is a CAH swing bed</span>
+                </label>
+              </div>
+              {snf.teamModel && snf.cahSwingBed && (
+                <div style={{ marginTop:10, background:C.forestPale, border:`1px solid #A7DFC4`, borderRadius:6, padding:"9px 12px", fontSize:12, color:C.forest }}>
+                  ✓ TEAM model exception applies — 3-day inpatient requirement waived. Document TEAM model participation and CAH swing-bed arrangement in discharge record.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: COMPLIANCE REPORT ──────────────────────────────────────── */}
+        {tab==="report" && (
+          <div style={{ animation:"fade .3s ease" }}>
+            {!report && !genLoading && (
+              <div style={{ textAlign:"center", padding:"50px 20px" }}>
+                <div style={{ fontSize:40, marginBottom:14 }}>📊</div>
+                <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:17, fontWeight:600, color:C.forest, marginBottom:8 }}>AI compliance analysis</div>
+                <div style={{ fontSize:13, color:C.muted, maxWidth:380, margin:"0 auto 18px", lineHeight:1.7 }}>
+                  Click the <strong style={{ color:C.gold }}>⚡ Compliance report</strong> button to analyze all four modules and identify gaps, risks, and required actions.
+                </div>
+                <button onClick={generateReport} style={{ background:C.forest, color:"#fff", border:"none", padding:"11px 24px", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Generate compliance report ↗</button>
+                {genError && <div style={{ marginTop:12, color:C.red, fontSize:12, background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:6, padding:"8px 12px", display:"inline-block" }}>⚠ {genError}</div>}
+              </div>
+            )}
+            {genLoading && (
+              <div style={{ textAlign:"center", padding:"50px 20px" }}>
+                <div style={{ fontSize:30, animation:"spin 1.5s linear infinite", display:"inline-block", marginBottom:12 }}>⟳</div>
+                <div style={{ fontSize:14, fontWeight:600, color:C.forest }}>Analyzing compliance across all modules…</div>
+                {["Checking CDPH checklist gaps…","Reviewing Medi-Cal auth status…","Verifying Livanta timeline…","Calculating SNF eligibility…"].map((t,i)=>(
+                  <div key={i} style={{ fontSize:12, color:C.muted, marginTop:5 }}>{t}</div>
+                ))}
+              </div>
+            )}
+            {report && (
+              <div style={{ animation:"fade .4s ease" }}>
+                <div style={{ ...cardStyle, background:report.overall_status==="compliant"?C.forestPale:report.overall_status==="at_risk"?C.amberPale:C.redPale, border:`2px solid ${report.overall_status==="compliant"?C.forest:report.overall_status==="at_risk"?C.amber:C.red}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+                    <div>
+                      <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:16, fontWeight:600, color:report.overall_status==="compliant"?C.forest:report.overall_status==="at_risk"?C.amber:C.red }}>
+                        {report.overall_status==="compliant"?"✓ Compliance status: Good standing":report.overall_status==="at_risk"?"⚠ Compliance status: At risk":"✗ Compliance status: Non-compliant"}
+                      </div>
+                      <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>Generated {new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"})}</div>
+                    </div>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:32, fontWeight:700, color:report.overall_status==="compliant"?C.forest:report.overall_status==="at_risk"?C.amber:C.red, fontFamily:"'Source Code Pro',monospace" }}>{report.compliance_score}</div>
+                      <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase" }}>Score / 100</div>
+                    </div>
+                  </div>
+                </div>
+
+                {["livanta_status","medi_cal_status","snf_status"].map(k=>(
+                  report[k] && <div key={k} style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:7, padding:"9px 13px", marginBottom:8, fontSize:13, color:C.ink }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginRight:8 }}>{k.replace(/_status/,"").replace("_"," ")}</span>
+                    {report[k]}
+                  </div>
+                ))}
+
+                {report.critical_gaps?.length>0 && (
+                  <div style={cardStyle}>
+                    <div style={{ ...sectionHead, color:C.red }}>Critical gaps — immediate action required</div>
+                    {report.critical_gaps.map((g,i)=>(
+                      <div key={i} style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:7, padding:"11px 13px", marginBottom:8 }}>
+                        <div style={{ fontSize:13, fontWeight:600, color:C.red, marginBottom:3 }}>{g.issue}</div>
+                        <div style={{ fontSize:11, fontFamily:"'Source Code Pro',monospace", color:C.muted, marginBottom:5 }}>{g.citation}</div>
+                        <div style={{ fontSize:12, color:"#5A1510" }}>→ {g.action}</div>
+                        <div style={{ marginTop:5 }}><span style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:2, background:g.urgency==="immediate"?C.red:C.amber, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em" }}>{g.urgency}</span></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {report.warnings?.length>0 && (
+                  <div style={cardStyle}>
+                    <div style={{ ...sectionHead, color:C.amber }}>Warnings</div>
+                    {report.warnings.map((w,i)=>(
+                      <div key={i} style={{ background:C.amberPale, border:`1px solid #F0D99A`, borderRadius:6, padding:"9px 12px", marginBottom:7, fontSize:12, color:"#5A3A08" }}>
+                        <div style={{ fontWeight:600, marginBottom:2 }}>{w.issue}</div>
+                        <div style={{ color:"#7A5010" }}>→ {w.recommendation}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {report.california_specific_notes?.length>0 && (
+                  <div style={cardStyle}>
+                    <div style={{ ...sectionHead, color:C.forest }}>California-specific observations</div>
+                    {report.california_specific_notes.map((n,i)=>(
+                      <div key={i} style={{ display:"flex", gap:8, fontSize:12, color:C.ink, padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                        <span style={{ color:C.forest, flexShrink:0 }}>🏛</span>{n}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ ...cardStyle, background:report.attestation_ready?C.forestPale:C.redPale, border:`1.5px solid ${report.attestation_ready?C.forest:C.red}` }}>
+                  <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:14, fontWeight:600, color:report.attestation_ready?C.forest:C.red, marginBottom:report.attestation_ready?0:8 }}>
+                    {report.attestation_ready?"✓ Ready for planner attestation":"✗ Attestation blocked — items require resolution"}
+                  </div>
+                  {!report.attestation_ready && report.attestation_blockers?.map((b,i)=>(
+                    <div key={i} style={{ fontSize:12, color:C.red, padding:"3px 0", display:"flex", gap:6 }}><span>·</span>{b}</div>
+                  ))}
+                </div>
+
+                <button onClick={generateReport} style={{ fontSize:11, padding:"6px 14px", background:"transparent", border:`1px solid ${C.border}`, borderRadius:5, cursor:"pointer", color:C.muted, fontFamily:"inherit", marginTop:4 }}>↺ Re-analyze</button>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<CDPHComplianceChecklist />);
+</script>
+</body>
+</html>
