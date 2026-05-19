@@ -461,6 +461,15 @@ async def roi_tracker_page(request: Request):
         return f.read()
 
 
+@app.get("/readmission-tracker", response_class=HTMLResponse)
+async def readmission_tracker_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "readmission-tracker.html", encoding="utf-8") as f:
+        return f.read()
+
+
 @app.post("/api/roi/generate")
 async def generate_roi_summary(request: Request):
     if not get_current_user(request):
