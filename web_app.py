@@ -452,6 +452,63 @@ async def hrrp_flagging_page(request: Request):
         return f.read()
 
 
+@app.get("/roi-tracker", response_class=HTMLResponse)
+async def roi_tracker_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "roi-tracker.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/roi/generate")
+async def generate_roi_summary(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    user_prompt = body.get("prompt", "")
+    if not user_prompt.strip():
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "Server not configured"}, status_code=500)
+
+    system_prompt = (
+        "You are a healthcare analytics specialist writing concise executive summaries "
+        "for hospital C-suite presentations. Write in confident, professional prose. "
+        "Numbers are pre-calculated — cite them exactly. Return JSON only."
+    )
+
+    def _call_api():
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=800, temperature=0,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
+
+    loop = asyncio.get_event_loop()
+    try:
+        raw_text = await loop.run_in_executor(None, _call_api)
+    except anthropic.APIError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+        clean = re.sub(r"\n?```$", "", clean)
+    clean = clean.strip()
+
+    try:
+        result = json.loads(clean)
+        return JSONResponse({"success": True, "result": result})
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"success": False, "error": f"JSON parse failed: {exc}", "raw": raw_text}, status_code=500)
+
+
 @app.post("/api/hrrp/generate")
 async def generate_hrrp_briefing(request: Request):
     if not get_current_user(request):
