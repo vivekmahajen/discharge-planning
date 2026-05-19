@@ -143,6 +143,7 @@ const callClaude = async (summary, ctx) => {
   }
   const data = await res.json();
   if (!data.success) throw new Error(data.error || "Generation failed");
+  if (!data.result?.categories?.length) throw new Error("Claude returned an unexpected structure — please try again.");
   return data.result;
 };
 
@@ -427,6 +428,11 @@ function TeachBackChecklist() {
             </div>
           ))}
 
+          {error && (
+            <div style={{ marginBottom: 9, background: "#FAECE7", border: "1px solid #F5C4B3", borderRadius: 6, padding: "9px 11px", fontSize: 12, color: "#C04028", lineHeight: 1.5 }}>
+              <strong>⚠ Error:</strong> {error}
+            </div>
+          )}
           <button onClick={generate} disabled={loading} style={{
             width: "100%", padding: "10px", fontSize: 13, fontWeight: 600,
             background: loading ? "#9A9580" : "#1A2744", color: "#EFF4F8",
@@ -440,9 +446,6 @@ function TeachBackChecklist() {
           </button>
           {questions && (
             <button onClick={generate} style={{ width: "100%", padding: "6px", fontSize: 11, background: "transparent", color: "#9A9580", border: "1px solid #D5D0C6", borderRadius: 5, cursor: "pointer", marginTop: 5 }}>↺ Regenerate</button>
-          )}
-          {error && (
-            <div style={{ marginTop: 7, background: "#FAECE7", border: "1px solid #F5C4B3", borderRadius: 6, padding: "7px 10px", fontSize: 11, color: "#C04028" }}>⚠ {error}</div>
           )}
         </div>
 
