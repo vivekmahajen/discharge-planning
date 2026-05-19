@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Readmission Tracker — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --font-sans:  "Source Sans 3", system-ui, sans-serif;
+      --font-serif: "Lora", Georgia, serif;
+      --font-mono:  "Source Code Pro", "Courier New", monospace;
+
+      --color-background-primary:   #FFFFFF;
+      --color-background-secondary: #F5F3EE;
+      --color-background-success:   #E8F5EE;
+      --color-background-warning:   #FEF0DC;
+      --color-background-danger:    #FAEBE8;
+      --color-background-info:      #E8F0F8;
+
+      --color-text-primary:   #1A1917;
+      --color-text-secondary: #6A6560;
+      --color-text-success:   #1B4332;
+      --color-text-warning:   #B86B0C;
+      --color-text-danger:    #B03020;
+      --color-text-info:      #1A5276;
+
+      --color-border-tertiary:  #E8E4DA;
+      --color-border-secondary: #DDD8CE;
+      --color-border-success:   #A7DFC4;
+      --color-border-warning:   #F0D99A;
+      --color-border-danger:    #F5C4B3;
+      --color-border-info:      #B5D4F4;
+
+      --border-radius-lg: 10px;
+      --border-radius-md: 6px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: #F5F3EE;
+      color: var(--color-text-primary);
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+
+    input[type="text"], input[type="number"], input[type="date"], select, textarea {
+      padding: 6px 9px; font-size: 12px; font-family: var(--font-sans);
+      border: 0.5px solid var(--color-border-secondary);
+      border-radius: var(--border-radius-md);
+      background: var(--color-background-primary);
+      color: var(--color-text-primary);
+      width: 100%;
+    }
+    textarea { resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #1D9E75; outline-offset: 1px; }
+
+    #root { padding: 16px 20px 40px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Readmission Tracker</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/teachback-checklist">Teach-back</a>
+  <a href="/cdph-compliance">CDPH</a>
+  <a href="/hrrp-flagging">HRRP</a>
+  <a href="/roi-tracker">ROI</a>
+  <a href="/summary-generator">Prompts</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/post-acute-directory">Facilities</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  });
+
+  /* localStorage shim for window.storage used by the component */
+  window.storage = {
+    get: async (key) => {
+      const val = localStorage.getItem(key);
+      return val ? { value: val } : null;
+    },
+    set: async (key, value) => {
+      localStorage.setItem(key, value);
+    },
+  };
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+/* ─── Seed data — 20 de-identified patients across pre/post adoption ──────── */
+const SEED = [
+  { id:"p001", initials:"E.M.", mrn:"4821", admit:"2025-09-10", dc:"2025-09-15", condition:"chf",  hrrp:true, lace:11, dest:"home_hh", app:false, r30:true,  r30d:"2025-10-08", r60:true,  r60d:"2025-11-03", r90:null, notes:"CHF exacerbation on readmit" },
+  { id:"p002", initials:"R.T.", mrn:"2234", admit:"2025-09-18", dc:"2025-09-22", condition:"pna",  hrrp:true, lace:8,  dest:"home",    app:false, r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"" },
+  { id:"p003", initials:"M.K.", mrn:"8812", admit:"2025-09-25", dc:"2025-09-30", condition:"ami",  hrrp:true, lace:9,  dest:"snf",     app:false, r30:true,  r30d:"2025-10-18", r60:null,  r60d:null,         r90:null, notes:"Rehospitalized for NSTEMI" },
+  { id:"p004", initials:"S.V.", mrn:"5543", admit:"2025-10-02", dc:"2025-10-07", condition:"copd", hrrp:true, lace:12, dest:"home_hh", app:false, r30:true,  r30d:"2025-10-29", r60:null,  r60d:null,         r90:null, notes:"COPD exacerbation x2" },
+  { id:"p005", initials:"A.N.", mrn:"9901", admit:"2025-10-10", dc:"2025-10-14", condition:"tha",  hrrp:true, lace:5,  dest:"snf",     app:false, r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"" },
+  { id:"p006", initials:"G.L.", mrn:"3317", admit:"2025-10-15", dc:"2025-10-20", condition:"chf",  hrrp:true, lace:10, dest:"home_hh", app:false, r30:true,  r30d:"2025-11-12", r60:null,  r60d:null,         r90:null, notes:"Non-compliant with diuretics" },
+  { id:"p007", initials:"F.R.", mrn:"6654", admit:"2025-10-22", dc:"2025-10-25", condition:"pna",  hrrp:true, lace:6,  dest:"home",    app:false, r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"" },
+  { id:"p008", initials:"H.W.", mrn:"1129", admit:"2025-10-28", dc:"2025-11-03", condition:"cabg", hrrp:true, lace:13, dest:"snf",     app:false, r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Completed cardiac rehab referral" },
+  /* ── POST-ADOPTION (app used = true) ─────────────────────────────────── */
+  { id:"p009", initials:"C.B.", mrn:"7745", admit:"2025-11-05", dc:"2025-11-10", condition:"chf",  hrrp:true, lace:11, dest:"home_hh", app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Daily weight monitoring set up" },
+  { id:"p010", initials:"L.P.", mrn:"4408", admit:"2025-11-12", dc:"2025-11-16", condition:"ami",  hrrp:true, lace:8,  dest:"home",    app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Cardiology f/u confirmed" },
+  { id:"p011", initials:"T.M.", mrn:"2293", admit:"2025-11-18", dc:"2025-11-22", condition:"copd", hrrp:true, lace:9,  dest:"home_hh", app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Inhaler teach-back passed" },
+  { id:"p012", initials:"D.O.", mrn:"8833", admit:"2025-11-25", dc:"2025-11-29", condition:"pna",  hrrp:true, lace:7,  dest:"home",    app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Pneumo vaccine administered" },
+  { id:"p013", initials:"B.A.", mrn:"5560", admit:"2025-12-02", dc:"2025-12-06", condition:"tha",  hrrp:true, lace:5,  dest:"snf",     app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"4-star SNF selected" },
+  { id:"p014", initials:"N.S.", mrn:"3341", admit:"2025-12-10", dc:"2025-12-14", condition:"chf",  hrrp:true, lace:10, dest:"home_hh", app:true,  r30:true,  r30d:"2026-01-05", r60:false, r60d:null,         r90:false, notes:"Fluid overload despite compliance" },
+  { id:"p015", initials:"K.J.", mrn:"9982", admit:"2025-12-18", dc:"2025-12-22", condition:"cabg", hrrp:true, lace:12, dest:"snf",     app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Cardiac rehab enrolled Day 1" },
+  { id:"p016", initials:"W.C.", mrn:"1155", admit:"2026-01-05", dc:"2026-01-09", condition:"ami",  hrrp:true, lace:8,  dest:"home",    app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"" },
+  { id:"p017", initials:"P.H.", mrn:"6679", admit:"2026-01-14", dc:"2026-01-18", condition:"copd", hrrp:true, lace:11, dest:"home_hh", app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"Action plan given in Spanish" },
+  { id:"p018", initials:"R.B.", mrn:"4427", admit:"2026-01-22", dc:"2026-01-26", condition:"pna",  hrrp:true, lace:6,  dest:"home",    app:true,  r30:false, r30d:null,         r60:false, r60d:null,         r90:false, notes:"" },
+  { id:"p019", initials:"A.G.", mrn:"8890", admit:"2026-02-01", dc:"2026-02-05", condition:"chf",  hrrp:true, lace:9,  dest:"home_hh", app:true,  r30:false, r30d:null,         r60:null,  r60d:null,         r90:null,  notes:"30-day window still open" },
+  { id:"p020", initials:"J.F.", mrn:"2261", admit:"2026-02-10", dc:"2026-02-15", condition:"tha",  hrrp:true, lace:4,  dest:"home_pt", app:true,  r30:null,  r30d:null,         r60:null,  r60d:null,         r90:null,  notes:"30-day window still open" },
+];
+
+/* ─── Config ──────────────────────────────────────────────────────────────── */
+const ADOPTION_DATE = "2025-11-01";
+const CONDITIONS_MAP = {
+  chf:"Heart Failure", ami:"AMI", pna:"Pneumonia",
+  copd:"COPD", tha:"Hip/Knee", cabg:"CABG", other:"Other",
+};
+const DEST_MAP = {
+  home:"Home", home_hh:"Home + HH", snf:"SNF", home_pt:"Home + PT",
+  irf:"IRF", ltach:"LTACH", hospice:"Hospice",
+};
+const CONDITION_COLORS = {
+  chf:"#C04028", ami:"#185FA5", pna:"#0F6E56",
+  copd:"#854F0B", tha:"#3C3489", cabg:"#7F77DD", other:"#888780",
+};
+const STORAGE_KEY = "discharge_tracking_records";
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+const today = () => new Date().toISOString().split("T")[0];
+const addDays = (d, n) => { const dt = new Date(d+"T00:00:00"); dt.setDate(dt.getDate()+n); return dt.toISOString().split("T")[0]; };
+const daysSince = (d) => Math.floor((Date.now() - new Date(d+"T00:00:00")) / 86400000);
+const fmtDate = (d) => d ? new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"2-digit"}) : "—";
+const newId = () => "p" + Date.now().toString().slice(-6);
+
+/* ─── Status logic ────────────────────────────────────────────────────────── */
+function r30Status(rec) {
+  if (rec.r30 === true)  return { label:"Readmitted", color:"#E24B4A", bg:"#FCEBEB" };
+  if (rec.r30 === false) return { label:"No readmit",  color:"#1D9E75", bg:"#E1F5EE" };
+  const d = daysSince(rec.dc);
+  if (d < 30)  return { label:`${30-d}d left`,   color:"#854F0B", bg:"#FAEEDA" };
+  return               { label:"Overdue",         color:"#A32D2D", bg:"#FCEBEB" };
+}
+
+/* ─── Blank record template ───────────────────────────────────────────────── */
+const blank = () => ({
+  id:newId(), initials:"", mrn:"", admit:today(), dc:today(),
+  condition:"chf", hrrp:true, lace:"", dest:"home_hh", app:true,
+  r30:null, r30d:"", r60:null, r60d:"", r90:null, r90d:"", notes:"",
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════════════════════ */
+function ReadmissionTracker() {
+  const [records,      setRecords]      = useState([]);
+  const [loaded,       setLoaded]       = useState(false);
+  const [showForm,     setShowForm]     = useState(false);
+  const [form,         setForm]         = useState(blank());
+  const [editId,       setEditId]       = useState(null);
+  const [filter,       setFilter]       = useState({ cond:"all", period:"all", r30:"all", hrrp:false });
+  const [sort,         setSort]         = useState({ by:"dc", dir:"desc" });
+  const [adoptionDate, setAdoptionDate] = useState(ADOPTION_DATE);
+  const [activeTab,    setActiveTab]    = useState("tracker");
+  const [saving,       setSaving]       = useState(false);
+  const [expandedId,   setExpandedId]   = useState(null);
+
+  /* ── Load from storage ────────────────────────────────────────────────── */
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await window.storage.get(STORAGE_KEY);
+        setRecords(stored ? JSON.parse(stored.value) : SEED);
+      } catch {
+        setRecords(SEED);
+      }
+      setLoaded(true);
+    })();
+  }, []);
+
+  /* ── Save to storage ──────────────────────────────────────────────────── */
+  const save = useCallback(async (recs) => {
+    setSaving(true);
+    try { await window.storage.set(STORAGE_KEY, JSON.stringify(recs)); } catch {}
+    setSaving(false);
+  }, []);
+
+  const updateRecords = (recs) => { setRecords(recs); save(recs); };
+
+  /* ── Form handlers ────────────────────────────────────────────────────── */
+  const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const submitForm = () => {
+    const rec = { ...form, lace: parseInt(form.lace)||0 };
+    let next;
+    if (editId) { next = records.map(r => r.id === editId ? rec : r); setEditId(null); }
+    else        { next = [rec, ...records]; }
+    updateRecords(next);
+    setForm(blank()); setShowForm(false);
+  };
+
+  const editRecord = (rec) => { setForm({ ...rec }); setEditId(rec.id); setShowForm(true); };
+  const deleteRecord = (id) => { if (window.confirm("Delete this record?")) updateRecords(records.filter(r => r.id !== id)); };
+
+  /* ── Inline readmission update ────────────────────────────────────────── */
+  const markReadmit = (id, field, val) => {
+    const next = records.map(r => r.id === id ? { ...r, [field]: val } : r);
+    updateRecords(next);
+  };
+
+  /* ── Filtered + sorted records ────────────────────────────────────────── */
+  const filtered = useMemo(() => {
+    return records
+      .filter(r => {
+        if (filter.cond !== "all" && r.condition !== filter.cond) return false;
+        if (filter.period === "pre"  && r.app)  return false;
+        if (filter.period === "post" && !r.app) return false;
+        if (filter.r30 === "yes"  && r.r30 !== true)  return false;
+        if (filter.r30 === "no"   && r.r30 !== false) return false;
+        if (filter.r30 === "open" && r.r30 !== null)  return false;
+        if (filter.hrrp && !r.hrrp) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const v = sort.by === "dc"   ? a.dc.localeCompare(b.dc)
+          : sort.by === "lace"       ? (a.lace||0) - (b.lace||0)
+          : sort.by === "cond"       ? a.condition.localeCompare(b.condition)
+          : 0;
+        return sort.dir === "desc" ? -v : v;
+      });
+  }, [records, filter, sort]);
+
+  /* ── Cohort stats ─────────────────────────────────────────────────────── */
+  const stats = useMemo(() => {
+    const pre  = records.filter(r => !r.app && r.hrrp && r.r30 !== null);
+    const post = records.filter(r =>  r.app && r.hrrp && r.r30 !== null);
+    const rate = (recs) => recs.length > 0 ? recs.filter(r => r.r30).length / recs.length * 100 : 0;
+    const preRate  = rate(pre);
+    const postRate = rate(post);
+    const reduction = preRate > 0 ? (preRate - postRate) / preRate * 100 : 0;
+    const condStats = Object.entries(CONDITIONS_MAP).map(([id]) => {
+      const p = pre.filter(r => r.condition === id);
+      const q = post.filter(r => r.condition === id);
+      return { id, before: rate(p), after: rate(q), preN: p.length, postN: q.length };
+    }).filter(c => c.preN > 0 || c.postN > 0);
+    return {
+      pre, post, preRate, postRate, reduction, condStats,
+      totalPre:  records.filter(r => !r.app).length,
+      totalPost: records.filter(r =>  r.app).length,
+      openWindows:    records.filter(r => r.r30 === null && daysSince(r.dc) <= 30).length,
+      overdueWindows: records.filter(r => r.r30 === null && daysSince(r.dc) >  30).length,
+    };
+  }, [records]);
+
+  /* ─── RENDER ──────────────────────────────────────────────────────────── */
+  if (!loaded) return <div style={{ padding:40, textAlign:"center", color:"var(--color-text-secondary)" }}>Loading records…</div>;
+
+  return (
+    <div style={{ fontFamily:"var(--font-sans)", color:"var(--color-text-primary)" }}>
+      <style>{`.trow:hover{background:var(--color-background-secondary)!important}`}</style>
+
+      {/* ── Header ── */}
+      <div style={{ background:"#0F2040", borderRadius:"var(--border-radius-lg)", padding:"14px 18px", marginBottom:14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+          <div>
+            <div style={{ fontFamily:"var(--font-serif)", fontSize:15, fontWeight:500, color:"#EFF4F8", marginBottom:3 }}>
+              Discharge Readmission Tracker
+            </div>
+            <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+              {records.length} patients · App adopted: {fmtDate(adoptionDate)}
+              {saving && <span style={{ marginLeft:8, color:"#C8920A" }}>Saving…</span>}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>Adoption date</span>
+              <input type="date" value={adoptionDate} onChange={e => setAdoptionDate(e.target.value)}
+                style={{ fontSize:11, padding:"4px 8px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", fontFamily:"var(--font-mono)", width:"auto" }}/>
+            </div>
+            <button onClick={() => { setForm(blank()); setEditId(null); setShowForm(true); }} style={{
+              fontSize:11, padding:"6px 14px", borderRadius:"var(--border-radius-md)",
+              background:"#1D9E75", color:"#fff", border:"none", cursor:"pointer", fontWeight:500,
+            }}>+ Add discharge</button>
+          </div>
+        </div>
+
+        {/* Summary stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))", gap:8, marginTop:12 }}>
+          {[
+            ["Pre-adoption",   stats.totalPre  + " patients",          "#9CA3AF"],
+            ["Post-adoption",  stats.totalPost + " patients",          "#6EE7B7"],
+            ["Pre 30-day rate",  stats.preRate.toFixed(1)+"%",         "#F87171"],
+            ["Post 30-day rate", stats.postRate.toFixed(1)+"%",        "#6EE7B7"],
+            ["Reduction",      stats.reduction.toFixed(1)+"%",         stats.reduction > 0 ? "#6EE7B7" : "#F87171"],
+            ["Open windows",   stats.openWindows,                      "#FCD34D"],
+            ["Overdue logs",   stats.overdueWindows,                   stats.overdueWindows > 0 ? "#F87171" : "#6EE7B7"],
+          ].map(([l,v,c]) => (
+            <div key={l} style={{ textAlign:"center" }}>
+              <div style={{ fontSize:9, color:"rgba(255,255,255,.35)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:2 }}>{l}</div>
+              <div style={{ fontSize:16, fontWeight:500, color:c, fontVariantNumeric:"tabular-nums" }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+        {[["tracker","Patient tracker"],["cohort","Cohort analysis"],["export","ROI export"]].map(([id,label]) => (
+          <button key={id} onClick={() => setActiveTab(id)} style={{
+            fontSize:12, padding:"6px 14px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+            background:  activeTab===id ? "#0F2040" : "var(--color-background-primary)",
+            color:       activeTab===id ? "#EFF4F8" : "var(--color-text-secondary)",
+            border: `0.5px solid ${activeTab===id ? "#0F2040" : "var(--color-border-secondary)"}`,
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          TAB: TRACKER
+      ════════════════════════════════════════════════════════════════════ */}
+      {activeTab==="tracker" && (
+        <div>
+          {/* Filters */}
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"10px 14px", marginBottom:12, display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+            <span style={{ fontSize:11, color:"var(--color-text-secondary)" }}>Filter:</span>
+            {[
+              { label:"Condition", k:"cond",   opts:[["all","All"],["chf","CHF"],["ami","AMI"],["pna","PNA"],["copd","COPD"],["tha","Hip/Knee"],["cabg","CABG"]] },
+              { label:"Period",    k:"period", opts:[["all","All periods"],["pre","Pre-adoption"],["post","Post-adoption"]] },
+              { label:"30-day",    k:"r30",    opts:[["all","All"],["yes","Readmitted"],["no","No readmit"],["open","Window open"]] },
+            ].map(({ label, k, opts }) => (
+              <div key={k} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ fontSize:10, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em" }}>{label}</span>
+                <select value={filter[k]} onChange={e => setFilter(p => ({ ...p, [k]: e.target.value }))}
+                  style={{ fontSize:11, padding:"3px 7px", borderRadius:"var(--border-radius-md)", width:"auto" }}>
+                  {opts.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+            ))}
+            <label style={{ display:"flex", gap:5, alignItems:"center", fontSize:11, cursor:"pointer" }}>
+              <input type="checkbox" checked={filter.hrrp} onChange={e => setFilter(p => ({ ...p, hrrp: e.target.checked }))} style={{ width:"auto" }} />
+              HRRP only
+            </label>
+            <div style={{ marginLeft:"auto", fontSize:11, color:"var(--color-text-secondary)" }}>
+              Showing {filtered.length} of {records.length} records
+            </div>
+          </div>
+
+          {/* Table */}
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", overflow:"hidden" }}>
+            {/* Header row */}
+            <div style={{ display:"grid", gridTemplateColumns:"65px 70px 90px 90px 55px 40px 110px 110px 80px 90px", gap:0, background:"var(--color-background-secondary)", padding:"8px 14px", borderBottom:"0.5px solid var(--color-border-tertiary)" }}>
+              {[["Patient",""],["DC Date","dc"],["Condition","cond"],["Destination",""],["LACE","lace"],["App",""],["30-day",""],["60-day",""],["90-day",""],["Actions",""]].map(([l,sk]) => (
+                <div key={l} style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", cursor:sk?"pointer":"default" }}
+                  onClick={() => sk && setSort(s => ({ by:sk, dir:s.by===sk&&s.dir==="desc"?"asc":"desc" }))}>
+                  {l}{sk && sort.by===sk ? (sort.dir==="desc" ? " ↓" : " ↑") : ""}
+                </div>
+              ))}
+            </div>
+
+            {filtered.map(rec => {
+              const s30 = r30Status(rec);
+              const isPost     = rec.app;
+              const isExpanded = expandedId === rec.id;
+              return (
+                <div key={rec.id}>
+                  <div className="trow" style={{ display:"grid", gridTemplateColumns:"65px 70px 90px 90px 55px 40px 110px 110px 80px 90px", gap:0, padding:"8px 14px", borderBottom:"0.5px solid var(--color-border-tertiary)", alignItems:"center",
+                    background: isPost ? "rgba(29,158,117,0.03)" : "transparent" }}>
+
+                    {/* Patient */}
+                    <div>
+                      <div style={{ fontWeight:500, fontFamily:"var(--font-mono)", fontSize:11 }}>{rec.initials}</div>
+                      <div style={{ fontSize:10, color:"var(--color-text-secondary)" }}>···{rec.mrn}</div>
+                    </div>
+
+                    {/* DC Date */}
+                    <div style={{ fontSize:11, color:"var(--color-text-secondary)", fontFamily:"var(--font-mono)" }}>{fmtDate(rec.dc)}</div>
+
+                    {/* Condition */}
+                    <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                      <span style={{ width:7, height:7, borderRadius:"50%", background:CONDITION_COLORS[rec.condition]||"#888", flexShrink:0 }}></span>
+                      <span style={{ fontSize:11 }}>{CONDITIONS_MAP[rec.condition]}</span>
+                    </div>
+
+                    {/* Destination */}
+                    <div style={{ fontSize:11, color:"var(--color-text-secondary)" }}>{DEST_MAP[rec.dest]||rec.dest}</div>
+
+                    {/* LACE */}
+                    <div style={{ fontSize:12, fontWeight:500, fontFamily:"var(--font-mono)",
+                      color: rec.lace >= 10 ? "#E24B4A" : rec.lace >= 5 ? "#BA7517" : "#1D9E75" }}>{rec.lace||"—"}</div>
+
+                    {/* App used */}
+                    <div style={{ fontSize:11, fontWeight:500, color:isPost?"#1D9E75":"var(--color-text-secondary)" }}>{isPost?"✓ App":"—"}</div>
+
+                    {/* 30-day */}
+                    <div>
+                      {rec.r30 === null ? (
+                        <div style={{ display:"flex", gap:4 }}>
+                          <button onClick={() => markReadmit(rec.id,"r30",true)}  style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#FCEBEB", color:"#E24B4A", border:"0.5px solid #F09595", cursor:"pointer" }}>Yes</button>
+                          <button onClick={() => markReadmit(rec.id,"r30",false)} style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#E1F5EE", color:"#1D9E75", border:"0.5px solid #9FE1CB", cursor:"pointer" }}>No</button>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:3, background:s30.bg, color:s30.color }}>{s30.label}</span>
+                      )}
+                    </div>
+
+                    {/* 60-day */}
+                    <div>
+                      {rec.r30 === false ? (
+                        rec.r60 === null ? (
+                          <div style={{ display:"flex", gap:4 }}>
+                            <button onClick={() => markReadmit(rec.id,"r60",true)}  style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#FCEBEB", color:"#E24B4A", border:"0.5px solid #F09595", cursor:"pointer" }}>Yes</button>
+                            <button onClick={() => markReadmit(rec.id,"r60",false)} style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#E1F5EE", color:"#1D9E75", border:"0.5px solid #9FE1CB", cursor:"pointer" }}>No</button>
+                          </div>
+                        ) : <span style={{ fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:3, background:rec.r60?"#FCEBEB":"#E1F5EE", color:rec.r60?"#E24B4A":"#1D9E75" }}>{rec.r60?"Readmit":"Clear"}</span>
+                      ) : <span style={{ fontSize:10, color:"var(--color-text-secondary)" }}>{rec.r30===true?"N/A":"Pending 30d"}</span>}
+                    </div>
+
+                    {/* 90-day */}
+                    <div>
+                      {rec.r30===false && rec.r60===false ? (
+                        rec.r90 === null ? (
+                          <div style={{ display:"flex", gap:4 }}>
+                            <button onClick={() => markReadmit(rec.id,"r90",true)}  style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#FCEBEB", color:"#E24B4A", border:"0.5px solid #F09595", cursor:"pointer" }}>Yes</button>
+                            <button onClick={() => markReadmit(rec.id,"r90",false)} style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:"#E1F5EE", color:"#1D9E75", border:"0.5px solid #9FE1CB", cursor:"pointer" }}>No</button>
+                          </div>
+                        ) : <span style={{ fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:3, background:rec.r90?"#FCEBEB":"#E1F5EE", color:rec.r90?"#E24B4A":"#1D9E75" }}>{rec.r90?"Readmit":"Clear ✓"}</span>
+                      ) : <span style={{ fontSize:10, color:"var(--color-text-secondary)" }}>—</span>}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display:"flex", gap:5 }}>
+                      <button onClick={() => setExpandedId(isExpanded ? null : rec.id)} style={{ fontSize:10, padding:"2px 8px", borderRadius:3, background:"var(--color-background-secondary)", color:"var(--color-text-secondary)", border:"0.5px solid var(--color-border-secondary)", cursor:"pointer" }}>
+                        {isExpanded?"▲":"▼"}
+                      </button>
+                      <button onClick={() => editRecord(rec)} style={{ fontSize:10, padding:"2px 8px", borderRadius:3, background:"var(--color-background-info)", color:"var(--color-text-info)", border:"0.5px solid var(--color-border-info)", cursor:"pointer" }}>Edit</button>
+                    </div>
+                  </div>
+
+                  {/* Expanded detail row */}
+                  {isExpanded && (
+                    <div style={{ padding:"10px 14px", background:"var(--color-background-secondary)", borderBottom:"0.5px solid var(--color-border-tertiary)", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+                      <div style={{ fontSize:11 }}>
+                        <div style={{ fontWeight:500, marginBottom:4 }}>Admission details</div>
+                        <div style={{ color:"var(--color-text-secondary)", lineHeight:1.7 }}>
+                          Admit: {fmtDate(rec.admit)}<br/>
+                          Discharge: {fmtDate(rec.dc)}<br/>
+                          LOS: {daysSince(rec.admit) - daysSince(rec.dc)} days<br/>
+                          HRRP eligible: {rec.hrrp?"Yes":"No"}
+                        </div>
+                      </div>
+                      <div style={{ fontSize:11 }}>
+                        <div style={{ fontWeight:500, marginBottom:4 }}>Readmission dates</div>
+                        <div style={{ color:"var(--color-text-secondary)", lineHeight:1.7 }}>
+                          30-day: {rec.r30===true ? fmtDate(rec.r30d||addDays(rec.dc,28)) : rec.r30===false ? "None" : "Pending"}<br/>
+                          60-day: {rec.r60===true ? fmtDate(rec.r60d||addDays(rec.dc,55)) : rec.r60===false ? "None" : "—"}<br/>
+                          90-day: {rec.r90===true ? fmtDate(rec.r90d||addDays(rec.dc,85)) : rec.r90===false ? "None" : "—"}
+                        </div>
+                      </div>
+                      <div style={{ fontSize:11 }}>
+                        <div style={{ fontWeight:500, marginBottom:4 }}>Notes</div>
+                        <div style={{ color:"var(--color-text-secondary)", lineHeight:1.7 }}>{rec.notes||"No notes recorded."}</div>
+                        <button onClick={() => deleteRecord(rec.id)} style={{ marginTop:6, fontSize:10, padding:"2px 8px", borderRadius:3, background:"var(--color-background-danger)", color:"var(--color-text-danger)", border:"0.5px solid var(--color-border-danger)", cursor:"pointer" }}>Delete record</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {filtered.length === 0 && (
+              <div style={{ padding:"24px", textAlign:"center", fontSize:12, color:"var(--color-text-secondary)" }}>
+                No records match the current filters.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════
+          TAB: COHORT ANALYSIS
+      ════════════════════════════════════════════════════════════════════ */}
+      {activeTab==="cohort" && (
+        <div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+            {[
+              { label:"Pre-adoption 30-day rate",  val:stats.preRate.toFixed(1)+"%",  sub:`${stats.pre.filter(r=>r.r30).length} readmits / ${stats.pre.length} patients`,   color:"#E24B4A", bg:"#FCEBEB" },
+              { label:"Post-adoption 30-day rate", val:stats.postRate.toFixed(1)+"%", sub:`${stats.post.filter(r=>r.r30).length} readmits / ${stats.post.length} patients`,  color:"#1D9E75", bg:"#E1F5EE" },
+              { label:"Relative reduction",        val:stats.reduction.toFixed(1)+"%",sub:`${stats.pre.filter(r=>r.r30).length - stats.post.filter(r=>r.r30).length} fewer readmissions`, color:"#7F77DD", bg:"#EEEDFE" },
+            ].map(s => (
+              <div key={s.label} style={{ background:s.bg, border:`0.5px solid ${s.color}40`, borderRadius:"var(--border-radius-lg)", padding:"14px 16px" }}>
+                <div style={{ fontSize:10, color:s.color, textTransform:"uppercase", letterSpacing:".08em", marginBottom:5 }}>{s.label}</div>
+                <div style={{ fontSize:32, fontWeight:500, color:s.color, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{s.val}</div>
+                <div style={{ fontSize:11, color:s.color, opacity:.7, marginTop:4 }}>{s.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px", marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:500, marginBottom:12 }}>30-day readmission rates by HRRP condition</div>
+            <div style={{ display:"grid", gridTemplateColumns:"120px 80px 80px 80px 80px", gap:6, marginBottom:6 }}>
+              {["Condition","Pre rate","Pre n","Post rate","Post n"].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em" }}>{h}</div>
+              ))}
+            </div>
+            {stats.condStats.map(c => {
+              const improved = c.after < c.before;
+              return (
+                <div key={c.id} style={{ display:"grid", gridTemplateColumns:"120px 80px 80px 80px 80px", gap:6, padding:"8px 0", borderBottom:"0.5px solid var(--color-border-tertiary)", alignItems:"center" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:7, fontSize:12 }}>
+                    <span style={{ width:8, height:8, borderRadius:"50%", background:CONDITION_COLORS[c.id], flexShrink:0 }}></span>
+                    {CONDITIONS_MAP[c.id]}
+                  </div>
+                  <div style={{ fontSize:13, fontWeight:500, color:"#E24B4A", fontVariantNumeric:"tabular-nums" }}>{c.before.toFixed(1)}%</div>
+                  <div style={{ fontSize:11, color:"var(--color-text-secondary)" }}>{c.preN} pts</div>
+                  <div style={{ fontSize:13, fontWeight:500, color:improved?"#1D9E75":"#E24B4A", fontVariantNumeric:"tabular-nums" }}>{c.after.toFixed(1)}%</div>
+                  <div style={{ fontSize:11, color:"var(--color-text-secondary)" }}>{c.postN} pts</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {stats.openWindows > 0 && (
+            <div style={{ background:"#FAEEDA", border:"0.5px solid #FAC775", borderRadius:"var(--border-radius-lg)", padding:"10px 14px", fontSize:12, color:"#633806" }}>
+              <strong>{stats.openWindows} patient{stats.openWindows>1?"s":""}</strong> with 30-day windows still open — readmission status not yet logged.
+              {stats.overdueWindows > 0 && <strong style={{ color:"#E24B4A" }}> {stats.overdueWindows} overdue.</strong>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════
+          TAB: ROI EXPORT
+      ════════════════════════════════════════════════════════════════════ */}
+      {activeTab==="export" && (
+        <div>
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px", marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:500, marginBottom:4 }}>Live data feed → ROI calculator</div>
+            <div style={{ fontSize:11, color:"var(--color-text-secondary)", marginBottom:12 }}>These condition-level rates are calculated from your actual patient records. Copy them into the ROI Calculator Rate Tracker tab for a data-driven ROI calculation.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"130px 80px 80px 70px 80px", gap:6, marginBottom:6 }}>
+              {["Condition","Before %","After %","Pilot vol.","Prevented"].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em" }}>{h}</div>
+              ))}
+            </div>
+            {stats.condStats.map(c => {
+              const prevented = c.preN > 0 && c.postN > 0 ? Math.round((c.before - c.after) / 100 * Math.min(c.preN, c.postN)) : 0;
+              return (
+                <div key={c.id} style={{ display:"grid", gridTemplateColumns:"130px 80px 80px 70px 80px", gap:6, padding:"7px 0", borderBottom:"0.5px solid var(--color-border-tertiary)", alignItems:"center" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:7, fontSize:12 }}>
+                    <span style={{ width:7, height:7, borderRadius:"50%", background:CONDITION_COLORS[c.id], flexShrink:0 }}></span>
+                    {CONDITIONS_MAP[c.id]}
+                  </div>
+                  <div style={{ fontSize:12, fontWeight:500, color:"#E24B4A", fontVariantNumeric:"tabular-nums" }}>{c.before.toFixed(1)}%</div>
+                  <div style={{ fontSize:12, fontWeight:500, color:"#1D9E75", fontVariantNumeric:"tabular-nums" }}>{c.after.toFixed(1)}%</div>
+                  <div style={{ fontSize:11, color:"var(--color-text-secondary)" }}>{Math.min(c.preN, c.postN)}</div>
+                  <div style={{ fontSize:12, fontWeight:500, color:prevented>0?"#1D9E75":"var(--color-text-secondary)", fontVariantNumeric:"tabular-nums" }}>{prevented>0 ? prevented+" fewer" : "—"}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => {
+            const header = "ID,Initials,DC Date,Condition,LACE,App Used,30-day Readmit,60-day Readmit,90-day Readmit,Notes";
+            const rows = records.map(r => [
+              r.id, r.initials, r.dc, r.condition, r.lace,
+              r.app?"Yes":"No",
+              r.r30===null?"Pending":r.r30?"Yes":"No",
+              r.r60===null?"—":r.r60?"Yes":"No",
+              r.r90===null?"—":r.r90?"Yes":"No",
+              (r.notes||"").replace(/,/g,";"),
+            ].join(","));
+            const csv = [header, ...rows].join("\n");
+            const a = document.createElement("a");
+            a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+            a.download = "readmission_data.csv";
+            a.click();
+          }} style={{ fontSize:12, padding:"8px 16px", borderRadius:"var(--border-radius-lg)", background:"#0F2040", color:"#EFF4F8", border:"none", cursor:"pointer", fontFamily:"inherit", fontWeight:500 }}>
+            ↓ Export CSV
+          </button>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════
+          ADD / EDIT FORM MODAL
+      ════════════════════════════════════════════════════════════════════ */}
+      {showForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 }}>
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"20px", width:"100%", maxWidth:500, maxHeight:"85vh", overflowY:"auto" }}>
+            <div style={{ fontSize:14, fontWeight:500, marginBottom:16 }}>{editId ? "Edit discharge record" : "Add discharge record"}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {[["Patient initials","initials","text"],["MRN last 4","mrn","text"],["Admission date","admit","date"],["Discharge date","dc","date"],["LACE score","lace","number"]].map(([l,k,t]) => (
+                <div key={k}>
+                  <label style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", display:"block", marginBottom:3 }}>{l}</label>
+                  <input type={t} value={form[k]} onChange={e => setF(k, e.target.value)}
+                    style={{ width:"100%", fontSize:12, boxSizing:"border-box", fontFamily: t==="number"||t==="date" ? "var(--font-mono)" : "inherit" }}/>
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", display:"block", marginBottom:3 }}>Condition</label>
+                <select value={form.condition} onChange={e => setF("condition", e.target.value)} style={{ width:"100%", fontSize:12 }}>
+                  {Object.entries(CONDITIONS_MAP).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", display:"block", marginBottom:3 }}>Discharge destination</label>
+                <select value={form.dest} onChange={e => setF("dest", e.target.value)} style={{ width:"100%", fontSize:12 }}>
+                  {Object.entries(DEST_MAP).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:12, marginTop:10 }}>
+              <label style={{ display:"flex", gap:6, alignItems:"center", fontSize:12, cursor:"pointer" }}>
+                <input type="checkbox" checked={form.hrrp} onChange={e => setF("hrrp", e.target.checked)} style={{ accentColor:"#C04028", width:"auto" }}/> HRRP eligible
+              </label>
+              <label style={{ display:"flex", gap:6, alignItems:"center", fontSize:12, cursor:"pointer" }}>
+                <input type="checkbox" checked={form.app} onChange={e => setF("app", e.target.checked)} style={{ accentColor:"#1D9E75", width:"auto" }}/> App was used
+              </label>
+            </div>
+            <div style={{ marginTop:10 }}>
+              <label style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", display:"block", marginBottom:3 }}>Notes</label>
+              <textarea value={form.notes} onChange={e => setF("notes", e.target.value)} rows={2} style={{ width:"100%", fontSize:12, boxSizing:"border-box" }}/>
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:14, justifyContent:"flex-end" }}>
+              <button onClick={() => { setShowForm(false); setEditId(null); }} style={{ fontSize:12, padding:"7px 16px", borderRadius:"var(--border-radius-md)", background:"var(--color-background-secondary)", color:"var(--color-text-secondary)", border:"0.5px solid var(--color-border-secondary)", cursor:"pointer" }}>Cancel</button>
+              <button onClick={submitForm} disabled={!form.initials||!form.dc} style={{ fontSize:12, padding:"7px 20px", borderRadius:"var(--border-radius-md)", background:"#0F2040", color:"#fff", border:"none", cursor:(!form.initials||!form.dc)?"default":"pointer", fontWeight:500 }}>
+                {editId ? "Save changes" : "Add record"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ReadmissionTracker />);
+</script>
+</body>
+</html>
