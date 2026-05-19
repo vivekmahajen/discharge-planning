@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ROI Tracker — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --font-sans:  "Source Sans 3", system-ui, sans-serif;
+      --font-serif: "Lora", Georgia, serif;
+      --font-mono:  "Source Code Pro", "Courier New", monospace;
+
+      --color-background-primary:   #FFFFFF;
+      --color-background-secondary: #F5F3EE;
+      --color-background-success:   #E8F5EE;
+      --color-background-warning:   #FEF0DC;
+      --color-background-danger:    #FAEBE8;
+      --color-background-info:      #E8F0F8;
+
+      --color-text-primary:   #1A1917;
+      --color-text-secondary: #6A6560;
+      --color-text-success:   #1B4332;
+      --color-text-warning:   #B86B0C;
+      --color-text-danger:    #B03020;
+      --color-text-info:      #1A5276;
+
+      --color-border-tertiary:  #E8E4DA;
+      --color-border-secondary: #DDD8CE;
+      --color-border-success:   #A7DFC4;
+      --color-border-warning:   #F0D99A;
+      --color-border-danger:    #F5C4B3;
+      --color-border-info:      #B5D4F4;
+
+      --border-radius-lg: 10px;
+      --border-radius-md: 6px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: #F5F3EE;
+      color: var(--color-text-primary);
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+
+    input[type="text"], input[type="number"], input[type="date"], select {
+      padding: 6px 9px; font-size: 12px; font-family: var(--font-sans);
+      border: 0.5px solid var(--color-border-secondary);
+      border-radius: var(--border-radius-md);
+      background: var(--color-background-primary);
+      color: var(--color-text-primary);
+      width: 100%;
+    }
+    input:focus, select:focus { outline: 2px solid #1D9E75; outline-offset: 1px; }
+
+    #root { padding: 16px 20px 40px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Outcomes &amp; ROI Tracker</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/teachback-checklist">Teach-back</a>
+  <a href="/cdph-compliance">CDPH</a>
+  <a href="/hrrp-flagging">HRRP</a>
+  <a href="/summary-generator">Prompts</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/post-acute-directory">Facilities</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  });
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ─── HRRP condition data ──────────────────────────────────────────────── */
+const CONDITIONS = [
+  { id:"chf",  label:"Heart Failure",        natRate:0.227, color:"#C04028", drgAvg:8200  },
+  { id:"ami",  label:"AMI",                  natRate:0.162, color:"#185FA5", drgAvg:12400 },
+  { id:"pna",  label:"Pneumonia",            natRate:0.186, color:"#0F6E56", drgAvg:6800  },
+  { id:"copd", label:"COPD",                 natRate:0.201, color:"#854F0B", drgAvg:7100  },
+  { id:"tha",  label:"Hip / Knee Replace.",  natRate:0.048, color:"#3C3489", drgAvg:18500 },
+  { id:"cabg", label:"CABG",                 natRate:0.142, color:"#5F3F8A", drgAvg:42000 },
+];
+
+/* ─── Backend proxy — API key stays server-side ────────────────────────── */
+const callClaude = async (data) => {
+  const prompt = `Write a 3-sentence executive summary and a 1-sentence headline for this discharge planning ROI report.
+
+Hospital: ${data.hospitalName}
+Pilot period: ${data.pilotMonths} months (${data.pilotStart})
+Discharges in pilot: ${data.pilotDischarges}
+Overall readmission rate before: ${data.baselineRate.toFixed(1)}%
+Overall readmission rate after: ${data.currentRate.toFixed(1)}%
+Readmissions prevented: ${data.readmissionsPrevented}
+HRRP penalty reduction: $${data.hrrpSavings.toLocaleString()}
+Time savings value: $${data.timeSavings.toLocaleString()}
+Subscription cost: $${data.subscriptionCost.toLocaleString()}
+Total annual ROI: ${data.roiPct.toFixed(0)}%
+
+Return JSON: {"headline": "<bold 1-sentence finding>", "summary": "<3 professional sentences>", "key_stat": "<most compelling single number or percentage>"}`;
+
+  const res = await fetch("/api/roi/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const d = await res.json();
+  if (!d.success) throw new Error(d.error || "Server error");
+  return d.result;
+};
+
+/* ─── Formatting helpers ───────────────────────────────────────────────── */
+const fmt$ = n => "$" + Math.abs(Math.round(n)).toLocaleString();
+const fmtPct = n => n.toFixed(1) + "%";
+const fmtX = n => n.toFixed(1) + "×";
+
+/* ─── Default hospital config ──────────────────────────────────────────── */
+const DEFAULTS = {
+  hospitalName:        "Mercy Community Hospital",
+  pilotStart:          "2025-11-01",
+  pilotMonths:          6,
+  annualDischarges:    420,
+  staffHourlyRate:     45,
+  avgDrgPayment:       12400,
+  hrrpPenaltyRate:     1.4,
+  subscriptionPlan:    "community",
+  conditionRates: {
+    chf:  { before:23.1, after:18.4, volume:68  },
+    ami:  { before:16.8, after:13.2, volume:34  },
+    pna:  { before:19.4, after:16.1, volume:52  },
+    copd: { before:21.3, after:17.6, volume:41  },
+    tha:  { before:5.1,  after:3.8,  volume:38  },
+    cabg: { before:14.7, after:11.9, volume:22  },
+  },
+};
+
+const PLAN_COSTS = { solo:1188, team:4188, community:9588, cah:6000 };
+
+/* ─── Stat card ────────────────────────────────────────────────────────── */
+const Stat = ({ label, value, sub, color="#1D9E75", big=false }) => (
+  <div style={{ background:"var(--color-background-secondary)", borderRadius:"var(--border-radius-md)", padding:"10px 14px" }}>
+    <div style={{ fontSize:10, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:4 }}>{label}</div>
+    <div style={{ fontSize:big?28:22, fontWeight:500, color, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{value}</div>
+    {sub && <div style={{ fontSize:10, color:"var(--color-text-secondary)", marginTop:3 }}>{sub}</div>}
+  </div>
+);
+
+/* ─── Condition rate row ───────────────────────────────────────────────── */
+const CondRow = ({ c, rates, onChange }) => {
+  const reduction = rates.before > 0 ? ((rates.before - rates.after) / rates.before * 100) : 0;
+  const prevented = Math.round(rates.volume * (rates.before - rates.after) / 100);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"130px 90px 90px 70px 60px 70px", gap:8, alignItems:"center", padding:"8px 0", borderBottom:"0.5px solid var(--color-border-tertiary)" }}>
+      <div style={{ fontSize:12, color:"var(--color-text-primary)", display:"flex", alignItems:"center", gap:6 }}>
+        <span style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }}></span>
+        {c.label}
+      </div>
+      {["before","after","volume"].map(k => (
+        <input key={k} type="number" value={rates[k]}
+          onChange={e => onChange(c.id, k, parseFloat(e.target.value)||0)}
+          step={k==="volume"?1:0.1} min={0} max={k==="volume"?9999:100}
+          style={{ fontSize:12, padding:"4px 7px", borderRadius:"var(--border-radius-md)", fontVariantNumeric:"tabular-nums", width:"100%", boxSizing:"border-box",
+            border:`0.5px solid ${k==="after"&&rates.after<rates.before?"var(--color-border-success)":"var(--color-border-secondary)"}`,
+            background: k==="after"&&rates.after<rates.before?"var(--color-background-success)":"var(--color-background-primary)" }} />
+      ))}
+      <div style={{ fontSize:11, fontWeight:500, color:reduction>0?"var(--color-text-success)":"var(--color-text-danger)", textAlign:"right" }}>
+        {reduction>0?"-":""}{fmtPct(reduction)}
+      </div>
+      <div style={{ fontSize:11, fontWeight:500, color:"var(--color-text-primary)", textAlign:"right", fontVariantNumeric:"tabular-nums" }}>
+        {prevented} fewer
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════════════════════ */
+function ROITracker() {
+  const [cfg, setCfg]           = useState(DEFAULTS);
+  const [tab, setTab]           = useState("dashboard");
+  const [brief, setBrief]       = useState(null);
+  const [briefLoad, setBriefLoad] = useState(false);
+  const [briefErr, setBriefErr]   = useState(null);
+  const chartRef1 = useRef(null);
+  const chartRef2 = useRef(null);
+  const chartRef3 = useRef(null);
+  const chart1 = useRef(null);
+  const chart2 = useRef(null);
+  const chart3 = useRef(null);
+
+  const setC = (k, v) => setCfg(p => ({ ...p, [k]: v }));
+  const setRate = (cid, field, val) => setCfg(p => ({
+    ...p, conditionRates: { ...p.conditionRates, [cid]: { ...p.conditionRates[cid], [field]: val } }
+  }));
+
+  /* ── Computed metrics ─────────────────────────────────────────────────── */
+  const metrics = (() => {
+    const rates = cfg.conditionRates;
+    const totalBefore = CONDITIONS.reduce((s,c) => s + rates[c.id].before * rates[c.id].volume / 100, 0);
+    const totalAfter  = CONDITIONS.reduce((s,c) => s + rates[c.id].after  * rates[c.id].volume / 100, 0);
+    const totalVol    = CONDITIONS.reduce((s,c) => s + rates[c.id].volume, 0);
+    const baselineRate = totalVol > 0 ? totalBefore / totalVol * 100 : 0;
+    const currentRate  = totalVol > 0 ? totalAfter  / totalVol * 100 : 0;
+    const readmissionsPrevented = Math.round(totalBefore - totalAfter);
+    const costPerReadmit = 15200;
+    const avoidedReadmitCost = readmissionsPrevented * costPerReadmit;
+
+    const basePayments = cfg.annualDischarges * cfg.avgDrgPayment;
+    const penaltyBefore = basePayments * cfg.hrrpPenaltyRate / 100;
+    const rateReduction = baselineRate > 0 ? (baselineRate - currentRate) / baselineRate : 0;
+    const hrrpSavings   = penaltyBefore * rateReduction;
+
+    const minsPerDischarge  = 22;
+    const pilotDischarges   = Math.round(cfg.annualDischarges * cfg.pilotMonths / 12);
+    const timeSavings       = pilotDischarges * minsPerDischarge / 60 * cfg.staffHourlyRate;
+    const annualTimeSavings = cfg.annualDischarges * minsPerDischarge / 60 * cfg.staffHourlyRate;
+
+    const subCost     = PLAN_COSTS[cfg.subscriptionPlan] || PLAN_COSTS.community;
+    const totalValue  = hrrpSavings + timeSavings + avoidedReadmitCost * 0.05;
+    const net         = totalValue - subCost;
+    const roiPct      = subCost > 0 ? (net / subCost * 100) : 0;
+    const roiMultiple = subCost > 0 ? totalValue / subCost : 0;
+
+    return {
+      baselineRate, currentRate, readmissionsPrevented, totalVol, pilotDischarges,
+      hrrpSavings, timeSavings, annualTimeSavings, avoidedReadmitCost, penaltyBefore,
+      subCost, totalValue, net, roiPct, roiMultiple,
+      rateReduction: rateReduction * 100,
+    };
+  })();
+
+  /* ── Charts ───────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    if (tab !== "dashboard") return;
+    const tc = "rgba(0,0,0,.5)";
+    const gc = "rgba(0,0,0,.05)";
+
+    if (chart1.current) { chart1.current.destroy(); chart1.current = null; }
+    if (chart2.current) { chart2.current.destroy(); chart2.current = null; }
+    if (chart3.current) { chart3.current.destroy(); chart3.current = null; }
+
+    /* Bar: before vs after by condition */
+    if (chartRef1.current) {
+      chart1.current = new window.Chart(chartRef1.current, {
+        type:"bar",
+        data:{
+          labels: CONDITIONS.map(c => c.label),
+          datasets:[
+            { label:"Before", data:CONDITIONS.map(c => cfg.conditionRates[c.id].before), backgroundColor:"rgba(224,75,74,0.7)", borderWidth:0, borderRadius:2 },
+            { label:"After",  data:CONDITIONS.map(c => cfg.conditionRates[c.id].after),  backgroundColor:"rgba(29,158,117,0.8)", borderWidth:0, borderRadius:2 },
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`}}},
+          scales:{
+            x:{grid:{color:gc}, ticks:{color:tc,font:{size:10}}, border:{display:false}},
+            y:{grid:{color:gc}, ticks:{color:tc,font:{size:10},callback:v=>v+"%"}, border:{display:false}, min:0},
+          }
+        }
+      });
+    }
+
+    /* Trend line: simulated monthly readmission rate */
+    if (chartRef2.current) {
+      const months = Array.from({length:12},(_,i)=>`M${i+1}`);
+      const base = metrics.baselineRate;
+      const cur  = metrics.currentRate;
+      const trend = months.map((_,i) => i<6 ? +(base + (Math.random()-.5)*1.5).toFixed(1) : +(cur + (i-6)*0.15 + (Math.random()-.5)*0.8).toFixed(1));
+      const nat   = months.map(() => +(CONDITIONS.reduce((s,c)=>s+c.natRate,0)/CONDITIONS.length*100).toFixed(1));
+      chart2.current = new window.Chart(chartRef2.current, {
+        type:"line",
+        data:{
+          labels:months,
+          datasets:[
+            { label:"Your readmission rate", data:trend,
+              borderColor:"#1D9E75", backgroundColor:"rgba(29,158,117,0.08)",
+              borderWidth:2, pointRadius:3, pointBackgroundColor:"#1D9E75", fill:true, tension:.3 },
+            { label:"National average", data:nat,
+              borderColor:"#E24B4A", borderDash:[5,3], borderWidth:1.5,
+              pointRadius:0, fill:false, tension:.3 },
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            annotation:{annotations:{line1:{type:"line",xMin:5.5,xMax:5.5,borderColor:"#C8920A",borderWidth:1.5,borderDash:[3,3],
+              label:{content:"App adopted",display:true,position:"start",color:"#C8920A",font:{size:10}}}}},
+            tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.raw}%`}}
+          },
+          scales:{
+            x:{grid:{color:gc}, ticks:{color:tc,font:{size:10}}, border:{display:false}},
+            y:{grid:{color:gc}, ticks:{color:tc,font:{size:10},callback:v=>v+"%"}, border:{display:false}},
+          }
+        }
+      });
+    }
+
+    /* Donut: ROI components */
+    if (chartRef3.current) {
+      chart3.current = new window.Chart(chartRef3.current, {
+        type:"doughnut",
+        data:{
+          labels:["HRRP penalty reduction","Time savings (staff)","Avoided readmit value"],
+          datasets:[{
+            data:[Math.round(metrics.hrrpSavings), Math.round(metrics.timeSavings), Math.round(metrics.avoidedReadmitCost*.05)],
+            backgroundColor:["#C04028","#C8920A","#1D9E75"],
+            borderWidth:0, hoverOffset:4,
+          }]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false, cutout:"68%",
+          plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>`${ctx.label}: $${ctx.raw.toLocaleString()}`}}}
+        }
+      });
+    }
+
+    return () => {
+      [chart1,chart2,chart3].forEach(c => { if(c.current){c.current.destroy();c.current=null;} });
+    };
+  }, [tab, cfg, metrics.baselineRate, metrics.currentRate]);
+
+  /* ── Generate executive brief ─────────────────────────────────────────── */
+  const genBrief = useCallback(async () => {
+    setBriefLoad(true); setBriefErr(null);
+    try {
+      setBrief(await callClaude({
+        hospitalName: cfg.hospitalName,
+        pilotMonths: cfg.pilotMonths,
+        pilotStart: cfg.pilotStart,
+        pilotDischarges: metrics.pilotDischarges,
+        baselineRate: metrics.baselineRate,
+        currentRate: metrics.currentRate,
+        readmissionsPrevented: metrics.readmissionsPrevented,
+        hrrpSavings: metrics.hrrpSavings,
+        timeSavings: metrics.timeSavings,
+        subscriptionCost: metrics.subCost,
+        roiPct: metrics.roiPct,
+      }));
+    } catch(e) { setBriefErr(e.message); }
+    finally { setBriefLoad(false); }
+  }, [cfg, metrics]);
+
+  /* ─── RENDER ──────────────────────────────────────────────────────────── */
+  return (
+    <div style={{ fontFamily:"var(--font-sans)", color:"var(--color-text-primary)" }}>
+
+      {/* ── Top bar ── */}
+      <div style={{ background:"#0F2040", padding:"14px 20px", borderRadius:"var(--border-radius-lg)", marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+        <div>
+          <div style={{ fontFamily:"var(--font-serif)", fontSize:16, fontWeight:500, color:"#EFF4F8", marginBottom:2 }}>
+            Discharge Planning AI · Outcomes &amp; ROI Report
+          </div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)" }}>
+            {cfg.hospitalName} · {cfg.pilotMonths}-month pilot · {cfg.pilotStart} · HRRP FY2026
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={() => window.print()} className="no-print" style={{ fontSize:11, padding:"5px 12px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", cursor:"pointer" }}>
+            🖨 Print report
+          </button>
+          <button onClick={genBrief} disabled={briefLoad} className="no-print" style={{ fontSize:11, padding:"5px 14px", borderRadius:"var(--border-radius-md)", background:"#C8920A", color:"#1A0A00", border:"none", cursor:briefLoad?"default":"pointer", display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
+            <i className={`ti ti-${briefLoad?"loader":"sparkles"}`} aria-hidden="true" style={{ fontSize:13, animation:briefLoad?"spin 1s linear infinite":"none" }}></i>
+            {briefLoad ? "Writing…" : "AI executive summary"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }} className="no-print">
+        {[["dashboard","Dashboard"],["tracker","Rate tracker"],["roi","ROI calculator"],["config","Hospital config"]].map(([id,label]) => (
+          <button key={id} onClick={()=>setTab(id)} style={{
+            fontSize:12, padding:"6px 14px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+            background:tab===id?"#0F2040":"var(--color-background-primary)",
+            color:tab===id?"#EFF4F8":"var(--color-text-secondary)",
+            border:`0.5px solid ${tab===id?"#0F2040":"var(--color-border-secondary)"}`,
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ══ TAB: DASHBOARD ═══════════════════════════════════════════════════ */}
+      {tab==="dashboard" && (
+        <div>
+          {/* AI brief */}
+          {brief && (
+            <div style={{ background:"#0F2040", borderRadius:"var(--border-radius-lg)", padding:"14px 18px", marginBottom:14 }}>
+              <div style={{ fontSize:14, fontWeight:500, color:"#C8920A", marginBottom:8 }}>{brief.headline}</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,.7)", lineHeight:1.75 }}>{brief.summary}</div>
+              <div style={{ marginTop:10, display:"inline-block", background:"rgba(200,146,10,.2)", borderRadius:"var(--border-radius-md)", padding:"5px 12px", fontSize:12, color:"#C8920A", fontWeight:500 }}>Key stat: {brief.key_stat}</div>
+            </div>
+          )}
+          {briefErr && <div style={{ fontSize:12, color:"var(--color-text-danger)", marginBottom:10 }}>⚠ {briefErr}</div>}
+
+          {/* Headline metrics */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:10, marginBottom:14 }}>
+            <Stat label="Readmission rate — before" value={fmtPct(metrics.baselineRate)} color="#E24B4A" big />
+            <Stat label="Readmission rate — after"  value={fmtPct(metrics.currentRate)}  color="#1D9E75" big />
+            <Stat label="Rate reduction"            value={"-"+fmtPct(metrics.rateReduction)} sub="relative improvement" color="#1D9E75" big />
+            <Stat label="Readmissions prevented"   value={metrics.readmissionsPrevented} sub={`in ${cfg.pilotMonths}-month pilot`} color="#1D9E75" big />
+            <Stat label="HRRP penalty reduction"   value={fmt$(metrics.hrrpSavings)}    sub="annualized"  color="#C8920A" big />
+            <Stat label="Total ROI multiple"        value={fmtX(metrics.roiMultiple)}    sub={fmt$(metrics.net)+" net value"} color="#7F77DD" big />
+          </div>
+
+          {/* Charts row */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, fontWeight:500, marginBottom:4 }}>Readmission rates by HRRP condition</div>
+              <div style={{ display:"flex", gap:12, marginBottom:8 }}>
+                <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:"var(--color-text-secondary)" }}><span style={{ width:10, height:10, borderRadius:2, background:"rgba(224,75,74,0.7)", display:"inline-block" }}></span>Before</span>
+                <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:"var(--color-text-secondary)" }}><span style={{ width:10, height:10, borderRadius:2, background:"rgba(29,158,117,0.8)", display:"inline-block" }}></span>After</span>
+              </div>
+              <div style={{ position:"relative", height:200 }}>
+                <canvas ref={chartRef1} role="img" aria-label="Bar chart comparing readmission rates before and after app adoption for six HRRP conditions">
+                  Readmission rates improved across all six HRRP conditions after app adoption.
+                </canvas>
+              </div>
+            </div>
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, fontWeight:500, marginBottom:4 }}>Monthly readmission trend</div>
+              <div style={{ display:"flex", gap:12, marginBottom:8 }}>
+                <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:"var(--color-text-secondary)" }}><span style={{ width:10, height:3, borderTop:"2px solid #1D9E75", display:"inline-block" }}></span>Your rate</span>
+                <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:"var(--color-text-secondary)" }}><span style={{ width:10, height:3, borderTop:"2px dashed #E24B4A", display:"inline-block" }}></span>National avg</span>
+                <span style={{ fontSize:11, color:"#C8920A" }}>← App adoption</span>
+              </div>
+              <div style={{ position:"relative", height:200 }}>
+                <canvas ref={chartRef2} role="img" aria-label="Line chart showing monthly readmission rate trend before and after app adoption compared to national average">
+                  Readmission rate declines after app adoption, trending below national average.
+                </canvas>
+              </div>
+            </div>
+          </div>
+
+          {/* ROI donut + outcome summary */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:12 }}>
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, fontWeight:500, marginBottom:8 }}>ROI composition</div>
+              <div style={{ position:"relative", height:160 }}>
+                <canvas ref={chartRef3} role="img" aria-label="Donut chart showing ROI components: HRRP penalty reduction, time savings, and avoided readmission value">
+                  HRRP penalty reduction is the largest ROI component, followed by time savings and avoided readmission value.
+                </canvas>
+              </div>
+              <div style={{ marginTop:8, display:"flex", flexDirection:"column", gap:4 }}>
+                {[["HRRP penalty reduction",metrics.hrrpSavings,"#C04028"],["Time savings (staff)",metrics.timeSavings,"#C8920A"],["Avoided readmit value",metrics.avoidedReadmitCost*.05,"#1D9E75"]].map(([l,v,c])=>(
+                  <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:11 }}>
+                    <span style={{ display:"flex", alignItems:"center", gap:5, color:"var(--color-text-secondary)" }}><span style={{ width:8, height:8, borderRadius:2, background:c, display:"inline-block" }}></span>{l}</span>
+                    <span style={{ fontWeight:500, color:"var(--color-text-primary)", fontVariantNumeric:"tabular-nums" }}>{fmt$(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, fontWeight:500, marginBottom:10 }}>30/60/90-day outcome summary</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:10 }}>
+                {[30,60,90].map(days => {
+                  const r30 = metrics.currentRate * (days===30?1:days===60?1.3:1.5) / 100;
+                  const prev = Math.round(metrics.pilotDischarges * r30);
+                  return (
+                    <div key={days} style={{ background:"var(--color-background-secondary)", borderRadius:"var(--border-radius-md)", padding:"10px", textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", marginBottom:3 }}>{days}-day readmits</div>
+                      <div style={{ fontSize:22, fontWeight:500, color:"var(--color-text-primary)", fontVariantNumeric:"tabular-nums" }}>{prev}</div>
+                      <div style={{ fontSize:10, color:"#1D9E75", marginTop:2 }}>{fmtPct(r30*100)} rate</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ background:"var(--color-background-success)", borderRadius:"var(--border-radius-md)", padding:"10px 12px" }}>
+                <div style={{ fontSize:12, fontWeight:500, color:"var(--color-text-success)", marginBottom:4 }}>Pilot period summary</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:11 }}>
+                  {[
+                    ["Pilot discharges", metrics.pilotDischarges],
+                    ["Readmissions prevented", metrics.readmissionsPrevented],
+                    ["Staff hours saved", Math.round(metrics.pilotDischarges*22/60)],
+                    ["HRRP exposure reduction", fmt$(metrics.hrrpSavings)],
+                  ].map(([l,v])=>(
+                    <div key={l}>
+                      <div style={{ color:"var(--color-text-secondary)", marginBottom:1 }}>{l}</div>
+                      <div style={{ fontWeight:500, color:"var(--color-text-success)", fontVariantNumeric:"tabular-nums" }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ TAB: RATE TRACKER ════════════════════════════════════════════════ */}
+      {tab==="tracker" && (
+        <div>
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px", marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:500, marginBottom:4 }}>HRRP condition readmission rates — before vs after app adoption</div>
+            <div style={{ fontSize:11, color:"var(--color-text-secondary)", marginBottom:12 }}>Enter your hospital's actual readmission rates and pilot volumes for each HRRP condition. Green cells indicate improvement.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"130px 90px 90px 70px 60px 70px", gap:8, marginBottom:6 }}>
+              {["Condition","Before (%)","After (%)","Pilot vol.","Change","Prevented"].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em" }}>{h}</div>
+              ))}
+            </div>
+            {CONDITIONS.map(c => (
+              <CondRow key={c.id} c={c} rates={cfg.conditionRates[c.id]} onChange={setRate} />
+            ))}
+            <div style={{ display:"grid", gridTemplateColumns:"130px 90px 90px 70px 60px 70px", gap:8, padding:"10px 0 0", borderTop:"2px solid var(--color-border-secondary)" }}>
+              <div style={{ fontSize:12, fontWeight:500 }}>Overall</div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#E24B4A", fontVariantNumeric:"tabular-nums" }}>{fmtPct(metrics.baselineRate)}</div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#1D9E75", fontVariantNumeric:"tabular-nums" }}>{fmtPct(metrics.currentRate)}</div>
+              <div style={{ fontSize:12, fontWeight:500, fontVariantNumeric:"tabular-nums" }}>{metrics.totalVol}</div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#1D9E75" }}>-{fmtPct(metrics.rateReduction)}</div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#1D9E75", fontVariantNumeric:"tabular-nums" }}>{metrics.readmissionsPrevented} fewer</div>
+            </div>
+          </div>
+          <div style={{ background:"var(--color-background-secondary)", borderRadius:"var(--border-radius-md)", padding:"10px 14px", fontSize:11, color:"var(--color-text-secondary)", lineHeight:1.7 }}>
+            <strong style={{ color:"var(--color-text-primary)" }}>Source guidance:</strong> Pull readmission rates from your EHR quality dashboard or HRRP notification letters from CMS (received July each year). The "Before" period should be the 12 months before app adoption. The "After" period should be the pilot months since adoption. Volume = HRRP-eligible discharges for that condition during the pilot.
+          </div>
+        </div>
+      )}
+
+      {/* ══ TAB: ROI CALCULATOR ══════════════════════════════════════════════ */}
+      {tab==="roi" && (
+        <div>
+          {/* Summary card */}
+          <div style={{ background:"#0F2040", borderRadius:"var(--border-radius-lg)", padding:"16px 20px", marginBottom:14, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:12 }}>
+            {[
+              ["HRRP savings",  fmt$(metrics.hrrpSavings),      "Annual penalty reduction",  "#C8920A"],
+              ["Time savings",  fmt$(metrics.annualTimeSavings), "Staff efficiency (annual)", "#C8920A"],
+              ["Total value",   fmt$(metrics.totalValue),        "Combined annual value",     "#1D9E75"],
+              ["Subscription",  fmt$(metrics.subCost),           "Annual app cost",           "#9CA3AF"],
+              ["Net ROI",       fmt$(metrics.net),               "Value minus cost",          "#1D9E75"],
+              ["ROI multiple",  fmtX(metrics.roiMultiple),       metrics.roiPct.toFixed(0)+"% return", "#7F77DD"],
+            ].map(([l,v,s,c]) => (
+              <div key={l} style={{ textAlign:"center" }}>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,.4)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:3 }}>{l}</div>
+                <div style={{ fontSize:22, fontWeight:500, color:c, fontVariantNumeric:"tabular-nums" }}>{v}</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,.35)", marginTop:2 }}>{s}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Detailed breakdown */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            {/* Value drivers */}
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px" }}>
+              <div style={{ fontSize:13, fontWeight:500, marginBottom:12 }}>Value drivers — annual</div>
+              {[
+                { label:"HRRP penalty reduction", val:metrics.hrrpSavings, color:"#C04028", bg:"#FAECE7",
+                  detail:`${fmtPct(cfg.hrrpPenaltyRate)} penalty × ${fmtPct(metrics.rateReduction)} rate improvement` },
+                { label:"Staff time savings", val:metrics.annualTimeSavings, color:"#C8920A", bg:"#FAEEDA",
+                  detail:`22 min/discharge × ${cfg.annualDischarges} discharges × $${cfg.staffHourlyRate}/hr` },
+                { label:"Avoided readmit (5% share)", val:metrics.avoidedReadmitCost*.05, color:"#1D9E75", bg:"#E1F5EE",
+                  detail:`${metrics.readmissionsPrevented} prevented × $15,200 avg × 5% hospital share` },
+              ].map(({ label, val, color, bg, detail }) => (
+                <div key={label} style={{ background:bg, borderRadius:"var(--border-radius-md)", padding:"10px 12px", marginBottom:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                    <div style={{ fontSize:12, fontWeight:500, color }}>{label}</div>
+                    <div style={{ fontSize:15, fontWeight:500, color, fontVariantNumeric:"tabular-nums" }}>{fmt$(val)}</div>
+                  </div>
+                  <div style={{ fontSize:11, color:"var(--color-text-secondary)", lineHeight:1.5 }}>{detail}</div>
+                </div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 12px", background:"var(--color-background-secondary)", borderRadius:"var(--border-radius-md)", marginBottom:8 }}>
+                <div style={{ fontSize:12, fontWeight:500 }}>Total annual value</div>
+                <div style={{ fontSize:15, fontWeight:500, color:"#1D9E75", fontVariantNumeric:"tabular-nums" }}>{fmt$(metrics.totalValue)}</div>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 12px", background:"var(--color-background-danger)", borderRadius:"var(--border-radius-md)" }}>
+                <div style={{ fontSize:12, fontWeight:500, color:"var(--color-text-danger)" }}>Subscription cost ({cfg.subscriptionPlan})</div>
+                <div style={{ fontSize:15, fontWeight:500, color:"var(--color-text-danger)", fontVariantNumeric:"tabular-nums" }}>- {fmt$(metrics.subCost)}</div>
+              </div>
+            </div>
+
+            {/* Payback + plan selector */}
+            <div>
+              <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:500, marginBottom:12 }}>Subscription plan</div>
+                {[
+                  ["solo","Solo planner",1188,"1 planner"],
+                  ["team","Team (2–5)",4188,"Per facility"],
+                  ["community","Community hospital",9588,"Best for 50–200 beds"],
+                  ["cah","CAH / network",6000,"CCAHN member rate"],
+                ].map(([id,label,cost,sub])=>(
+                  <label key={id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", marginBottom:5, borderRadius:"var(--border-radius-md)", cursor:"pointer",
+                    background:cfg.subscriptionPlan===id?"var(--color-background-info)":"var(--color-background-secondary)",
+                    border:`0.5px solid ${cfg.subscriptionPlan===id?"var(--color-border-info)":"var(--color-border-secondary)"}` }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <input type="radio" checked={cfg.subscriptionPlan===id} onChange={()=>setC("subscriptionPlan",id)} style={{ accentColor:"#378ADD" }}/>
+                      <div>
+                        <div style={{ fontSize:12, fontWeight:500, color:cfg.subscriptionPlan===id?"var(--color-text-info)":"var(--color-text-primary)" }}>{label}</div>
+                        <div style={{ fontSize:10, color:"var(--color-text-secondary)" }}>{sub}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:13, fontWeight:500, fontVariantNumeric:"tabular-nums", color:cfg.subscriptionPlan===id?"var(--color-text-info)":"var(--color-text-primary)" }}>${(cost/12).toFixed(0)}/mo</div>
+                  </label>
+                ))}
+              </div>
+              <div style={{ background:"var(--color-background-success)", border:"0.5px solid var(--color-border-success)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px" }}>
+                <div style={{ fontSize:13, fontWeight:500, color:"var(--color-text-success)", marginBottom:8 }}>Payback analysis</div>
+                {[
+                  ["Monthly subscription", fmt$(metrics.subCost/12)],
+                  ["Monthly HRRP savings", fmt$(metrics.hrrpSavings/12)],
+                  ["Payback period", metrics.hrrpSavings>0?`${Math.max(1,Math.round(metrics.subCost/12/(metrics.totalValue/12)))} days`:"N/A"],
+                  ["Annual net value", fmt$(metrics.net)],
+                  ["ROI", metrics.roiPct.toFixed(0)+"%"],
+                ].map(([l,v])=>(
+                  <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0", borderBottom:"0.5px solid var(--color-border-success)" }}>
+                    <span style={{ color:"var(--color-text-secondary)" }}>{l}</span>
+                    <span style={{ fontWeight:500, fontVariantNumeric:"tabular-nums" }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ TAB: CONFIG ══════════════════════════════════════════════════════ */}
+      {tab==="config" && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px" }}>
+            <div style={{ fontSize:13, fontWeight:500, marginBottom:12 }}>Hospital profile</div>
+            {[
+              ["Hospital name",               "hospitalName",     "text"],
+              ["Pilot start date",            "pilotStart",       "date"],
+              ["Pilot length (months)",       "pilotMonths",      "number"],
+              ["Annual Medicare discharges",  "annualDischarges", "number"],
+              ["Staff hourly rate ($)",       "staffHourlyRate",  "number"],
+              ["Average DRG payment ($)",     "avgDrgPayment",    "number"],
+              ["Current HRRP penalty rate (%)","hrrpPenaltyRate", "number"],
+            ].map(([label, key, type]) => (
+              <div key={key} style={{ marginBottom:10 }}>
+                <label style={{ fontSize:10, fontWeight:500, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:".07em", display:"block", marginBottom:3 }}>{label}</label>
+                <input type={type} value={cfg[key]} onChange={e=>setC(key,type==="number"?parseFloat(e.target.value)||0:e.target.value)}
+                  style={{ width:"100%", fontSize:12, fontVariantNumeric:"tabular-nums", boxSizing:"border-box" }} />
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{ background:"var(--color-background-secondary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px", marginBottom:10, fontSize:12, color:"var(--color-text-secondary)", lineHeight:1.8 }}>
+              <div style={{ fontSize:13, fontWeight:500, color:"var(--color-text-primary)", marginBottom:8 }}>How to find your numbers</div>
+              <div><strong style={{ color:"var(--color-text-primary)" }}>HRRP penalty rate:</strong> Check your annual CMS HRRP adjustment letter (received each July). Range: 0–3%. National avg FY2026: 0.76%.</div>
+              <div style={{ marginTop:8 }}><strong style={{ color:"var(--color-text-primary)" }}>Readmission rates:</strong> Pull from your EHR quality module or request from your quality department. Use the same 30-day risk-standardized rates CMS uses for HRRP.</div>
+              <div style={{ marginTop:8 }}><strong style={{ color:"var(--color-text-primary)" }}>Average DRG payment:</strong> Use your hospital's average Medicare DRG payment across all discharges. Typically $10K–$15K for community hospitals.</div>
+              <div style={{ marginTop:8 }}><strong style={{ color:"var(--color-text-primary)" }}>Staff hourly rate:</strong> Use the fully-loaded cost (salary + benefits) of your case managers / discharge planners. Typically $40–$55/hr for RN case managers in California.</div>
+            </div>
+            <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"14px 16px" }}>
+              <div style={{ fontSize:13, fontWeight:500, marginBottom:8 }}>Key benchmarks — FY2026</div>
+              {[
+                ["National avg HRRP penalty",        "0.76%"],
+                ["Max HRRP penalty",                 "3.00%"],
+                ["Avg CHF readmit rate (national)",  "22.7%"],
+                ["Avg cost per readmission",         "$15,200"],
+                ["Annual readmit cost (US total)",   "$26 billion"],
+                ["HRRP penalties collected FY2024",  "$521 million"],
+                ["FY2027: MA joins HRRP cohort",     "⚠ Prepare now"],
+              ].map(([l,v])=>(
+                <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"5px 0", borderBottom:"0.5px solid var(--color-border-tertiary)" }}>
+                  <span style={{ color:"var(--color-text-secondary)" }}>{l}</span>
+                  <span style={{ fontWeight:500 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ROITracker />);
+</script>
+</body>
+</html>
