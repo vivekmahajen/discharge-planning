@@ -962,7 +962,11 @@ async def epic_launch(request: Request, iss: str, launch: str = None):
     return r
 
 @app.get("/api/auth/epic/callback")
-async def epic_callback(request: Request, code: str, state: str):
+async def epic_callback(request: Request, code: str = None, state: str = None, error: str = None):
+    if error:
+        return {"epic_error": error, "params": dict(request.query_params)}
+    if not code:
+        return {"error": "missing_code", "all_params": dict(request.query_params)}
     verifier  = request.cookies.get("pkce_verifier")
     token_url = request.cookies.get("epic_token_url")
     epic_iss  = request.cookies.get("epic_iss", "")
