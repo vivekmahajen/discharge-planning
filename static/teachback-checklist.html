@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teach-back Checklist — Discharge Planning AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Source Sans 3", system-ui, sans-serif; background: #F5F3EE; }
+    header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; }
+    header a {
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
+    }
+    header a:hover { background: rgba(255,255,255,.28); }
+    #root { min-height: calc(100vh - 52px); }
+    @keyframes spin     { to { transform: rotate(360deg); } }
+    @keyframes fadeIn   { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes shimmer  { 0%,100%{opacity:.4} 50%{opacity:1} }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Teach-back Documentation</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system">Multilingual</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div id="root"></div>
+
+<script>
+  fetch('/api/me').then(r => {
+    if (!r.ok) window.location.href = '/login';
+  }).catch(() => { window.location.href = '/login'; });
+</script>
+
+<script type="text/babel">
+const { useState, useRef } = React;
+
+// Build user prompt client-side; system prompt lives on the server
+const buildPrompt = (summary, ctx) => `
+Generate patient-specific teach-back questions for this patient's discharge.
+
+PATIENT:
+- Diagnosis: ${summary.diagnosis?.primary || ctx.diagnosis}
+- LACE score: ${ctx.laceScore || "unknown"}
+- Discharge destination: ${summary.post_acute?.destination || ctx.destination || "home"}
+- Preferred language: ${ctx.language || "English"}
+
+MEDICATIONS (generate a question for EACH medication listed):
+${(summary.medications || []).map(m =>
+  `- ${m.name} ${m.dose} ${m.frequency} — ${m.indication}${m.is_new ? " [NEW]" : ""}${m.is_high_alert ? " [HIGH ALERT]" : ""}`
+).join("\n") || ctx.medications}
+
+WARNING SIGNS:
+${(summary.warning_signs || []).map(w => `- ${w.sign} → ${w.action_label}`).join("\n") || ctx.warningsSigns}
+
+FOLLOW-UP:
+${(summary.follow_up?.appointments || []).map(a => `- ${a.provider} within ${a.timeframe}`).join("\n") || ctx.followUp}
+
+ACTIVITY RESTRICTIONS: ${summary.activity_restrictions || ctx.activity || "none specified"}
+DIET: ${summary.diet_instructions || ctx.diet || "none specified"}
+WOUND CARE: ${summary.wound_care || "none"}
+
+Return JSON:
+{
+  "patient_summary": "<1 sentence: who is this patient and what happened>",
+  "total_required": 0,
+  "categories": [
+    {
+      "id": "medications",
+      "label": "Medications",
+      "icon": "pill",
+      "priority": "critical",
+      "questions": [
+        {
+          "id": "med_1",
+          "required": true,
+          "priority": "critical",
+          "topic": "<medication name or topic>",
+          "question": "<the open-ended question the planner asks aloud>",
+          "expected_answer": "<what a correct patient response includes>",
+          "planner_tip": "<brief guidance for planner>",
+          "red_flag": "<warning if patient gets this wrong>",
+          "follow_up_teaching": "<what to teach if patient fails>"
+        }
+      ]
+    },
+    { "id": "warning_signs", "label": "Warning Signs",          "icon": "alert",    "priority": "critical", "questions": [] },
+    { "id": "diagnosis",     "label": "Understanding Condition", "icon": "heart",    "priority": "high",     "questions": [] },
+    { "id": "followup",      "label": "Follow-up & Next Steps",  "icon": "calendar", "priority": "high",     "questions": [] },
+    { "id": "lifestyle",     "label": "Activity & Diet",         "icon": "leaf",     "priority": "standard", "questions": [] }
+  ]
+}
+
+REQUIREMENTS:
+- Generate at least one question per medication listed (especially new and high-alert meds)
+- Generate at least 2 warning sign questions — one for "call doctor", one for "call 911"
+- All high-alert medications (warfarin, insulin, opioids, anticoagulants, digoxin): required = true, priority = critical
+- If LACE score >= 10: mark ALL medication and warning sign questions as required
+- Questions must reference the patient's actual condition and medication names — not generic
+`;
+
+// Routes through backend — API key never exposed to browser
+const callClaude = async (summary, ctx) => {
+  const res = await fetch("/api/teachback/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: buildPrompt(summary, ctx) }),
+  });
+  if (!res.ok) {
+    let msg = `Server error ${res.status}`;
+    try { const d = await res.json(); msg = d.error || msg; } catch(_) {}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Generation failed");
+  return data.result;
+};
+
+const DEMO_SUMMARY = {
+  diagnosis: {
+    primary: "I50.9 — Heart failure, unspecified",
+    secondary: ["E11.9 — Type 2 diabetes", "I10 — Essential hypertension"],
+    hospital_course: "Admitted with acute decompensated heart failure, treated with IV furosemide, discharged on oral diuretics after 4.2L diuresis.",
+    condition_at_discharge: "improved"
+  },
+  medications: [
+    { name: "Furosemide (Lasix)",           dose: "40mg",  route: "oral", frequency: "once daily in the morning", indication: "remove excess fluid from the body",               is_new: false, is_changed: true,  is_high_alert: false },
+    { name: "Spironolactone (Aldactone)",    dose: "25mg",  route: "oral", frequency: "once daily",                indication: "heart failure and fluid management",               is_new: true,  is_changed: false, is_high_alert: false },
+    { name: "Metoprolol succinate (Toprol XL)", dose: "50mg", route: "oral", frequency: "once daily",             indication: "slow the heart rate and reduce heart workload",    is_new: false, is_changed: false, is_high_alert: false },
+    { name: "Warfarin (Coumadin)",           dose: "5mg",   route: "oral", frequency: "once daily at 6pm",        indication: "prevent blood clots",                              is_new: false, is_changed: false, is_high_alert: true  },
+    { name: "Lisinopril (Zestril)",          dose: "10mg",  route: "oral", frequency: "once daily",               indication: "strengthen the heart and lower blood pressure",    is_new: false, is_changed: false, is_high_alert: false },
+  ],
+  warning_signs: [
+    { sign: "Weight gain of 2 or more pounds overnight, or 5 pounds in a week", action_label: "Call your doctor" },
+    { sign: "Sudden severe shortness of breath at rest",                          action_label: "Call 911 immediately" },
+    { sign: "Ankles or legs swelling more than before discharge",                 action_label: "Call your doctor" },
+    { sign: "Bleeding that won't stop, or coughing up blood",                    action_label: "Go to the emergency room" },
+  ],
+  follow_up: {
+    appointments: [
+      { provider: "Cardiology — Dr. Patel", timeframe: "7 days", reason: "CHF management and medication review" },
+      { provider: "Primary care physician",  timeframe: "3 days", reason: "blood pressure and kidney function check" },
+    ]
+  },
+  activity_restrictions: "No lifting over 10 lbs for 2 weeks. Rest when short of breath. Short walks are encouraged — stop if dizzy.",
+  diet_instructions: "Low-sodium diet — less than 2,000mg sodium per day. No added salt. Limit fluids to 2 liters per day.",
+  post_acute: { destination: "home", home_health: true, home_health_services: ["nursing", "weight monitoring"] }
+};
+
+const RESPONSE_OPTIONS = [
+  { key: "demonstrated",        label: "Demonstrated",        color: "#2D7A5E", bg: "#E8F5F0", icon: "✓" },
+  { key: "needs_reinforcement", label: "Needs reinforcement", color: "#C07B1A", bg: "#FEF3DC", icon: "↺" },
+  { key: "not_attempted",       label: "Not attempted",       color: "#7A7570", bg: "#F2F0EB", icon: "—" },
+];
+
+const PRIORITY_CONFIG = {
+  critical: { color: "#C04028", bg: "#FAECE7", label: "Required" },
+  high:     { color: "#C07B1A", bg: "#FEF3DC", label: "Important" },
+  standard: { color: "#2D7A5E", bg: "#E8F5F0", label: "Standard" },
+};
+
+const ICON_MAP = { pill: "💊", alert: "⚠️", heart: "🫀", calendar: "📅", leaf: "🥗" };
+
+const Pill = ({ text, color = "#2D7A5E", bg = "#E8F5F0" }) => (
+  <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", padding: "2px 8px", borderRadius: 3, background: bg, color }}>{text}</span>
+);
+
+const ProgressRing = ({ pct, size = 52, stroke = 4 }) => {
+  const r    = (size - stroke * 2) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = (pct / 100) * circ;
+  const color = pct === 100 ? "#2D7A5E" : pct >= 60 ? "#C07B1A" : "#C04028";
+  return (
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#EDE9E0" strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeLinecap="round" strokeDasharray={`${dash} ${circ}`}
+        style={{ transition: "stroke-dasharray .6s ease" }} />
+      <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central"
+        style={{ fill: color, fontSize: 12, fontWeight: 600,
+                 transform: "rotate(90deg)", transformOrigin: `${size/2}px ${size/2}px` }}>
+        {Math.round(pct)}%
+      </text>
+    </svg>
+  );
+};
+
+const QuestionCard = ({ q, idx, response, note, onResponse, onNote, expanded, onToggle }) => {
+  const resp = RESPONSE_OPTIONS.find(r => r.key === response);
+  const pc   = PRIORITY_CONFIG[q.priority] || PRIORITY_CONFIG.standard;
+  return (
+    <div style={{
+      background: response === "demonstrated" ? "#F4FAF7" : response === "needs_reinforcement" ? "#FEFBF3" : "#FAFAF4",
+      border: `1px solid ${response === "demonstrated" ? "#C8E8DC" : response === "needs_reinforcement" ? "#F0D99A" : "#E8E4DA"}`,
+      borderLeft: `4px solid ${resp ? resp.color : "#DDD9CE"}`,
+      borderRadius: 10, marginBottom: 12, overflow: "hidden", transition: "all .25s ease",
+    }}>
+      <div onClick={onToggle} style={{ padding: "13px 15px", display: "flex", alignItems: "flex-start", gap: 11, cursor: "pointer" }}>
+        <div style={{
+          width: 28, height: 28, borderRadius: "50%",
+          background: resp ? resp.bg : "#EDE9E0", color: resp ? resp.color : "#7A7570",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: resp ? 14 : 12, fontWeight: 700,
+          fontFamily: "'Source Code Pro',monospace", flexShrink: 0, marginTop: 1,
+        }}>{resp ? resp.icon : idx + 1}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: "'Source Code Pro',monospace", fontSize: 10, fontWeight: 600, color: "#7A7570", textTransform: "uppercase", letterSpacing: "0.08em" }}>{q.topic}</span>
+            {q.required && <Pill text="Required" color={pc.color} bg={pc.bg} />}
+            {q.is_high_alert && <Pill text="⚠ High alert" color="#C04028" bg="#FAECE7" />}
+          </div>
+          <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 14, color: "#1C1B19", lineHeight: 1.6, fontWeight: 500 }}>{q.question}</div>
+        </div>
+        <div style={{ color: "#ADA99D", fontSize: 14, flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▾</div>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: "0 15px 13px 54px" }}>
+          <div style={{ background: "#fff", border: "1px solid #E8E4DA", borderRadius: 7, padding: "9px 11px", marginBottom: 9 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Expected response</div>
+            <div style={{ fontSize: 13, color: "#3A3830", lineHeight: 1.65 }}>{q.expected_answer}</div>
+          </div>
+          {q.planner_tip && (
+            <div style={{ fontSize: 12, color: "#5A7A9A", lineHeight: 1.6, marginBottom: 9, display: "flex", gap: 6 }}>
+              <span style={{ flexShrink: 0 }}>💡</span>
+              <span><strong>Planner tip:</strong> {q.planner_tip}</span>
+            </div>
+          )}
+          {q.red_flag && response === "needs_reinforcement" && (
+            <div style={{ background: "#FEF0EE", border: "1px solid #F5C4B3", borderRadius: 6, padding: "7px 10px", marginBottom: 9, fontSize: 12, color: "#C04028" }}>
+              ⚠ <strong>Clinical risk:</strong> {q.red_flag}
+            </div>
+          )}
+          {q.follow_up_teaching && response === "needs_reinforcement" && (
+            <div style={{ background: "#FEF3DC", border: "1px solid #F0D99A", borderRadius: 6, padding: "7px 10px", marginBottom: 9, fontSize: 12, color: "#7A4F0A", lineHeight: 1.65 }}>
+              <strong>Reinforce:</strong> {q.follow_up_teaching}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, marginBottom: 9, flexWrap: "wrap" }}>
+            {RESPONSE_OPTIONS.map(opt => (
+              <button key={opt.key} onClick={() => onResponse(q.id, opt.key)} style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                border: `1.5px solid ${response === opt.key ? opt.color : "#DDD9CE"}`,
+                background: response === opt.key ? opt.bg : "transparent",
+                color: response === opt.key ? opt.color : "#9A9580",
+                cursor: "pointer", transition: "all .15s",
+                display: "flex", alignItems: "center", gap: 4,
+              }}><span>{opt.icon}</span> {opt.label}</button>
+            ))}
+          </div>
+          <textarea
+            placeholder="Add notes (patient response, teaching provided, barriers identified…)"
+            value={note || ""} onChange={e => onNote(q.id, e.target.value)} rows={2}
+            style={{
+              width: "100%", padding: "7px 9px", fontSize: 12,
+              border: "1px solid #DDD9CE", borderRadius: 6,
+              background: "#FAFAF4", color: "#1C1B19",
+              lineHeight: 1.6, resize: "vertical", boxSizing: "border-box",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+function TeachBackChecklist() {
+  const [ctx, setCtx] = useState({
+    patientInitials: "E.M.", mrn: "****4821", dob: "1951-08-14",
+    laceScore: "11", language: "English", diagnosis: "Heart failure — CHF",
+    medications: "Furosemide 40mg daily, Warfarin 5mg daily, Metoprolol 50mg daily, Lisinopril 10mg daily, Spironolactone 25mg daily (NEW)",
+    warningsSigns: "Weight gain 2+ lbs overnight, sudden shortness of breath, ankle swelling, bleeding",
+    followUp: "Cardiology within 7 days, PCP within 3 days",
+    activity: "No lifting >10 lbs, short walks OK",
+    diet: "Low sodium <2000mg, fluid restriction 2L/day",
+    destination: "home",
+  });
+  const [useDemoSummary, setUseDemoSummary] = useState(true);
+  const [questions,      setQuestions]      = useState(null);
+  const [patientSummary, setPatientSummary] = useState("");
+  const [responses,      setResponses]      = useState({});
+  const [notes,          setNotes]          = useState({});
+  const [expanded,       setExpanded]       = useState({});
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState(null);
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [attestation,    setAttestation]    = useState({ plannerName: "", date: new Date().toISOString().split("T")[0], signed: false });
+  const printRef = useRef();
+
+  const generate = async () => {
+    setLoading(true); setError(null); setResponses({}); setNotes({}); setExpanded({});
+    try {
+      const result = await callClaude(useDemoSummary ? DEMO_SUMMARY : {}, ctx);
+      setQuestions(result.categories);
+      setPatientSummary(result.patient_summary || "");
+      setActiveCategory(result.categories?.[0]?.id || null);
+      const exp = {};
+      result.categories?.forEach(cat => { if (cat.questions?.[0]) exp[cat.questions[0].id] = true; });
+      setExpanded(exp);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setResponse = (id, val) => setResponses(p => ({ ...p, [id]: val }));
+  const setNote     = (id, val) => setNotes(p => ({ ...p, [id]: val }));
+  const toggleExpand = id => setExpanded(p => ({ ...p, [id]: !p[id] }));
+
+  const allQ          = questions?.flatMap(c => c.questions) || [];
+  const requiredQ     = allQ.filter(q => q.required);
+  const answered      = allQ.filter(q => responses[q.id]);
+  const passed        = allQ.filter(q => responses[q.id] === "demonstrated");
+  const partial       = allQ.filter(q => responses[q.id] === "needs_reinforcement");
+  const requiredPassed  = requiredQ.filter(q => responses[q.id] === "demonstrated");
+  const requiredPartial = requiredQ.filter(q => responses[q.id] === "needs_reinforcement");
+  const completionPct = allQ.length ? Math.round((answered.length / allQ.length) * 100) : 0;
+  const canAttest     = requiredQ.length > 0 && requiredQ.every(q => responses[q.id]);
+  const lace          = parseInt(ctx.laceScore) || 0;
+
+  return (
+    <div style={{ fontFamily: "'Source Sans 3',sans-serif", background: "#F5F3EE", minHeight: "100vh", color: "#1C1B19" }}>
+
+      {/* Tool bar */}
+      <div style={{ background: "#1A2744", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 44, borderBottom: "3px solid #2D7A5E" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 13, fontWeight: 600, color: "#EFF4F8" }}>Teach-back Verification</span>
+          <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 3, background: "rgba(45,122,94,0.3)", color: "#6EE7B7", fontWeight: 700, letterSpacing: "0.08em" }}>LIVE TOOL</span>
+        </div>
+        {questions && (
+          <button onClick={() => window.print()} className="no-print" style={{
+            background: "transparent", color: "#9ABCCC", border: "1px solid #2D3F6A",
+            padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer",
+          }}>🖨 Print</button>
+        )}
+      </div>
+
+      <div style={{ display: "flex", minHeight: "calc(100vh - 96px)" }}>
+
+        {/* Left panel */}
+        <div style={{ width: 272, flexShrink: 0, background: "#EEEADE", borderRight: "1px solid #DDD9CE", padding: "18px 16px", overflowY: "auto" }} className="no-print">
+
+          <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 13, fontWeight: 600, color: "#1A2744", marginBottom: 11, paddingBottom: 8, borderBottom: "1px solid #DDD9CE" }}>Patient context</div>
+
+          {[
+            ["Initials",     "patientInitials", "text"],
+            ["MRN (last 4)", "mrn",             "text"],
+            ["LACE score",   "laceScore",       "number"],
+            ["Language",     "language",        "text"],
+            ["Destination",  "destination",     "text"],
+          ].map(([label, key, type]) => (
+            <div key={key} style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 10, fontWeight: 600, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 3 }}>{label}</label>
+              <input type={type} value={ctx[key]} onChange={e => setCtx(p => ({ ...p, [key]: e.target.value }))}
+                style={{ width: "100%", padding: "5px 8px", fontSize: 12, border: "1px solid #D5D0C6", borderRadius: 5, background: "#F5F3EE", color: "#1C1B19", fontFamily: "'Source Code Pro',monospace", boxSizing: "border-box" }}
+              />
+            </div>
+          ))}
+
+          {lace > 0 && (
+            <div style={{ background: lace >= 10 ? "#FAECE7" : lace >= 5 ? "#FEF3DC" : "#E8F5F0", border: `1px solid ${lace >= 10 ? "#F5C4B3" : lace >= 5 ? "#F0D99A" : "#C8E8DC"}`, borderRadius: 7, padding: "7px 10px", marginBottom: 13 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>LACE risk</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: lace >= 10 ? "#C04028" : lace >= 5 ? "#C07B1A" : "#2D7A5E", fontFamily: "'Source Code Pro',monospace" }}>
+                {lace} — {lace >= 10 ? "High" : lace >= 5 ? "Moderate" : "Low"}
+              </div>
+              {lace >= 10 && <div style={{ fontSize: 10, color: "#C04028", marginTop: 2 }}>All questions marked required</div>}
+            </div>
+          )}
+
+          <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 13, fontWeight: 600, color: "#1A2744", marginBottom: 9, marginTop: 2, paddingTop: 11, borderTop: "1px solid #DDD9CE" }}>Source data</div>
+
+          <div style={{ display: "flex", gap: 5, marginBottom: 11 }}>
+            {[true, false].map(v => (
+              <button key={String(v)} onClick={() => setUseDemoSummary(v)} style={{
+                flex: 1, padding: "5px", fontSize: 11, fontWeight: 500,
+                background: useDemoSummary === v ? "#1A2744" : "transparent",
+                color: useDemoSummary === v ? "#EFF4F8" : "#7A7570",
+                border: `1px solid ${useDemoSummary === v ? "#1A2744" : "#D5D0C6"}`,
+                borderRadius: 5, cursor: "pointer",
+              }}>{v ? "Demo CHF" : "Manual"}</button>
+            ))}
+          </div>
+
+          {!useDemoSummary && [
+            ["Medications", "medications",  3],
+            ["Warning signs","warningsSigns",2],
+            ["Follow-up",   "followUp",     2],
+            ["Activity",    "activity",     1],
+            ["Diet",        "diet",         1],
+          ].map(([label, key, rows]) => (
+            <div key={key} style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 10, fontWeight: 600, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 3 }}>{label}</label>
+              <textarea value={ctx[key]} onChange={e => setCtx(p => ({ ...p, [key]: e.target.value }))} rows={rows}
+                style={{ width: "100%", padding: "5px 8px", fontSize: 11, border: "1px solid #D5D0C6", borderRadius: 5, background: "#F5F3EE", color: "#1C1B19", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5 }}
+              />
+            </div>
+          ))}
+
+          <button onClick={generate} disabled={loading} style={{
+            width: "100%", padding: "10px", fontSize: 13, fontWeight: 600,
+            background: loading ? "#9A9580" : "#1A2744", color: "#EFF4F8",
+            border: "none", borderRadius: 7, cursor: loading ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+            marginTop: 2, transition: "all .2s",
+          }}>
+            {loading
+              ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span> Generating…</>
+              : "✦ Generate questions"}
+          </button>
+          {questions && (
+            <button onClick={generate} style={{ width: "100%", padding: "6px", fontSize: 11, background: "transparent", color: "#9A9580", border: "1px solid #D5D0C6", borderRadius: 5, cursor: "pointer", marginTop: 5 }}>↺ Regenerate</button>
+          )}
+          {error && (
+            <div style={{ marginTop: 7, background: "#FAECE7", border: "1px solid #F5C4B3", borderRadius: 6, padding: "7px 10px", fontSize: 11, color: "#C04028" }}>⚠ {error}</div>
+          )}
+        </div>
+
+        {/* Right panel */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px 40px" }} ref={printRef}>
+
+          {!questions && !loading && (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ width: 76, height: 76, borderRadius: "50%", background: "#EEEADE", margin: "0 auto 14px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>📋</div>
+              <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 17, fontWeight: 600, color: "#1A2744", marginBottom: 7 }}>Ready to generate teach-back questions</div>
+              <div style={{ fontSize: 13, color: "#7A7570", maxWidth: 370, margin: "0 auto", lineHeight: 1.7 }}>
+                Configure patient context on the left and click <strong>Generate questions</strong>. Claude will create patient-specific teach-back questions for every medication, warning sign, and follow-up topic.
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: 34, marginBottom: 12, animation: "spin 2s linear infinite", display: "inline-block" }}>⟳</div>
+              <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 15, fontWeight: 600, color: "#1A2744", marginBottom: 7 }}>Generating patient-specific questions…</div>
+              {["Analyzing medications for teach-back points…", "Building warning sign verification questions…", "Tailoring questions to patient's condition…"].map((t, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#9A9580", marginBottom: 4, animation: `shimmer 1.5s ease ${i * 0.4}s infinite` }}>{t}</div>
+              ))}
+            </div>
+          )}
+
+          {questions && (
+            <div style={{ animation: "fadeIn .4s ease" }}>
+
+              {/* Doc header */}
+              <div style={{ background: "#1A2744", borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                <div>
+                  <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 15, fontWeight: 600, color: "#EFF4F8", marginBottom: 3 }}>Teach-back Verification Record</div>
+                  <div style={{ fontSize: 11, color: "#6A8FAA" }}>Patient {ctx.patientInitials} · MRN {ctx.mrn} · {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>
+                  {patientSummary && <div style={{ fontSize: 11, color: "#9ABCCC", marginTop: 4, fontStyle: "italic" }}>{patientSummary}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <ProgressRing pct={completionPct} />
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6A8FAA", marginBottom: 2 }}>Completion</div>
+                    <div style={{ fontSize: 13, color: "#EFF4F8", fontWeight: 600 }}>{answered.length}/{allQ.length} addressed</div>
+                    <div style={{ fontSize: 11, color: "#6A8FAA" }}>{passed.length} passed · {partial.length} need reinforcement</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(90px,1fr))", gap: 7, marginBottom: 16 }}>
+                {[
+                  { label: "Total",    val: allQ.length,             color: "#1A2744" },
+                  { label: "Required", val: requiredQ.length,        color: "#C04028" },
+                  { label: "Passed",   val: passed.length,           color: "#2D7A5E" },
+                  { label: "Partial",  val: partial.length,          color: "#C07B1A" },
+                  { label: "Remaining",val: allQ.length - answered.length, color: "#7A7570" },
+                ].map((s, i) => (
+                  <div key={i} style={{ background: "#fff", border: "1px solid #E8E4DA", borderRadius: 8, padding: "9px 10px", textAlign: "center" }}>
+                    <div style={{ fontSize: 20, fontWeight: 600, color: s.color, fontFamily: "'Source Code Pro',monospace" }}>{s.val}</div>
+                    <div style={{ fontSize: 10, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 1 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {requiredQ.filter(q => !responses[q.id]).length > 0 && (
+                <div style={{ background: "#FEF0EE", border: "1px solid #F5C4B3", borderRadius: 8, padding: "9px 13px", marginBottom: 14, fontSize: 12, color: "#C04028" }}>
+                  <strong>⚠ {requiredQ.filter(q => !responses[q.id]).length} required item{requiredQ.filter(q => !responses[q.id]).length > 1 ? "s" : ""} not yet addressed.</strong>{" "}Complete before discharge attestation.
+                </div>
+              )}
+
+              {/* Category tabs */}
+              <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap" }} className="no-print">
+                {questions.map(cat => {
+                  const catPassed   = cat.questions.filter(q => responses[q.id] === "demonstrated").length;
+                  const catAnswered  = cat.questions.filter(q => responses[q.id]).length;
+                  const isActive = activeCategory === cat.id;
+                  return (
+                    <button key={cat.id} onClick={() => setActiveCategory(cat.id)} style={{
+                      padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500,
+                      background: isActive ? "#1A2744" : "#fff",
+                      color: isActive ? "#EFF4F8" : "#4A4740",
+                      border: `1px solid ${isActive ? "#1A2744" : "#DDD9CE"}`,
+                      cursor: "pointer", display: "flex", alignItems: "center", gap: 6, transition: "all .15s",
+                    }}>
+                      <span>{ICON_MAP[cat.icon] || "📋"}</span>
+                      <span>{cat.label}</span>
+                      <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 9, background: catAnswered === cat.questions.length && cat.questions.length > 0 ? "#2D7A5E" : isActive ? "#2D3F6A" : "#F0EDE8", color: catAnswered === cat.questions.length && cat.questions.length > 0 ? "#fff" : isActive ? "#9ABCCC" : "#9A9580", fontFamily: "'Source Code Pro',monospace" }}>
+                        {catPassed}/{cat.questions.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active category */}
+              {questions.map(cat => cat.id === activeCategory && (
+                <div key={cat.id}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>{ICON_MAP[cat.icon]}</span>
+                      <span style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 14, fontWeight: 600, color: "#1A2744" }}>{cat.label}</span>
+                      <Pill text={cat.priority === "critical" ? "High priority" : cat.priority} color={PRIORITY_CONFIG[cat.priority]?.color} bg={PRIORITY_CONFIG[cat.priority]?.bg} />
+                    </div>
+                    <button onClick={() => { const exp = {}; cat.questions.forEach(q => { exp[q.id] = true; }); setExpanded(p => ({ ...p, ...exp })); }} style={{ fontSize: 11, padding: "3px 9px", background: "transparent", border: "1px solid #D5D0C6", borderRadius: 5, cursor: "pointer", color: "#7A7570" }}>
+                      Expand all
+                    </button>
+                  </div>
+                  {cat.questions.map((q, idx) => (
+                    <QuestionCard key={q.id} q={q} idx={idx}
+                      response={responses[q.id]} note={notes[q.id]}
+                      onResponse={setResponse} onNote={setNote}
+                      expanded={!!expanded[q.id]} onToggle={() => toggleExpand(q.id)}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {/* Attestation */}
+              <div style={{ background: canAttest ? "#F4FAF7" : "#FAFAF4", border: `1px solid ${canAttest ? "#C8E8DC" : "#DDD9CE"}`, borderRadius: 10, padding: "16px 18px", marginTop: 18 }}>
+                <div style={{ fontFamily: "'Lora',Georgia,serif", fontSize: 14, fontWeight: 600, color: "#1A2744", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>📝</span> Planner attestation
+                  {!canAttest && <Pill text="Complete required items first" color="#C04028" bg="#FAECE7" />}
+                </div>
+                <div style={{ fontSize: 12, color: "#5A5550", lineHeight: 1.7, marginBottom: 12, fontStyle: "italic" }}>
+                  I certify that teach-back education was provided to this patient and/or their authorized representative for all items checked above. Patient demonstrated understanding of topics marked as demonstrated. Topics marked "needs reinforcement" received additional teaching. This record was completed in compliance with CMS discharge planning requirements and California CDPH standards.
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #E8E4DA", borderRadius: 7, padding: "9px 12px", marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, fontSize: 12 }}>
+                    <div><span style={{ color: "#9A9580" }}>Required items:</span> <strong style={{ color: "#C04028" }}>{requiredPassed.length}/{requiredQ.length} passed</strong></div>
+                    <div><span style={{ color: "#9A9580" }}>Need reinforcement:</span> <strong style={{ color: "#C07B1A" }}>{requiredPartial.length}</strong></div>
+                    <div><span style={{ color: "#9A9580" }}>Overall:</span> <strong>{answered.length}/{allQ.length}</strong></div>
+                    <div><span style={{ color: "#9A9580" }}>High-alert meds:</span> <strong>{allQ.filter(q => q.is_high_alert && responses[q.id] === "demonstrated").length} verified</strong></div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 11 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 3 }}>Planner name</label>
+                    <input value={attestation.plannerName} onChange={e => setAttestation(p => ({ ...p, plannerName: e.target.value }))} placeholder="Your full name and credentials"
+                      style={{ width: "100%", padding: "6px 9px", fontSize: 12, border: "1px solid #DDD9CE", borderRadius: 5, background: "#F5F3EE", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#9A9580", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 3 }}>Date</label>
+                    <input type="date" value={attestation.date} onChange={e => setAttestation(p => ({ ...p, date: e.target.value }))}
+                      style={{ width: "100%", padding: "6px 9px", fontSize: 12, border: "1px solid #DDD9CE", borderRadius: 5, background: "#F5F3EE", fontFamily: "'Source Code Pro',monospace", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <button
+                  disabled={!canAttest || !attestation.plannerName || attestation.signed}
+                  onClick={() => setAttestation(p => ({ ...p, signed: true }))}
+                  style={{
+                    width: "100%", padding: "11px", fontSize: 13, fontWeight: 600,
+                    background: attestation.signed ? "#2D7A5E" : canAttest && attestation.plannerName ? "#1A2744" : "#DDD9CE",
+                    color: attestation.signed || (canAttest && attestation.plannerName) ? "#fff" : "#9A9580",
+                    border: "none", borderRadius: 7,
+                    cursor: canAttest && attestation.plannerName && !attestation.signed ? "pointer" : "not-allowed",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 7, transition: "all .2s",
+                  }}>
+                  {attestation.signed
+                    ? `✓ Attested by ${attestation.plannerName} · ${attestation.date}`
+                    : "Sign & lock teach-back record"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<TeachBackChecklist />);
+</script>
+</body>
+</html>

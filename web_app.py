@@ -415,6 +415,80 @@ async def discharge_summary_generator_page(request: Request):
         return f.read()
 
 
+@app.get("/teachback-checklist", response_class=HTMLResponse)
+async def teachback_checklist_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "teachback-checklist.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/teachback/generate")
+async def generate_teachback(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    user_prompt = body.get("prompt", "")
+    if not user_prompt.strip():
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "Server not configured"}, status_code=500)
+
+    system_prompt = (
+        "You are a patient education specialist and teach-back methodology expert embedded in a "
+        "clinical discharge planning system. Your role is to generate highly specific, clinically "
+        "accurate teach-back questions for discharge planners to use with patients before discharge.\n\n"
+        "TEACH-BACK PRINCIPLES:\n"
+        "- Every question must be open-ended — never yes/no. Start with 'Show me...', 'Tell me...', "
+        "'What would you do if...', 'Walk me through...'\n"
+        "- Questions must be personalized to THIS patient's exact medications, diagnosis, and circumstances\n"
+        "- Include an 'expected answer' guide so the planner knows what a correct response looks like\n"
+        "- Flag questions that are REQUIRED vs optional based on clinical risk\n"
+        "- Order questions: medications first (highest risk), then warning signs, then diagnosis, "
+        "then follow-up, then lifestyle\n\n"
+        "NEVER generate generic questions like 'Do you understand your medications?' — these are "
+        "useless for teach-back.\n\n"
+        "GOOD example: 'Show me which pill you take every morning for your heart. Now tell me — "
+        "what would you do if you stepped on the scale and your weight was 4 pounds heavier than yesterday?'\n\n"
+        "BAD example: 'Do you know what to do if you gain weight?'\n\n"
+        "Return ONLY valid JSON — no prose, no markdown fences."
+    )
+
+    def _call_api():
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            temperature=0,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
+
+    loop = asyncio.get_event_loop()
+    try:
+        raw_text = await loop.run_in_executor(None, _call_api)
+    except anthropic.APIError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = clean.split("\n", 1)[-1]
+        if clean.endswith("```"):
+            clean = clean.rsplit("```", 1)[0]
+    clean = clean.strip()
+
+    try:
+        result = json.loads(clean)
+        return JSONResponse({"success": True, "result": result})
+    except json.JSONDecodeError:
+        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+
+
 @app.post("/api/discharge-summary/generate")
 async def generate_discharge_summary_v2(request: Request):
     if not get_current_user(request):
