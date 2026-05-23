@@ -41,6 +41,8 @@ class EHRConfig:
     # Override SMART discovery when endpoints are known at deploy time.
     auth_endpoint_override: Optional[str] = None
     token_endpoint_override: Optional[str] = None
+    # "v1" = no PKCE, no aud param (Epic sandbox is locked to SMART v1)
+    smart_version: str = "v2"
 
 
 def _epic_oauth_root(fhir_base: str) -> str:
@@ -70,6 +72,7 @@ def _build_registry() -> dict[str, EHRConfig]:
             client_secret=None,
             is_public_client=True,
             scopes=FHIR_SCOPES_PHASE1,
+            smart_version="v1",
             # Derive from URL pattern — avoids SMART discovery which Epic blocks
             # server-side. Override with EPIC_AUTH_ENDPOINT for non-standard instances.
             auth_endpoint_override=os.getenv(
