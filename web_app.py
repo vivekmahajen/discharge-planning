@@ -1167,7 +1167,7 @@ async def fhir_authorize(
         "redirect_uri": FHIR_REDIRECT_URI,
         "scope": " ".join(config.scopes),
         "state": state,
-        "aud": fhir_base,   # required by Epic regardless of SMART version
+        "aud": fhir_base,
     }
     if use_pkce:
         params["code_challenge"] = code_challenge
