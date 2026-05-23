@@ -1008,9 +1008,9 @@ async def fhir_debug_params(ehr: str = "epic"):
         "redirect_uri": FHIR_REDIRECT_URI,
         "scope": " ".join(config.scopes),
         "state": "DEBUG_TEST_STATE",
+        "aud": config.fhir_base_url,
     }
     if use_pkce:
-        params["aud"] = config.fhir_base_url
         params["code_challenge"] = "DEBUG_CHALLENGE"
         params["code_challenge_method"] = "S256"
     full_url = auth_endpoint + "?" + urlencode(params)
@@ -1167,9 +1167,9 @@ async def fhir_authorize(
         "redirect_uri": FHIR_REDIRECT_URI,
         "scope": " ".join(config.scopes),
         "state": state,
+        "aud": fhir_base,
     }
     if use_pkce:
-        params["aud"] = fhir_base
         params["code_challenge"] = code_challenge
         params["code_challenge_method"] = "S256"
     if launch:
