@@ -1161,11 +1161,15 @@ async def fhir_authorize(
         "user": user,
     }
 
+    scopes = list(config.scopes)
+    if launch:
+        scopes = ["launch/patient"] + scopes
+
     params: dict = {
         "response_type": "code",
         "client_id": config.client_id,
         "redirect_uri": FHIR_REDIRECT_URI,
-        "scope": " ".join(config.scopes),
+        "scope": " ".join(scopes),
         "state": state,
         "aud": fhir_base,
     }
