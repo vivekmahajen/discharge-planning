@@ -867,7 +867,6 @@ async def readmission_tracker_page(request: Request):
     with open(STATIC_DIR / "readmission-tracker.html", encoding="utf-8") as f:
         return f.read()
 
-
 @app.post("/api/roi/generate")
 @limiter.limit("30/hour")
 async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={}),
