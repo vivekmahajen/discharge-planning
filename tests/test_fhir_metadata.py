@@ -11,31 +11,26 @@ REQUIRED_RESOURCES = [
 ]
 
 
-@pytest.mark.anyio
 async def test_capability_statement_returns_200(client):
     resp = await client.get("/fhir/metadata")
     assert resp.status_code == 200
 
 
-@pytest.mark.anyio
 async def test_capability_statement_resource_type(client):
     data = (await client.get("/fhir/metadata")).json()
     assert data["resourceType"] == "CapabilityStatement"
 
 
-@pytest.mark.anyio
 async def test_capability_statement_fhir_version(client):
     data = (await client.get("/fhir/metadata")).json()
     assert data["fhirVersion"] == "4.0.1"
 
 
-@pytest.mark.anyio
 async def test_capability_statement_us_core_ig(client):
     data = (await client.get("/fhir/metadata")).json()
     assert any("us/core" in ig for ig in data.get("implementationGuide", []))
 
 
-@pytest.mark.anyio
 async def test_capability_statement_smart_security(client):
     data = (await client.get("/fhir/metadata")).json()
     security = data["rest"][0]["security"]
@@ -47,7 +42,6 @@ async def test_capability_statement_smart_security(client):
     assert "SMART-on-FHIR" in service_codes
 
 
-@pytest.mark.anyio
 async def test_capability_statement_has_required_resources(client):
     data = (await client.get("/fhir/metadata")).json()
     declared = {r["type"] for r in data["rest"][0]["resource"]}
@@ -55,7 +49,6 @@ async def test_capability_statement_has_required_resources(client):
     assert not missing, f"Missing US Core resources: {missing}"
 
 
-@pytest.mark.anyio
 async def test_capability_statement_patient_search_params(client):
     data = (await client.get("/fhir/metadata")).json()
     patient = next(r for r in data["rest"][0]["resource"] if r["type"] == "Patient")
@@ -64,7 +57,6 @@ async def test_capability_statement_patient_search_params(client):
     assert "identifier" in param_names
 
 
-@pytest.mark.anyio
 async def test_capability_statement_json_format(client):
     data = (await client.get("/fhir/metadata")).json()
     assert "application/fhir+json" in data["format"]
