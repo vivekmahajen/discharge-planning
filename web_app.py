@@ -18,24 +18,41 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from fhir.ehr_config import get_ehr_config, list_ehr_display
-from fhir.auth import (
-    FHIR_SESSION_COOKIE,
-    FHIR_SESSION_TTL,
-    FHIR_STATE_COOKIE,
-    FHIR_STATE_TTL,
-    decode_fhir_session_cookie,
-    decode_fhir_state_cookie,
-    discover_smart_endpoints,
-    encode_fhir_cookie,
-    exchange_code_for_token,
-    generate_pkce_pair,
-    generate_secure_state,
-    needs_refresh,
-    refresh_access_token,
-)
-from fhir.client import FHIRAuthError, FHIRClient, FHIRForbiddenError
-from fhir.normalizers import fhir_bundle_to_agent_data
+try:
+    from fhir.ehr_config import get_ehr_config, list_ehr_display
+    from fhir.auth import (
+        FHIR_SESSION_COOKIE,
+        FHIR_SESSION_TTL,
+        FHIR_STATE_COOKIE,
+        FHIR_STATE_TTL,
+        decode_fhir_session_cookie,
+        decode_fhir_state_cookie,
+        discover_smart_endpoints,
+        encode_fhir_cookie,
+        exchange_code_for_token,
+        generate_pkce_pair,
+        generate_secure_state,
+        needs_refresh,
+        refresh_access_token,
+    )
+    from fhir.client import FHIRAuthError, FHIRClient, FHIRForbiddenError
+    from fhir.normalizers import fhir_bundle_to_agent_data
+    _FHIR_IMPORT_ERROR: str | None = None
+except Exception as _e:
+    # Capture the exact error so /api/healthz and FHIR route handlers can report it.
+    # Define stubs so the route decorators below don't cause NameErrors at module load.
+    _FHIR_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+    get_ehr_config = list_ehr_display = None  # type: ignore[assignment]
+    FHIRClient = FHIRAuthError = FHIRForbiddenError = None  # type: ignore[assignment,misc]
+    fhir_bundle_to_agent_data = None  # type: ignore[assignment]
+    FHIR_SESSION_COOKIE = "fhir_session"
+    FHIR_SESSION_TTL = 28800
+    FHIR_STATE_COOKIE = "fhir_auth_state"
+    FHIR_STATE_TTL = 300
+    decode_fhir_session_cookie = decode_fhir_state_cookie = None  # type: ignore[assignment]
+    discover_smart_endpoints = encode_fhir_cookie = None  # type: ignore[assignment]
+    exchange_code_for_token = generate_pkce_pair = None  # type: ignore[assignment]
+    generate_secure_state = needs_refresh = refresh_access_token = None  # type: ignore[assignment]
 
 load_dotenv()
 
@@ -44,6 +61,19 @@ STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="Discharge Planning AI")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/api/healthz")
+async def healthz():
+    """Public diagnostic endpoint — shows registered routes and import status."""
+    routes = [r.path for r in app.routes if hasattr(r, "path")]
+    return {
+        "status": "ok",
+        "fhir_loaded": _FHIR_IMPORT_ERROR is None,
+        "fhir_import_error": _FHIR_IMPORT_ERROR,
+        "python_path": __import__("sys").path[:4],
+        "routes": sorted(routes),
+    }
 
 # Auth config
 SECRET_KEY = os.getenv("SECRET_KEY", "discharge-planning-dev-secret-change-in-prod")
@@ -986,10 +1016,22 @@ async def epic_callback_legacy(request: Request, code: str = None, state: str = 
 
 _fhir_audit_logger = logging.getLogger("fhir.audit")
 logging.basicConfig(level=logging.INFO)
+if _FHIR_IMPORT_ERROR:
+    _fhir_audit_logger.error("fhir package unavailable: %s", _FHIR_IMPORT_ERROR)
+
+
+def _fhir_unavailable():
+    """Return 503 with the exact import error when fhir package couldn't load."""
+    return JSONResponse(
+        {"error": "FHIR connector unavailable", "detail": _FHIR_IMPORT_ERROR},
+        status_code=503,
+    )
 
 
 @app.get("/api/fhir/ehrs")
 async def list_fhir_ehrs(request: Request):
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     return JSONResponse({"ehrs": list_ehr_display()})
@@ -1007,6 +1049,8 @@ async def fhir_authorize(
     Generates PKCE pair and secure state, stores them in a signed HttpOnly
     cookie, then redirects the browser to the EHR's authorization endpoint.
     """
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -1109,6 +1153,8 @@ async def fhir_callback(
     error: str = None,
 ):
     """OAuth callback — validates state, exchanges code for tokens, stores session cookie."""
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     if error:
         _fhir_audit_logger.warning("FHIR auth error from EHR: %s", error)
         return RedirectResponse(url=f"/?fhir_error={error}", status_code=302)
@@ -1248,6 +1294,8 @@ def _apply_refreshed_cookie(response, new_cookie: str | None) -> None:
 @app.get("/api/fhir/session")
 async def fhir_session_status(request: Request):
     """Return current FHIR session state (no PHI — only EHR name and patient context ID)."""
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -1272,6 +1320,8 @@ async def get_fhir_patient_bundle(request: Request, patient_id: str):
 
     Data is fetched fresh from the EHR on every request — never cached to disk.
     """
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -1343,6 +1393,8 @@ async def generate_plan_from_fhir(request: Request, patient_id: str):
     situation, etc.) that are not available from Phase 1 FHIR resources.
     These are merged with the FHIR-derived data before plan generation.
     """
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
