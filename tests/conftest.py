@@ -1,7 +1,7 @@
 """Shared pytest fixtures for Discharge Planning AI test suite."""
 import json
 import os
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -34,7 +34,7 @@ MOCK_SUMMARY_JSON = json.dumps({
 
 @pytest.fixture(autouse=True)
 def reset_rate_limiter():
-    """Reset in-memory rate limit counters before each test for isolation."""
+    """Reset in-memory rate limit counters and lockout state before each test."""
     import web_app
     for attr in ("_storage", "_limiter"):
         try:
@@ -45,6 +45,9 @@ def reset_rate_limiter():
             getattr(getattr(web_app.limiter, attr, None), "_storage", None).reset()
         except Exception:
             pass
+    web_app._login_failures.clear()
+    web_app._login_lockouts.clear()
+    web_app._global_ai_counters.clear()
 
 
 @pytest.fixture
