@@ -11,9 +11,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Phase 1 read-only scopes — applied to Epic and Cerner (public clients).
+# Phase 1 read-only scopes for standalone (patient-facing) launch.
+# Excludes launch/patient (EHR-embedded only) and offline_access (requires
+# special app-level approval in Epic) to work with standard app registrations.
 FHIR_SCOPES_PHASE1 = [
-    "launch/patient",
     "patient/Patient.read",
     "patient/Condition.read",
     "patient/MedicationRequest.read",
@@ -23,11 +24,10 @@ FHIR_SCOPES_PHASE1 = [
     "patient/DocumentReference.read",
     "openid",
     "fhirUser",
-    "offline_access",
 ]
 
-# athenahealth does not use launch/patient in its scope list.
-FHIR_SCOPES_ATHENA = [s for s in FHIR_SCOPES_PHASE1 if s != "launch/patient"]
+# athenahealth uses the same standalone scope set.
+FHIR_SCOPES_ATHENA = FHIR_SCOPES_PHASE1[:]
 
 
 @dataclass
