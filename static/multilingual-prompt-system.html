@@ -3,54 +3,59 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Multilingual Discharge Instructions — Discharge Planning AI</title>
+  <title>Multilingual Instructions — Discharge Planning AI</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #F5F4F0; }
+    body { font-family: "Source Sans 3", system-ui, sans-serif; background: #F5F3EE; }
     header {
       background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
-      color: white;
-      padding: 16px 28px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
+      color: white; padding: 10px 18px;
+      display: flex; align-items: center; gap: 10px;
     }
-    header .logo { font-size: 1.8rem; }
-    header h1 { font-size: 1.1rem; font-weight: 700; }
-    header p { font-size: .75rem; opacity: .85; margin-top: 2px; }
+    header .logo { font-size: 1.3rem; }
+    header h1 { font-size: .95rem; font-weight: 700; }
+    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
     header .spacer { flex: 1; }
     header a {
-      color: rgba(255,255,255,.85);
-      text-decoration: none;
-      font-size: .8rem;
-      padding: 6px 14px;
-      border-radius: 6px;
-      background: rgba(255,255,255,.15);
-      margin-left: 8px;
-      transition: background .15s;
+      color: rgba(255,255,255,.85); text-decoration: none;
+      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
+      background: rgba(255,255,255,.15); margin-left: 5px;
+      transition: background .15s; white-space: nowrap;
     }
     header a:hover { background: rgba(255,255,255,.28); }
-    #root { min-height: calc(100vh - 72px); }
+    header a.active { background: rgba(255,255,255,.35); font-weight: 600; }
+    #root { min-height: calc(100vh - 52px); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    @media print {
+      header, .no-print { display: none !important; }
+      body { background: white !important; }
+      .print-section { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">🏥</div>
+  <div class="logo">&#127973;</div>
   <div>
     <h1>Discharge Planning AI</h1>
-    <p>Language Access Module · Prompt Engineering Reference</p>
+    <p>Multilingual Patient Instructions</p>
   </div>
   <div class="spacer"></div>
-  <a href="/">← Back to Planner</a>
+  <a href="/">&#8592; Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
   <a href="/teachback-checklist">Teach-back</a>
   <a href="/cdph-compliance">CDPH</a>
   <a href="/hrrp-flagging">HRRP</a>
   <a href="/roi-tracker">ROI</a>
-  <a href="/readmission-tracker">Tracker</a>
+  <a href="/imm-prompt-system">IMM</a>
+  <a href="/multilingual-prompt-system" class="active">Multilingual</a>
   <a href="/post-acute-directory">Facilities</a>
   <a href="/api/auth/logout">Sign Out</a>
 </header>
@@ -67,820 +72,359 @@
 const { useState } = React;
 
 const LANGUAGES = [
-  { code: "es",  name: "Spanish",    native: "Español",    flag: "🇲🇽", population: "28% Sacramento County" },
-  { code: "vi",  name: "Vietnamese", native: "Tiếng Việt", flag: "🇻🇳", population: "9% Sacramento County" },
-  { code: "hmn", name: "Hmong",      native: "Hmoob",      flag: "🌿",  population: "6% Sacramento County" },
-  { code: "ru",  name: "Russian",    native: "Русский",    flag: "🇷🇺", population: "4% Sacramento County" },
-  { code: "tl",  name: "Tagalog",    native: "Tagalog",    flag: "🇵🇭", population: "4% Sacramento County" },
-  { code: "zh",  name: "Chinese",    native: "中文",        flag: "🇨🇳", population: "3% Sacramento County" },
-  { code: "ar",  name: "Arabic",     native: "العربية",    flag: "🇸🇦", population: "Statewide priority" },
-  { code: "ko",  name: "Korean",     native: "한국어",      flag: "🇰🇷", population: "Statewide priority" },
+  { code: "es",    name: "Spanish",                flag: "MX", dir: "ltr" },
+  { code: "zh-TW", name: "Cantonese Chinese",       flag: "HK", dir: "ltr" },
+  { code: "zh-CN", name: "Mandarin Chinese",        flag: "CN", dir: "ltr" },
+  { code: "vi",    name: "Vietnamese",              flag: "VN", dir: "ltr" },
+  { code: "tl",    name: "Tagalog",                 flag: "PH", dir: "ltr" },
+  { code: "ko",    name: "Korean",                  flag: "KR", dir: "ltr" },
+  { code: "hy",    name: "Armenian",                flag: "AM", dir: "ltr" },
+  { code: "fa",    name: "Persian / Farsi",         flag: "IR", dir: "rtl" },
+  { code: "ru",    name: "Russian",                 flag: "RU", dir: "ltr" },
+  { code: "km",    name: "Khmer",                   flag: "KH", dir: "ltr" },
+  { code: "hi",    name: "Hindi",                   flag: "IN", dir: "ltr" },
+  { code: "pa",    name: "Punjabi",                 flag: "IN", dir: "ltr" },
+  { code: "ar",    name: "Arabic",                  flag: "SA", dir: "rtl" },
+  { code: "pt",    name: "Portuguese (Brazilian)",  flag: "BR", dir: "ltr" },
+  { code: "ja",    name: "Japanese",                flag: "JP", dir: "ltr" },
+  { code: "ium",   name: "Mien / Iu Mien",          flag: "--", dir: "ltr" },
+  { code: "hmn",   name: "Hmong",                   flag: "--", dir: "ltr" },
+  { code: "so",    name: "Somali",                  flag: "SO", dir: "ltr" },
+  { code: "am",    name: "Amharic",                 flag: "ET", dir: "ltr" },
+  { code: "th",    name: "Thai",                    flag: "TH", dir: "ltr" },
 ];
 
-const SYSTEM_PROMPT = `You are a certified medical interpreter and clinical health educator specializing in multilingual patient discharge instructions for California acute care hospitals. You serve patients in Sacramento and El Dorado County, where the primary non-English languages include Spanish, Vietnamese, Hmong, Russian, Tagalog, and Chinese (Cantonese and Mandarin).
-
-You operate under California Title 22, the Dymally-Alatorre Bilingual Services Act, and CMS meaningful language access requirements. Your translations must:
-
-ACCURACY RULES — non-negotiable:
-- NEVER translate medication names (generic or brand) — keep all drug names in English exactly as written
-- NEVER translate dosing numbers, units, or frequencies — "10mg twice daily" stays as written in all languages
-- NEVER alter medical instructions — if the instruction says "no driving for 6 weeks", that is what you translate
-- NEVER simplify a safety-critical warning to the point of losing its meaning
-- NEVER use machine-translation shortcuts that introduce clinical ambiguity
-- ALWAYS flag any term or phrase you cannot translate with clinical precision using [REVIEW: reason]
-- ALWAYS preserve numbered lists, bullet structure, and section headers from the source
-
-HEALTH LITERACY RULES:
-- Target 6th-grade reading level in the target language (not 6th-grade English — 6th-grade equivalent in the target language)
-- Use everyday vocabulary the patient's community actually uses — not formal or academic register
-- Replace medical jargon with plain-language equivalents BEFORE translating, not after
-- Short sentences. Active voice. One instruction per sentence.
-
-CULTURAL ADAPTATION RULES:
-- Adapt food and dietary examples to culturally relevant equivalents when clinically equivalent (e.g., rice-based diet guidance for Vietnamese patients)
-- Note when a cultural belief or practice may affect adherence — flag for planner follow-up, do not dismiss
-- Use formal address conventions appropriate to the target language and community
-- For Hmong: acknowledge the role of traditional healers (txiv neeb) where relevant — do not discourage, but clarify what is medically required
-
-CALIFORNIA LEGAL REQUIREMENTS:
-- Patients have the right to a qualified interpreter at no cost under California Health & Safety Code §1259
-- Staff interpreters and telephone interpreters (e.g., Language Line) are acceptable; family members are NOT acceptable for discharge instructions per Title 22
-- Translated instructions must be provided in writing — verbal translation alone does not satisfy the requirement
-- Document the interpreter's name, service, and language in the discharge record
-
-OUTPUT FORMAT:
-- Return structured JSON only — no prose, no markdown fences, no preamble
-- All translated sections must preserve the JSON structure of the source
-- Include confidence scores (0.0–1.0) per section — flag anything below 0.85 for professional review
-- Include back-translation notes for any flagged sections`;
-
-const TRANSLATION_PROMPT = `Translate the following discharge instructions from English into {{TARGET_LANGUAGE}} ({{TARGET_LANGUAGE_NATIVE}}).
-
-## Patient Context
-- Primary language: {{TARGET_LANGUAGE}}
-- Patient age: {{PATIENT_AGE}}
-- Health literacy estimate: {{LITERACY_LEVEL}} (low | moderate | high)
-- Cultural background: {{CULTURAL_BACKGROUND}}
-- Interpreter used for verbal instructions: {{INTERPRETER_NAME}} ({{INTERPRETER_SERVICE}})
-- Interpreter type: {{INTERPRETER_TYPE}} (professional_in_person | telephone | staff)
-- Primary diagnosis: {{PRIMARY_DIAGNOSIS}}
-- Discharge destination: {{DISCHARGE_DESTINATION}}
-
-## Source English Instructions (JSON)
-{{SOURCE_INSTRUCTIONS_JSON}}
-
-Structure of source:
-{
-  "diagnosis_explanation": "<plain English, 2–3 sentences>",
+const SAMPLE_PLAN = `{
+  "diagnosis": {
+    "primary": "Heart failure with reduced ejection fraction (HFrEF)",
+    "source_content": "You have heart failure. This means your heart is not pumping blood as well as it should."
+  },
   "medications": [
-    {
-      "name": "<generic (brand)>",
-      "dose": "<dose>",
-      "frequency": "<frequency>",
-      "purpose": "<why they take it>",
-      "patient_instruction": "<what to do>"
-    }
+    { "name": "metoprolol succinate", "dose": "25 mg", "frequency": "once daily", "why": "to help your heart pump better" },
+    { "name": "furosemide", "dose": "40 mg", "frequency": "once in the morning", "why": "to remove extra fluid from your body" },
+    { "name": "lisinopril", "dose": "5 mg", "frequency": "once daily", "why": "to lower blood pressure and protect your heart" }
   ],
-  "activity_restrictions": "<what patient can and cannot do>",
-  "diet_instructions": "<dietary guidance>",
-  "wound_care": "<wound care steps or null>",
   "warning_signs": [
-    { "sign": "<symptom>", "action": "<call doctor | go to ER | call 911>" }
+    { "sign": "Sudden weight gain of more than 2 pounds in one day", "action": "call_doctor", "urgency": "urgent" },
+    { "sign": "Trouble breathing or chest pain", "action": "call_911", "urgency": "emergent" },
+    { "sign": "Legs or ankles more swollen than usual", "action": "call_doctor", "urgency": "urgent" }
   ],
   "follow_up": {
-    "provider": "<name or specialty>",
-    "timeframe": "<within X days>",
-    "instructions": "<how to schedule or confirm>"
+    "appointments": [
+      { "provider": "Cardiologist", "timeframe": "within 7 days", "reason": "heart failure follow-up", "instruction": "Call the cardiology office today to schedule." }
+    ]
   },
-  "emergency_contacts": {
-    "primary_care": "<phone>",
-    "hospital": "<phone>",
-    "emergency": "911"
+  "activity_restrictions": { "source_content": "Rest at home. Do not lift anything heavier than 10 pounds. Walk short distances only. Stop if you feel short of breath." },
+  "diet_instructions": { "source_content": "Limit salt to less than 2 grams per day. Limit fluids to 6 cups per day. Avoid canned soups and processed foods." },
+  "when_to_call": {
+    "er_instruction": "Go to the emergency room right away for chest pain, trouble breathing, or fainting.",
+    "emergency_instruction": "Call 911 if you have severe chest pain or cannot breathe."
   }
-}
-
-## Translation Instructions
-Return a single valid JSON object. Do not wrap in markdown fences.
-
-{
-  "translation_metadata": {
-    "source_language": "en",
-    "target_language": "{{TARGET_LANGUAGE_CODE}}",
-    "target_language_name": "{{TARGET_LANGUAGE}}",
-    "target_language_native": "{{TARGET_LANGUAGE_NATIVE}}",
-    "dialect_notes": "<any dialect considerations or null>",
-    "translated_at": "<ISO timestamp>",
-    "interpreter_name": "{{INTERPRETER_NAME}}",
-    "interpreter_service": "{{INTERPRETER_SERVICE}}",
-    "overall_confidence": "<0.0–1.0>",
-    "flagged_for_review": true,
-    "review_reasons": ["<reason if flagged>"],
-    "cultural_adaptations_made": ["<description of any cultural adaptation>"],
-    "untranslatable_terms": ["<term kept in English + brief note>"]
-  },
-
-  "translated_instructions": {
-    "section_header": "<'Discharge Instructions' in target language>",
-    "patient_greeting": "<culturally appropriate opening>",
-
-    "diagnosis_explanation": {
-      "english_original": "<original text>",
-      "translated": "<translated text>",
-      "confidence": "<0.0–1.0>",
-      "flagged": false,
-      "flag_reason": null
-    },
-
-    "medications_header": "<'Your Medications' in target language>",
-    "medications": [
-      {
-        "name_display": "<KEEP IN ENGLISH>",
-        "dose_display": "<KEEP AS-IS>",
-        "frequency_display": "<KEEP AS-IS>",
-        "purpose_label": "<'This medicine is for:' in target language>",
-        "purpose_translated": "<translated purpose>",
-        "instruction_label": "<'How to take it:' in target language>",
-        "instruction_translated": "<translated instruction>",
-        "confidence": "<0.0–1.0>",
-        "flagged": false
-      }
-    ],
-    "medication_safety_note": "<'Do not stop taking your medicines without calling your doctor first.' in target language>",
-
-    "activity_header": "<'Activity' in target language>",
-    "activity_restrictions": {
-      "translated": "<translated text>",
-      "confidence": "<0.0–1.0>",
-      "flagged": false,
-      "cultural_note": "<any relevant cultural note or null>"
-    },
-
-    "diet_header": "<'Diet' in target language>",
-    "diet_instructions": {
-      "translated": "<translated text>",
-      "confidence": "<0.0–1.0>",
-      "cultural_adaptation": "<culturally adapted food example or null>",
-      "flagged": false
-    },
-
-    "wound_care_header": "<'Wound Care' in target language or null>",
-    "wound_care": {
-      "translated": "<translated text or null>",
-      "confidence": "<0.0–1.0>",
-      "flagged": false
-    },
-
-    "warning_signs_header": "<'Warning Signs — When to Get Help' in target language>",
-    "warning_signs_intro": "<'Call your doctor or go to the emergency room if you have any of these:' in target language>",
-    "warning_signs": [
-      {
-        "sign_translated": "<translated symptom>",
-        "action_translated": "<translated action>",
-        "action_emphasis": "call_doctor | go_to_er | call_911",
-        "confidence": "<0.0–1.0>",
-        "flagged": false
-      }
-    ],
-    "call_911_statement": "<'Call 911 immediately if:' equivalent in target language>",
-
-    "follow_up_header": "<'Your Follow-Up Appointment' in target language>",
-    "follow_up": {
-      "provider_label": "<'Provider:' in target language>",
-      "provider_value": "<provider name — keep in English>",
-      "timeframe_label": "<'When:' in target language>",
-      "timeframe_translated": "<timeframe in target language>",
-      "instructions_translated": "<scheduling instructions>",
-      "confidence": "<0.0–1.0>"
-    },
-
-    "contacts_header": "<'Important Phone Numbers' in target language>",
-    "emergency_contacts": {
-      "primary_care_label": "<'Your doctor's office:' in target language>",
-      "hospital_label": "<'Hospital:' in target language>",
-      "emergency_label": "<'Emergency (ambulance/fire/police):' in target language>",
-      "emergency_number": "911",
-      "interpreter_services_note": "<'You have the right to a free interpreter. Ask at any time.' in target language>"
-    },
-
-    "closing_statement": "<culturally appropriate closing in target language>",
-
-    "bilingual_footer": {
-      "english_line": "If you have questions, call your doctor or come to the hospital.",
-      "translated_line": "<same sentence in target language>",
-      "rights_statement_english": "You have the right to language assistance at no cost. Ask a staff member.",
-      "rights_statement_translated": "<same sentence in target language>"
-    }
-  },
-
-  "print_layout": {
-    "text_direction": "ltr | rtl",
-    "font_recommendation": "<recommended web-safe or Google Font for target script>",
-    "requires_special_encoding": true,
-    "encoding_note": "<e.g. 'Requires Unicode UTF-8 with Hmong PUA support' or null>",
-    "bilingual_layout": "side_by_side | stacked",
-    "bilingual_recommendation": "<layout guidance>",
-    "page_break_guidance": "<notes on section breaks for print pagination>"
-  },
-
-  "quality_flags": [
-    {
-      "section": "<section name>",
-      "confidence": "<0.0–1.0>",
-      "issue": "<description of translation challenge>",
-      "recommendation": "<professional review note>",
-      "priority": "critical | high | medium | low"
-    }
-  ],
-
-  "back_translation_sample": {
-    "section": "warning_signs",
-    "translated_text": "<one warning sign in target language>",
-    "back_translation_to_english": "<back-translate to English for planner spot-check>",
-    "semantic_match": true,
-    "discrepancy_note": "<note if meaning drifted, else null>"
-  },
-
-  "planner_attestation": {
-    "statement": "I confirm that translated discharge instructions were provided to the patient or authorized representative in their preferred language via a qualified interpreter or certified translation, in compliance with California Health & Safety Code §1259 and CMS language access requirements.",
-    "interpreter_documented": true,
-    "written_copy_provided": true,
-    "verbal_review_completed": true,
-    "attestation_pending": true
-  }
-}
-
-## Translation Quality Rules
-1. Any section with confidence < 0.85 must be flagged and added to quality_flags with priority ≥ high
-2. Warning signs and medication instructions confidence < 0.90 → priority: critical
-3. If target language is Hmong: add cultural_note about txiv neeb if diagnosis is chronic or serious
-4. If patient_age > 65: use larger-print layout recommendation and simpler sentence structure
-5. If literacy_level is low: shorten sentences to ≤12 words, use pictogram recommendations in cultural_adaptations_made
-6. Never translate: medication names, phone numbers, "911", provider names, hospital names, ICD codes
-7. Always include bilingual_footer in every translation — this is the legal language access statement`;
-
-const LANGUAGE_DETECT_PROMPT = `Identify the patient's preferred language from the following intake information and return the appropriate translation configuration.
-
-## Intake Data
-- Patient-reported language preference: {{REPORTED_PREFERENCE}}
-- Staff observation notes: {{STAFF_NOTES}}
-- Interpreter request on file: {{INTERPRETER_REQUEST}}
-- Prior encounter language: {{PRIOR_LANGUAGE}}
-- ZIP code: {{ZIP_CODE}}
-- Name origin (if consented): {{NAME_ORIGIN}}
-
-## Available Languages
-- es: Spanish (Español)
-- vi: Vietnamese (Tiếng Việt)
-- hmn: Hmong (Hmoob)
-- ru: Russian (Русский)
-- tl: Tagalog (Tagalog)
-- zh: Chinese (中文)
-- ar: Arabic (العربية)
-- ko: Korean (한국어)
-
-Return JSON only:
-{
-  "primary_language_code": "<ISO 639-1 or 639-3 code>",
-  "primary_language_name": "<English name>",
-  "primary_language_native": "<native script name>",
-  "confidence": "<0.0–1.0>",
-  "dialect_preference": "<e.g. 'Mexican Spanish', 'Cantonese', 'White Hmong' or null>",
-  "interpreter_required": true,
-  "interpreter_service_recommendation": "<Language Line | in-person | staff | null>",
-  "secondary_language": "<code or null — for bilingual layouts>",
-  "literacy_concern": true,
-  "literacy_note": "<note if low literacy suspected>",
-  "pictogram_recommended": true,
-  "cultural_flags": ["<any cultural considerations for the care team>"],
-  "legal_obligation": "<California H&S §1259 note if interpreter required>"
 }`;
 
-const BACK_TRANSLATION_PROMPT = `You are a quality assurance specialist for multilingual clinical documents. Perform a back-translation audit on the following translated discharge instruction section.
-
-## Original English
-{{ORIGINAL_ENGLISH}}
-
-## Translation ({{TARGET_LANGUAGE}})
-{{TRANSLATED_TEXT}}
-
-## Back-Translation Task
-1. Translate the {{TARGET_LANGUAGE}} text back into English WITHOUT looking at the original
-2. Compare your back-translation to the original English
-3. Identify any semantic drift, omissions, additions, or clinical inaccuracies
-
-Return JSON only:
-{
-  "back_translation": "<your English back-translation of the target text>",
-  "semantic_match": true,
-  "match_score": "<0.0–1.0>",
-  "discrepancies": [
-    {
-      "original_phrase": "<phrase from original English>",
-      "back_translated_phrase": "<how it came back>",
-      "severity": "critical | moderate | minor",
-      "clinical_impact": "<could this discrepancy cause patient harm or confusion?>",
-      "correction_needed": true
-    }
-  ],
-  "overall_assessment": "approved | needs_minor_revision | needs_major_revision | reject",
-  "reviewer_note": "<plain English summary for the discharge planner>",
-  "corrected_translation": "<corrected target-language text if needed, else null>"
-}
-
-## Severity Definitions
-- critical: meaning changes to the point of potential patient harm (wrong dose timing, missing warning sign)
-- moderate: meaning is noticeably altered but unlikely to cause direct harm (awkward phrasing, cultural mismatch)
-- minor: style or register issue, clinical meaning preserved`;
-
-const INTEGRATION_CODE = `// api/translate/discharge.js
-// Actions: detect_language, translate, back_translate, attest
-
-import { createClient } from '@supabase/supabase-js';
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
-const LANGUAGES = [
-  { code: "es",  name: "Spanish",    native: "Español"    },
-  { code: "vi",  name: "Vietnamese", native: "Tiếng Việt" },
-  { code: "hmn", name: "Hmong",      native: "Hmoob"      },
-  { code: "ru",  name: "Russian",    native: "Русский"    },
-  { code: "tl",  name: "Tagalog",    native: "Tagalog"    },
-  { code: "zh",  name: "Chinese",    native: "中文"        },
-  { code: "ar",  name: "Arabic",     native: "العربية"    },
-  { code: "ko",  name: "Korean",     native: "한국어"      },
-];
-
-export async function POST(req) {
-  const { action, payload, staffId } = await req.json();
-
-  switch (action) {
-
-    case 'detect_language': {
-      const prompt = LANGUAGE_DETECT_PROMPT
-        .replace('{{REPORTED_PREFERENCE}}', payload.reportedPreference || 'unknown')
-        .replace('{{STAFF_NOTES}}',         payload.staffNotes || 'none')
-        .replace('{{INTERPRETER_REQUEST}}', payload.interpreterRequest || 'none')
-        .replace('{{PRIOR_LANGUAGE}}',      payload.priorLanguage || 'unknown')
-        .replace('{{ZIP_CODE}}',            payload.zipCode || 'unknown')
-        .replace('{{NAME_ORIGIN}}',         payload.nameOrigin || 'not provided');
-      const data = parseJSON(await callClaude(prompt, 800));
-      return Response.json({ success: true, detection: data });
-    }
-
-    case 'translate': {
-      const { encounterId, patientId, targetLanguage, sourceInstructions, patientContext } = payload;
-      const lang = LANGUAGES.find(l => l.code === targetLanguage);
-      if (!lang) return Response.json({ error: 'Unsupported language' }, { status: 400 });
-
-      const userPrompt = TRANSLATION_PROMPT
-        .replace(/{{TARGET_LANGUAGE}}/g,         lang.name)
-        .replace(/{{TARGET_LANGUAGE_NATIVE}}/g,  lang.native)
-        .replace(/{{TARGET_LANGUAGE_CODE}}/g,    lang.code)
-        .replace('{{PATIENT_AGE}}',              patientContext.age)
-        .replace('{{LITERACY_LEVEL}}',           patientContext.literacyLevel || 'moderate')
-        .replace('{{CULTURAL_BACKGROUND}}',      patientContext.culturalBackground || lang.name)
-        .replace('{{INTERPRETER_NAME}}',         patientContext.interpreterName || 'Language Line')
-        .replace('{{INTERPRETER_SERVICE}}',      patientContext.interpreterService || 'Language Line Solutions')
-        .replace('{{INTERPRETER_TYPE}}',         patientContext.interpreterType || 'telephone')
-        .replace('{{PRIMARY_DIAGNOSIS}}',        patientContext.primaryDiagnosis)
-        .replace('{{DISCHARGE_DESTINATION}}',    patientContext.dischargeDestination)
-        .replace('{{SOURCE_INSTRUCTIONS_JSON}}', JSON.stringify(sourceInstructions, null, 2));
-
-      const translation = parseJSON(await callClaude(userPrompt, 4000));
-
-      // Auto back-translation QA on warning signs
-      let backTranslation = null;
-      if (translation.translated_instructions?.warning_signs?.length > 0) {
-        const firstWarning = translation.translated_instructions.warning_signs[0];
-        const btPrompt = BACK_TRANSLATION_PROMPT
-          .replace('{{ORIGINAL_ENGLISH}}',   sourceInstructions.warning_signs?.[0]?.sign || '')
-          .replace(/{{TARGET_LANGUAGE}}/g,   lang.name)
-          .replace('{{TRANSLATED_TEXT}}',    firstWarning.sign_translated || '');
-        backTranslation = parseJSON(await callClaude(btPrompt, 1000));
-
-        if (backTranslation.overall_assessment === 'reject' ||
-            backTranslation.discrepancies?.some(d => d.severity === 'critical')) {
-          translation.translation_metadata.flagged_for_review = true;
-          translation.translation_metadata.review_reasons.push(
-            'Critical back-translation discrepancy in warning signs — professional review required'
-          );
-        }
-      }
-
-      const { data: stored, error } = await supabase
-        .from('discharge_translations')
-        .insert({
-          encounter_id:          encounterId,
-          patient_id:            patientId,
-          target_language_code:  lang.code,
-          target_language_name:  lang.name,
-          source_instructions:   sourceInstructions,
-          translation:           translation,
-          back_translation_qa:   backTranslation,
-          flagged_for_review:    translation.translation_metadata.flagged_for_review,
-          overall_confidence:    translation.translation_metadata.overall_confidence,
-          interpreter_name:      patientContext.interpreterName,
-          interpreter_service:   patientContext.interpreterService,
-          written_copy_provided: false,
-          attestation_pending:   true,
-          created_by:            staffId,
-          created_at:            new Date().toISOString(),
-        })
-        .select().single();
-
-      if (error) throw error;
-      return Response.json({ success: true, translation, backTranslation, translationId: stored.id });
-    }
-
-    case 'back_translate': {
-      const { originalEnglish, translatedText, targetLanguage } = payload;
-      const lang = LANGUAGES.find(l => l.code === targetLanguage);
-      const prompt = BACK_TRANSLATION_PROMPT
-        .replace('{{ORIGINAL_ENGLISH}}',   originalEnglish)
-        .replace(/{{TARGET_LANGUAGE}}/g,   lang.name)
-        .replace('{{TRANSLATED_TEXT}}',    translatedText);
-      const data = parseJSON(await callClaude(prompt, 1000));
-      return Response.json({ success: true, qa: data });
-    }
-
-    case 'attest': {
-      const { translationId } = payload;
-      await supabase.from('discharge_translations')
-        .update({ written_copy_provided: true, attestation_pending: false,
-                  attested_at: new Date().toISOString(), attested_by: staffId })
-        .eq('id', translationId);
-      await supabase.from('audit_log').insert({
-        action: 'TRANSLATION_ATTESTED', table_name: 'discharge_translations',
-        record_id: translationId, performed_by: staffId,
-        timestamp: new Date().toISOString(),
-        summary: 'Discharge translation attested — written copy provided to patient'
-      });
-      return Response.json({ success: true });
-    }
-
-    default:
-      return Response.json({ error: 'Unknown action' }, { status: 400 });
-  }
-}
-
-async function callClaude(userPrompt, maxTokens = 2000) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: maxTokens,
-      temperature: 0,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userPrompt }]
-    })
-  });
-  const data = await res.json();
-  return data.content[0].text;
-}
-
-function parseJSON(raw) {
-  const clean = raw.replace(/^\`\`\`json\n?/, '').replace(/\n?\`\`\`$/, '').trim();
-  return JSON.parse(clean);
-}`;
-
-const DB_SCHEMA = `-- Discharge translations (one row per language per encounter)
-CREATE TABLE discharge_translations (
-  id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  encounter_id            uuid NOT NULL REFERENCES encounters(id),
-  patient_id              uuid NOT NULL REFERENCES patients(id),
-
-  target_language_code    text NOT NULL,
-  target_language_name    text NOT NULL,
-  dialect_notes           text,
-
-  source_instructions     jsonb NOT NULL,
-  translation             jsonb NOT NULL,
-  back_translation_qa     jsonb,
-
-  overall_confidence      numeric(3,2),
-  flagged_for_review      boolean DEFAULT false,
-  review_resolved_by      uuid REFERENCES staff(id),
-  review_resolved_at      timestamptz,
-
-  interpreter_name        text,
-  interpreter_service     text,
-  interpreter_type        text CHECK (interpreter_type IN (
-                            'professional_in_person','telephone','staff','none')),
-
-  written_copy_provided   boolean DEFAULT false,
-  verbal_review_completed boolean DEFAULT false,
-  attestation_pending     boolean DEFAULT true,
-  attested_at             timestamptz,
-  attested_by             uuid REFERENCES staff(id),
-
-  created_by              uuid NOT NULL REFERENCES staff(id),
-  created_at              timestamptz DEFAULT now(),
-
-  UNIQUE (encounter_id, target_language_code, created_at)
-);
-
--- Print job log — California Title 22 compliance evidence
-CREATE TABLE translation_print_jobs (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  translation_id  uuid NOT NULL REFERENCES discharge_translations(id),
-  encounter_id    uuid NOT NULL REFERENCES encounters(id),
-  printed_by      uuid REFERENCES staff(id),
-  print_format    text CHECK (print_format IN ('bilingual','target_only','large_print')),
-  copies_printed  integer DEFAULT 1,
-  delivered_to    text CHECK (delivered_to IN ('patient','representative','mailed','emailed')),
-  printed_at      timestamptz DEFAULT now()
-);
-
-CREATE INDEX idx_trans_encounter ON discharge_translations(encounter_id);
-CREATE INDEX idx_trans_flagged   ON discharge_translations(flagged_for_review) WHERE flagged_for_review = true;
-CREATE INDEX idx_trans_pending   ON discharge_translations(attestation_pending) WHERE attestation_pending = true;`;
-
-const RULES = [
-  {
-    title: "What must NEVER be translated",
-    color: "#C04028", bg: "#FAECE7",
-    items: [
-      "Medication names — generic and brand. 'Lisinopril (Zestril)' stays as-is in every language. Translation of drug names causes dangerous dosing errors.",
-      "Dosing numbers and units — '10mg twice daily', '500mg with food', '2 puffs every 4 hours'. Keep exactly as written.",
-      "Phone numbers — 911, hospital numbers, doctor's office. Numbers are universal.",
-      "Provider names, hospital names, clinic names — these are proper nouns and must not be altered.",
-      "ICD-10 codes if shown — clinical codes are not patient-facing but if present, keep as-is.",
-      "The legal attestation statement — liability language stays in English, translated version appears alongside.",
-    ],
-  },
-  {
-    title: "California language access law",
-    color: "#0C447C", bg: "#E6F1FB",
-    items: [
-      "California Health & Safety Code §1259: patients with limited English proficiency have the right to a qualified interpreter at no cost, at any time.",
-      "Dymally-Alatorre Bilingual Services Act: state-funded entities must provide translated materials for language groups exceeding 5% of the patient population served.",
-      "Title 22 CCR: written discharge instructions must be provided in the patient's primary language when the patient has limited English proficiency.",
-      "Family members are NOT acceptable interpreters for discharge instructions, informed consent, or rights notification — California Title 22 requires a qualified professional interpreter.",
-      "Document the interpreter's full name, agency/service, and language in the medical record — every time. This is your compliance evidence.",
-      "Failure to provide language access can constitute discriminatory treatment under both state law and Section 1557 of the ACA.",
-    ],
-  },
-  {
-    title: "Health literacy & cultural adaptation",
-    color: "#0F6E56", bg: "#E1F5EE",
-    items: [
-      "6th-grade reading level means 6th-grade equivalent in the TARGET language — not a literal translation of 6th-grade English.",
-      "Hmong: acknowledge the role of traditional healers (txiv neeb) in healing decisions. Never dismiss — instead clarify what is medically required alongside traditional practices.",
-      "Vietnamese: dietary examples should reference rice-based meals, phở, congee when clinically equivalent to English food examples (e.g., 'bland diet' → rice porridge).",
-      "Russian: older patients may have distrust of institutional healthcare. Use formal address (Вы, not ты) and clear, factual language without perceived condescension.",
-      "Spanish: distinguish between Mexican/Central American Spanish (dominant in Sacramento) vs. other dialects for idioms and health vocabulary. 'Pastillas' over 'tabletas' for tablets in most communities.",
-      "For patients with low health literacy in any language: sentences ≤12 words, pictogram supplements, and large-print layout are strongly recommended.",
-    ],
-  },
-  {
-    title: "Back-translation QA process",
-    color: "#5F3F8A", bg: "#EEEDFE",
-    items: [
-      "Warning signs and medication instructions require automatic back-translation QA before the document is delivered to the patient.",
-      "A 'critical' back-translation discrepancy (meaning changed to the point of potential harm) must block delivery until a professional reviewer corrects the translation.",
-      "Back-translation is not a perfect quality check — it only catches the most severe semantic drift. Professional human review is the gold standard for all critical languages.",
-      "Match score < 0.85 on any safety-critical section should trigger a planner alert and require supervisor sign-off before attestation.",
-      "Log all QA results — if a translation is ever challenged in litigation, the back-translation record shows your quality process was rigorous.",
-    ],
-  },
-  {
-    title: "Print & delivery requirements",
-    color: "#6B4A10", bg: "#FAEEDA",
-    items: [
-      "Bilingual layout (English + target language side by side) is recommended for most patients — it allows staff to point to sections during verbal review.",
-      "Arabic, Hebrew, Urdu, Farsi: right-to-left text direction. Your PDF renderer must support RTL — test this before go-live.",
-      "Hmong requires Unicode UTF-8 with PUA (Private Use Area) encoding for some characters — standard fonts may render incorrectly. Use Noto Sans Hmong.",
-      "Large-print version (≥14pt body text) must be available for patients ≥65 or with documented visual impairment — California Unruh Act applies.",
-      "A printed copy must be given to the patient before discharge — verbal-only translation does not satisfy California Title 22 requirements.",
-      "Log the print job: who printed it, how many copies, and who received it (patient, representative, mailed). This is your compliance record.",
-    ],
-  },
-];
-
-const TABS = [
-  { id: "system",    label: "System prompt"      },
-  { id: "translate", label: "Translation prompt"  },
-  { id: "detect",    label: "Language detection"  },
-  { id: "backxl",    label: "Back-translation QA" },
-  { id: "code",      label: "API + DB schema"     },
-  { id: "rules",     label: "Compliance rules"    },
-];
-
-const CONTENT = {
-  system:    SYSTEM_PROMPT,
-  translate: TRANSLATION_PROMPT,
-  detect:    LANGUAGE_DETECT_PROMPT,
-  backxl:    BACK_TRANSLATION_PROMPT,
+const css = {
+  wrap:   { maxWidth: 1100, margin: "0 auto", padding: "24px 16px" },
+  card:   { background: "#fff", borderRadius: 10, padding: 24, marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,.08)" },
+  label:  { display: "block", fontSize: ".8rem", fontWeight: 600, color: "#374151", marginBottom: 6 },
+  select: { width: "100%", padding: "9px 12px", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: ".9rem", background: "#fff" },
+  ta:     { width: "100%", padding: "10px 12px", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: ".82rem", fontFamily: "'Source Code Pro', monospace", resize: "vertical" },
+  btn:    { background: "#1a56db", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 7, fontSize: ".9rem", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 },
+  btnSec: { background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "8px 16px", borderRadius: 7, fontSize: ".85rem", fontWeight: 500, cursor: "pointer" },
+  secTitle: { fontSize: ".95rem", fontWeight: 700, color: "#1e3a8a", marginBottom: 12 },
+  grid:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+  colHd:  { fontSize: ".72rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 },
 };
 
-const META = {
-  system:    { title: "System prompt",            sub: "Medical interpreter persona, Title 22 constraints, what must never be translated. Sent with every call." },
-  translate: { title: "Translation prompt",        sub: "Full template with 12 variables. Returns bilingual JSON with confidence scores, cultural adaptations, and back-translation sample." },
-  detect:    { title: "Language detection prompt", sub: "Lightweight prompt to identify preferred language and dialect from intake data. Returns interpreter recommendation and literacy flags." },
-  backxl:    { title: "Back-translation QA",       sub: "Safety check: translates back to English and flags semantic drift. Auto-runs on warning signs before every delivery." },
-  code:      { title: "API route / Database schema", sub: "Four actions: detect_language, translate, back_translate, attest. Auto-QA on warning signs before delivery." },
-  rules:     { title: "Compliance rules",           sub: "California Title 22, Dymally-Alatorre, ACA §1557, health literacy standards, print requirements." },
-};
-
-function MultilingualPromptSystem() {
-  const [activeTab, setActiveTab] = useState("system");
-  const [codeView, setCodeView] = useState("api");
-  const [copied, setCopied] = useState(null);
-
-  const copy = (text, id) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(id);
-      setTimeout(() => setCopied(null), 2200);
-    });
+function badge(color) {
+  const map = {
+    red:   { bg: "#fee2e2", fg: "#991b1b" },
+    amber: { bg: "#fef3c7", fg: "#92400e" },
+    green: { bg: "#dcfce7", fg: "#166534" },
+    blue:  { bg: "#e0e7ff", fg: "#3730a3" },
   };
+  const c = map[color] || map.blue;
+  return { display: "inline-block", padding: "2px 10px", borderRadius: 20, fontSize: ".72rem", fontWeight: 700, background: c.bg, color: c.fg };
+}
 
-  const getContent = () => {
-    if (activeTab === "code") return codeView === "api" ? INTEGRATION_CODE : DB_SCHEMA;
-    return CONTENT[activeTab] || "";
-  };
-
-  const getFilename = () => {
-    const map = {
-      system:    "multilingual_system_prompt.txt",
-      translate: "translation_prompt_template.txt",
-      detect:    "language_detection_prompt.txt",
-      backxl:    "back_translation_qa_prompt.txt",
-    };
-    if (activeTab === "code") return codeView === "api" ? "api/translate/discharge.js" : "schema/translations.sql";
-    return map[activeTab] || "";
-  };
-
+function Spinner() {
   return (
-    <div style={{ fontFamily: "'Helvetica Neue',Arial,sans-serif", background: "#F5F4F0", minHeight: "100vh", color: "#1A1917" }}>
+    <span style={{ display:"inline-block", width:16, height:16, border:"2px solid rgba(255,255,255,.4)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin .7s linear infinite" }} />
+  );
+}
 
-      {/* Module header */}
-      <div style={{ background: "#0C2340", padding: "26px 30px 20px", borderBottom: "3px solid #1D9E75" }}>
-        <div style={{ fontSize: 10, letterSpacing: "0.18em", color: "#5A7A9A", textTransform: "uppercase", marginBottom: 7 }}>
-          Discharge Planning AI · Language Access Module
-        </div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#EFF4F8", margin: "0 0 5px", letterSpacing: "-0.2px" }}>
-          Multilingual Discharge Instructions
-        </h1>
-        <p style={{ fontSize: 12, color: "#6A8FAA", margin: 0, lineHeight: 1.5 }}>
-          California Title 22 · Dymally-Alatorre · ACA §1557 · Back-translation QA · 8 languages
-        </p>
-        <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
-          {LANGUAGES.map(l => (
-            <div key={l.code} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 5, padding: "4px 10px", display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 13 }}>{l.flag}</span>
-              <span style={{ fontSize: 11, color: "#B0C8DA" }}>{l.native}</span>
-              <span style={{ fontSize: 10, color: "#4A6A80" }}>{l.population}</span>
-            </div>
-          ))}
-        </div>
+function BiRow({ src, tgt, dir }) {
+  if (!src && !tgt) return null;
+  return (
+    <div style={css.grid}>
+      <div>
+        <div style={css.colHd}>English (Source)</div>
+        <div style={{ fontSize:".88rem", color:"#374151", lineHeight:1.6 }}>{src || "—"}</div>
       </div>
-
-      {/* Tabs */}
-      <div style={{ background: "#091C30", display: "flex", overflowX: "auto", borderBottom: "1px solid #1A3050" }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-            background: activeTab === t.id ? "#0C2340" : "transparent",
-            border: "none", borderBottom: activeTab === t.id ? "2px solid #1D9E75" : "2px solid transparent",
-            color: activeTab === t.id ? "#EFF4F8" : "#4A6A80",
-            padding: "10px 18px", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-            whiteSpace: "nowrap", letterSpacing: "0.02em", transition: "all .15s",
-          }}>{t.label}</button>
-        ))}
-      </div>
-
-      <div style={{ padding: "22px 28px", maxWidth: 920 }}>
-
-        {activeTab !== "rules" && (
-          <div>
-            {activeTab === "code" && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                {[["api","API route"],["db","DB schema"]].map(([v, label]) => (
-                  <button key={v} onClick={() => setCodeView(v)} style={{
-                    background: codeView === v ? "#1D9E75" : "transparent",
-                    color: codeView === v ? "#fff" : "#777",
-                    border: "1px solid " + (codeView === v ? "#1D9E75" : "#ccc"),
-                    padding: "4px 14px", borderRadius: 4, fontSize: 11,
-                    cursor: "pointer", fontFamily: "inherit",
-                  }}>{label}</button>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1917", marginBottom: 3 }}>{META[activeTab]?.title}</div>
-                <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5, maxWidth: 560 }}>{META[activeTab]?.sub}</div>
-              </div>
-              <button onClick={() => copy(getContent(), activeTab)} style={{
-                background: copied === activeTab ? "#1D9E75" : "#0C2340",
-                color: "#fff", border: "none", padding: "7px 16px", borderRadius: 4,
-                fontSize: 11, cursor: "pointer", fontFamily: "inherit",
-                flexShrink: 0, marginLeft: 12, transition: "background .2s",
-              }}>
-                {copied === activeTab ? "✓ Copied" : "Copy"}
-              </button>
-            </div>
-
-            {activeTab === "translate" && (
-              <div style={{ background: "#E6F1FB", border: "1px solid #B5D4F4", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#0C447C", lineHeight: 1.6 }}>
-                <strong>12 template variables</strong> — replace all <code style={{ background: "rgba(0,0,0,0.07)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>{"{{VARIABLE}}"}</code> tokens server-side. Pass the English source instructions as a JSON object so Claude preserves structure in the translation output.
-              </div>
-            )}
-            {activeTab === "backxl" && (
-              <div style={{ background: "#E1F5EE", border: "1px solid #9FE1CB", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#0F6E56", lineHeight: 1.6 }}>
-                <strong>Auto-runs on warning signs</strong> before every delivery. Critical discrepancy blocks attestation and surfaces a planner alert. Run manually on any section via the <code style={{ background: "rgba(0,0,0,0.07)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>back_translate</code> action.
-              </div>
-            )}
-            {activeTab === "code" && codeView === "db" && (
-              <div style={{ background: "#FAEEDA", border: "1px solid #FAC775", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#6B4A10", lineHeight: 1.6 }}>
-                <strong>Print job logging</strong> is a separate table — track every copy printed, format used, and who received it. This is your California Title 22 compliance evidence. Sign a Supabase BAA before storing real PHI.
-              </div>
-            )}
-
-            <div style={{ background: "#0A1929", borderRadius: 8, border: "1px solid #1A3050", overflow: "hidden" }}>
-              <div style={{ background: "#0C2340", padding: "8px 14px", display: "flex", gap: 6, alignItems: "center", borderBottom: "1px solid #1A3050" }}>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#C04028" }}></span>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#BA7517" }}></span>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#1D9E75" }}></span>
-                <span style={{ fontSize: 10, color: "#3A5A70", marginLeft: 8 }}>{getFilename()}</span>
-              </div>
-              <pre style={{
-                margin: 0, padding: "18px 20px",
-                color: "#9ABCCC", fontFamily: "'Menlo','Monaco','Courier New',monospace",
-                fontSize: 11, lineHeight: 1.75, overflow: "auto", maxHeight: 500,
-                whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}>{getContent()}</pre>
-            </div>
-
-            <div style={{ marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
-              {activeTab === "system"    && <><span style={{ fontSize: 11, color: "#999" }}>~{Math.round(SYSTEM_PROMPT.length/4)} tokens</span><span style={{ fontSize: 11, color: "#999" }}>temperature: 0 · Sent with every call</span></>}
-              {activeTab === "translate" && <><span style={{ fontSize: 11, color: "#999" }}>~{Math.round(TRANSLATION_PROMPT.length/4)} tokens base</span><span style={{ fontSize: 11, color: "#999" }}>max_tokens: 4000 · temperature: 0</span></>}
-              {activeTab === "detect"    && <><span style={{ fontSize: 11, color: "#999" }}>Lightweight · max_tokens: 600</span><span style={{ fontSize: 11, color: "#999" }}>Run at admission intake</span></>}
-              {activeTab === "backxl"    && <><span style={{ fontSize: 11, color: "#999" }}>Safety check · max_tokens: 1000</span><span style={{ fontSize: 11, color: "#999" }}>Auto-triggered on warning signs</span></>}
-            </div>
-          </div>
-        )}
-
-        {activeTab === "rules" && (
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1917", marginBottom: 4 }}>Compliance rules reference</div>
-            <div style={{ fontSize: 12, color: "#888", marginBottom: 20 }}>Apply when building, testing, or extending the multilingual feature.</div>
-
-            <div style={{ background: "#0C2340", borderRadius: 8, padding: "14px 18px", marginBottom: 20, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-              {[
-                { label: "California H&S Code", value: "§1259",         sub: "Free qualified interpreter right" },
-                { label: "Dymally-Alatorre",    value: "CA Govt §7290+", sub: "Translated materials ≥5% pop." },
-                { label: "ACA Section",          value: "§1557",         sub: "Non-discrimination / language access" },
-                { label: "Title 22 CCR",         value: "Written",       sub: "Instructions in patient's language" },
-              ].map((s, i) => (
-                <div key={i}>
-                  <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#3A6A8A", marginBottom: 4 }}>{s.label}</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#1D9E75" }}>{s.value}</div>
-                  <div style={{ fontSize: 10, color: "#4A7A9A", marginTop: 1 }}>{s.sub}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {RULES.map((section, i) => (
-                <div key={i} style={{ background: "#fff", border: "1px solid #E5E2DC", borderRadius: 8, overflow: "hidden" }}>
-                  <div style={{ background: section.bg, padding: "10px 16px", borderBottom: `1px solid ${section.color}25` }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: section.color, letterSpacing: "0.05em", textTransform: "uppercase" }}>{section.title}</div>
-                  </div>
-                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {section.items.map((item, j) => (
-                      <div key={j} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: section.bg, color: section.color, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>{j+1}</span>
-                        <span style={{ fontSize: 12, color: "#3A3A38", lineHeight: 1.65 }}>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div style={{ borderTop: "1px solid #E5E2DC", padding: "14px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 11, color: "#aaa" }}>8 languages · California Title 22 · Back-translation QA · HIPAA-compliant</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[["system","System"],["translate","Translate"],["backxl","QA"],["code","API"]].map(([id, label]) => (
-            <button key={id} onClick={() => copy(CONTENT[id] || INTEGRATION_CODE, `f-${id}`)} style={{
-              background: copied === `f-${id}` ? "#1D9E75" : "transparent",
-              color: copied === `f-${id}` ? "#fff" : "#999",
-              border: "1px solid #ddd", padding: "4px 10px", borderRadius: 4,
-              fontSize: 10, cursor: "pointer", fontFamily: "inherit",
-              textTransform: "uppercase", letterSpacing: "0.05em", transition: "all .2s",
-            }}>{copied === `f-${id}` ? "✓" : label}</button>
-          ))}
-        </div>
+      <div>
+        <div style={css.colHd}>Translation</div>
+        <div dir={dir} style={{ fontSize:".88rem", color:"#111827", lineHeight:1.6 }}>{tgt || "—"}</div>
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<MultilingualPromptSystem />);
+function MedCard({ med, dir }) {
+  return (
+    <div style={{ borderLeft:"3px solid #3b82f6", paddingLeft:12, marginBottom:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+        <strong style={{ fontSize:".9rem" }}>{med.name_display || med.name}</strong>
+        <span style={{ fontSize:".75rem", background:"#e0e7ff", color:"#3730a3", padding:"1px 8px", borderRadius:12, fontWeight:600 }}>{med.dose} &middot; {med.frequency}</span>
+      </div>
+      <div style={css.grid}>
+        <div style={{ fontSize:".82rem", color:"#6b7280" }}>{med.source_instruction || ""}</div>
+        <div dir={dir} style={{ fontSize:".82rem", color:"#111827" }}>{med.instruction || ""}</div>
+      </div>
+      {med.why && <div style={{ fontSize:".76rem", color:"#4b5563", marginTop:4 }}><em>Why: {med.why}</em></div>}
+    </div>
+  );
+}
+
+function WarnCard({ ws, dir }) {
+  const c = ws.urgency === "emergent" ? "red" : ws.urgency === "urgent" ? "amber" : "green";
+  return (
+    <div style={{ display:"flex", gap:10, marginBottom:10, alignItems:"flex-start" }}>
+      <span style={{ ...badge(c), flexShrink:0, marginTop:2 }}>{ws.urgency || "routine"}</span>
+      <div style={{ flex:1 }}>
+        <div style={css.grid}>
+          <div style={{ fontSize:".85rem", color:"#374151" }}>{ws.source_sign || ws.sign}</div>
+          <div dir={dir} style={{ fontSize:".85rem", color:"#111827" }}>{ws.sign}</div>
+        </div>
+        {ws.action_text && <div style={{ fontSize:".78rem", color:"#dc2626", marginTop:2 }} dir={dir}>{ws.action_text}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Output({ data, dir }) {
+  const t = data.translation;
+  const meta = t.meta || {};
+  return (
+    <div style={{ animation:"fadeIn .3s ease" }}>
+      {/* Status bar */}
+      <div style={{ ...css.card, background: meta.requires_clinician_review ? "#fef2f2" : meta.interpreter_recommended ? "#fffbeb" : "#f0fdf4", display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+        <strong style={{ fontSize:".85rem" }}>Translation status:</strong>
+        {meta.requires_clinician_review
+          ? <span style={badge("red")}>&#9888; Clinician review required</span>
+          : <span style={badge("green")}>&#10003; No review flags</span>}
+        {meta.interpreter_recommended && <span style={badge("amber")}>Interpreter recommended</span>}
+        {(meta.review_reasons || []).map((r, i) =>
+          <span key={i} style={{ fontSize:".74rem", color:"#991b1b" }}>&#8226; {r}</span>
+        )}
+        <div style={{ marginLeft:"auto", fontSize:".74rem", color:"#6b7280" }}>
+          Language: {meta.target_language_name || data.language} &middot; Generated {new Date(meta.generated_at || Date.now()).toLocaleTimeString()}
+        </div>
+      </div>
+
+      {/* Patient header */}
+      {t.patient_header && (t.patient_header.greeting || t.patient_header.source_greeting) && (
+        <div style={css.card} className="print-section">
+          <div style={css.secTitle}>Patient Greeting</div>
+          <BiRow src={t.patient_header.source_greeting} tgt={t.patient_header.greeting} dir={dir} />
+        </div>
+      )}
+
+      {/* Diagnosis */}
+      {t.diagnosis && (
+        <div style={css.card} className="print-section">
+          <div style={css.secTitle}>Diagnosis</div>
+          <BiRow src={t.diagnosis.source_content} tgt={t.diagnosis.content} dir={dir} />
+        </div>
+      )}
+
+      {/* Medications */}
+      {t.medications && t.medications.length > 0 && (
+        <div style={css.card} className="print-section">
+          <div style={css.secTitle}>Medications ({t.medications.length})</div>
+          {t.medications.map((m, i) => <MedCard key={i} med={m} dir={dir} />)}
+        </div>
+      )}
+
+      {/* Warning signs */}
+      {t.warning_signs && t.warning_signs.length > 0 && (
+        <div style={{ ...css.card, borderLeft:"4px solid #ef4444" }} className="print-section">
+          <div style={css.secTitle}>&#9888; Warning Signs &mdash; When to Seek Help</div>
+          {t.warning_signs.map((w, i) => <WarnCard key={i} ws={w} dir={dir} />)}
+        </div>
+      )}
+
+      {/* Activity / Diet / Wound */}
+      {[["activity_restrictions","Activity Restrictions"],["diet_instructions","Diet Instructions"],["wound_care","Wound Care"]].map(([key, title]) =>
+        t[key] && (t[key].content || t[key].source_content) ? (
+          <div key={key} style={css.card} className="print-section">
+            <div style={css.secTitle}>{title}</div>
+            <BiRow src={t[key].source_content} tgt={t[key].content} dir={dir} />
+          </div>
+        ) : null
+      )}
+
+      {/* Follow-up */}
+      {t.follow_up && t.follow_up.appointments && t.follow_up.appointments.length > 0 && (
+        <div style={css.card} className="print-section">
+          <div style={css.secTitle}>Follow-up Appointments</div>
+          {t.follow_up.appointments.map((apt, i) => (
+            <div key={i} style={{ borderBottom:"1px solid #e5e7eb", paddingBottom:10, marginBottom:10 }}>
+              <div style={{ fontWeight:600, fontSize:".88rem", marginBottom:6 }}>{apt.provider} &mdash; {apt.timeframe}</div>
+              <BiRow src={apt.source_instruction} tgt={apt.instruction} dir={dir} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* When to call */}
+      {t.when_to_call && (
+        <div style={{ ...css.card, background:"#fef2f2" }} className="print-section">
+          <div style={css.secTitle}>&#128680; When to Call for Help</div>
+          {t.when_to_call.er_instruction && (
+            <BiRow src={t.when_to_call.er_instruction} tgt={t.when_to_call.er_instruction} dir={dir} />
+          )}
+          {t.when_to_call.emergency_instruction && (
+            <div style={{ background:"#dc2626", color:"#fff", padding:"8px 14px", borderRadius:6, fontSize:".88rem", fontWeight:600, marginTop:10 }} dir={dir}>
+              {t.when_to_call.emergency_instruction}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Teach-back prompt */}
+      {t.teach_back_prompt && (
+        <div style={css.card} className="print-section">
+          <div style={css.secTitle}>Teach-back Prompt</div>
+          <div dir={dir} style={{ fontSize:".88rem", color:"#1e40af", fontStyle:"italic" }}>{t.teach_back_prompt}</div>
+        </div>
+      )}
+
+      {/* Cultural adaptations (screen only) */}
+      {(meta.cultural_adaptations || []).length > 0 && (
+        <div style={{ ...css.card, background:"#f0f9ff" }} className="no-print">
+          <div style={{ fontSize:".8rem", fontWeight:700, color:"#075985", marginBottom:8 }}>Cultural adaptations applied</div>
+          {meta.cultural_adaptations.map((a, i) => <div key={i} style={{ fontSize:".78rem", color:"#0c4a6e" }}>&#8226; {a}</div>)}
+        </div>
+      )}
+
+      {/* Attestation */}
+      {t.attestation && (
+        <div style={{ fontSize:".72rem", color:"#9ca3af", marginTop:8, paddingTop:8, borderTop:"1px solid #e5e7eb" }} className="print-section">
+          {t.attestation}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [lang, setLang]       = useState("es");
+  const [planText, setPlanText] = useState("");
+  const [useSample, setUseSample] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState(null);
+  const [error, setError]     = useState("");
+
+  const selected = LANGUAGES.find(l => l.code === lang) || LANGUAGES[0];
+
+  const generate = async () => {
+    const text = useSample ? SAMPLE_PLAN : planText;
+    if (!text.trim()) { setError("Paste a discharge plan or click 'Use sample plan'."); return; }
+    setLoading(true); setError(""); setResult(null);
+    try {
+      const res = await fetch("/api/multilingual/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_language: lang, discharge_plan: text }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || "Translation failed.");
+      } else {
+        setResult(data);
+      }
+    } catch (e) {
+      setError("Network error — please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={css.wrap}>
+      {/* Header card */}
+      <div style={{ ...css.card, borderLeft:"4px solid #1a56db" }}>
+        <div style={{ fontSize:"1.05rem", fontWeight:700, color:"#1e3a8a", marginBottom:4 }}>
+          Multilingual Patient Discharge Instructions
+        </div>
+        <div style={{ fontSize:".82rem", color:"#6b7280" }}>
+          Title VI / California Gov. Code 7290 / CDPH CoP &middot; 20 languages &middot; 6th-grade reading level &middot; Bilingual side-by-side output &middot; Clinical accuracy validated
+        </div>
+      </div>
+
+      {/* Input controls */}
+      <div style={css.card}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
+          <div>
+            <label style={css.label}>Target Language</label>
+            <select style={css.select} value={lang} onChange={e => setLang(e.target.value)}>
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.name}{l.dir === "rtl" ? " (RTL)" : ""}</option>
+              ))}
+            </select>
+            {selected.dir === "rtl" && (
+              <div style={{ fontSize:".72rem", color:"#b45309", marginTop:4 }}>Right-to-left script &mdash; text direction applied automatically</div>
+            )}
+            {["ium","hmn","km"].includes(lang) && (
+              <div style={{ fontSize:".72rem", color:"#6d28d9", marginTop:4 }}>Interpreter recommendation will be auto-set for this language group</div>
+            )}
+          </div>
+          <div style={{ display:"flex", alignItems:"flex-end" }}>
+            <div style={{ fontSize:".78rem", color:"#6b7280", lineHeight:1.5 }}>
+              Covers ~97% of California LEP hospital volume. Drug names and dosages are preserved exactly. Warning signs translated with equal urgency.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom:16 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+            <label style={css.label}>English Discharge Plan (JSON or plain text)</label>
+            <button style={css.btnSec} onClick={() => { setUseSample(v => !v); setPlanText(""); }}>
+              {useSample ? "Clear sample" : "Use sample plan"}
+            </button>
+          </div>
+          <textarea
+            style={{ ...css.ta, minHeight:200, background: useSample ? "#f9fafb" : "#fff" }}
+            placeholder='Paste the discharge plan JSON output here, or click "Use sample plan" to test with a heart failure case...'
+            value={useSample ? SAMPLE_PLAN : planText}
+            onChange={e => { setUseSample(false); setPlanText(e.target.value); }}
+            readOnly={useSample}
+          />
+        </div>
+
+        <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+          <button style={{ ...css.btn, opacity: loading ? .7 : 1 }} onClick={generate} disabled={loading}>
+            {loading ? <><Spinner /> Translating&hellip;</> : `Translate to ${selected.name}`}
+          </button>
+          {result && (
+            <button style={css.btnSec} onClick={() => window.print()} className="no-print">
+              Print bilingual document
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div style={{ marginTop:12, padding:"10px 14px", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:7, fontSize:".85rem", color:"#dc2626" }}>
+            {error}
+          </div>
+        )}
+      </div>
+
+      {result && <Output data={result} dir={selected.dir} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>

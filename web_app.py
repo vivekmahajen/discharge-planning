@@ -1585,3 +1585,212 @@ async def generate_plan_from_fhir(request: Request, patient_id: str):
     )
     _apply_refreshed_cookie(response, new_cookie)
     return response
+
+
+# ── Multilingual discharge instruction generation ────────────────────────────
+
+LANGUAGE_CONFIGS: dict[str, dict] = {
+    "es":    {"name": "Spanish",             "locale": "es-MX", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Use usted (formal). Avoid literal idiom translation. Emergency room = sala de emergencias."},
+    "zh-TW": {"name": "Cantonese Chinese",   "locale": "zh-HK", "direction": "ltr", "date_fmt": "YYYY/MM/DD",
+              "notes": "Traditional Chinese script. Older patients prefer Traditional; never use Simplified. Formal register."},
+    "zh-CN": {"name": "Mandarin Chinese",    "locale": "zh-CN", "direction": "ltr", "date_fmt": "YYYY/MM/DD",
+              "notes": "Simplified Chinese script. Formal register. Use approved Chinese pharmacopeia drug names where available."},
+    "vi":    {"name": "Vietnamese",          "locale": "vi-VN", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "All tone diacritics mandatory. Missing marks change word meaning completely. Never omit."},
+    "tl":    {"name": "Tagalog",             "locale": "tl-PH", "direction": "ltr", "date_fmt": "MM/DD/YYYY",
+              "notes": "Drug names often kept in English. Mix of Tagalog and English loanwords is standard."},
+    "ko":    {"name": "Korean",              "locale": "ko-KR", "direction": "ltr", "date_fmt": "YYYY. MM. DD",
+              "notes": "Formal jondaemal register. Honorifics critical for elderly patients."},
+    "hy":    {"name": "Armenian",            "locale": "hy-AM", "direction": "ltr", "date_fmt": "DD.MM.YYYY",
+              "notes": "Eastern Armenian (Yerevan dialect). Verify medical terms against Armenian medical glossary."},
+    "fa":    {"name": "Persian/Farsi",       "locale": "fa-IR", "direction": "rtl", "date_fmt": "DD/MM/YYYY",
+              "notes": "Right-to-left. Formal. Western numerals (0-9) for all medical data."},
+    "ru":    {"name": "Russian",             "locale": "ru-RU", "direction": "ltr", "date_fmt": "DD.MM.YYYY",
+              "notes": "Formal register. Transliterate drug names from English if no Russian pharmacopeia name. Dates: DD.MM.YYYY."},
+    "km":    {"name": "Khmer",               "locale": "km-KH", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "High health literacy barrier. Very simple sentences. Always set interpreter_recommended: true."},
+    "hi":    {"name": "Hindi",               "locale": "hi-IN", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Formal (aap). Drug names: English generic name with Devanagari transliteration in parentheses."},
+    "pa":    {"name": "Punjabi",             "locale": "pa-IN", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Gurmukhi script. Verify script preference (Gurmukhi vs Shahmukhi) with clinician."},
+    "ar":    {"name": "Arabic",              "locale": "ar-SA", "direction": "rtl", "date_fmt": "DD/MM/YYYY",
+              "notes": "Right-to-left. Modern Standard Arabic for written materials. Western numerals (0-9) in medical data."},
+    "pt":    {"name": "Portuguese (Brazilian)", "locale": "pt-BR", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Brazilian Portuguese, not European. ANVISA approved drug names if available."},
+    "ja":    {"name": "Japanese",            "locale": "ja-JP", "direction": "ltr", "date_fmt": "YYYY/MM/DD",
+              "notes": "Formal keigo register. Drug names in katakana. Dates: YYYY/MM/DD."},
+    "ium":   {"name": "Mien/Iu Mien",        "locale": "ium",   "direction": "ltr", "date_fmt": "MM/DD/YYYY",
+              "notes": "Low-literacy community. Simplest possible sentences. Always set interpreter_recommended: true."},
+    "hmn":   {"name": "Hmong",               "locale": "hmn",   "direction": "ltr", "date_fmt": "MM/DD/YYYY",
+              "notes": "RPA orthography. Very low health literacy in older population. Always set interpreter_recommended: true."},
+    "so":    {"name": "Somali",              "locale": "so-SO", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Formal register. Flag alcohol/gelatin in medications for Islamic dietary review if relevant."},
+    "am":    {"name": "Amharic",             "locale": "am-ET", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Ethiopic script. Formal. Relatively higher health literacy. Loanwords like 'hospital' are acceptable."},
+    "th":    {"name": "Thai",                "locale": "th-TH", "direction": "ltr", "date_fmt": "DD/MM/YYYY",
+              "notes": "Polite particles (khrap/kha) required. Thai FDA approved drug names if available, otherwise English."},
+}
+
+_LOW_LITERACY_LOCALES = {"hmn", "ium", "km-KH"}
+_LOW_LITERACY_NAMES   = {"Hmong", "Mien/Iu Mien", "Khmer"}
+
+
+def build_multilingual_system_prompt(lang_config: dict) -> str:
+    return (
+        "You are a clinical linguist and medical translation specialist embedded in a "
+        "HIPAA-compliant hospital discharge planning system for California acute care hospitals.\n\n"
+        "YOUR ROLE:\n"
+        f"Translate the English discharge instructions below into patient-ready {lang_config['name']}.\n"
+        f"Patient preferred language: {lang_config['name']} ({lang_config['locale']} locale).\n"
+        f"Script direction: {lang_config['direction']}.\n"
+        f"Date format for this locale: {lang_config['date_fmt']}.\n\n"
+        "NON-NEGOTIABLE CLINICAL ACCURACY RULES:\n\n"
+        "RULE 1 -- DRUG NAMES: Never alter medication names. Use one of:\n"
+        "  (a) The English generic name exactly as written.\n"
+        f"  (b) The approved {lang_config['name']} pharmacopeia name if one definitively exists.\n"
+        "  (c) The English name with transliteration in parentheses.\n"
+        "  If uncertain between (b) and (c), use the English name unchanged.\n\n"
+        "RULE 2 -- DOSAGES AND FREQUENCIES: Translate exact wording only.\n"
+        "  'Twice daily' is never 'often'. '500 mg' stays '500 mg'.\n"
+        "  'Every 8 hours' stays 'every 8 hours' -- never substitute 'three times a day'.\n\n"
+        "RULE 3 -- WARNING SIGNS: Equal or greater urgency. Never soften.\n"
+        "  US emergency number is always 911. Do not substitute other country numbers.\n\n"
+        "RULE 4 -- NO OMISSIONS: Every section must appear in output.\n"
+        "  If a section cannot be accurately translated, return the English text with:\n"
+        "  [TRANSLATION PENDING -- INTERPRETER REQUIRED]\n\n"
+        f"RULE 5 -- READING LEVEL: 6th grade or below in {lang_config['name']}.\n"
+        "  Sentences under 15 words. No jargon without plain-language explanation.\n"
+        "  Active voice. Use: take, call, go, stop, drink, rest.\n\n"
+        "RULE 6 -- BILINGUAL: Return English source alongside translation in every section.\n\n"
+        f"CULTURAL COMPETENCY FOR {lang_config['name']}:\n{lang_config['notes']}\n\n"
+        "QUALITY CHECKS (run before returning output):\n"
+        "  - Every medication name from source must appear in medications[].name_display.\n"
+        "    If any name is altered: set requires_clinician_review: true, add to review_reasons.\n"
+        "  - Warning sign count in output must equal count in source.\n"
+        "    If lower: set requires_clinician_review: true, add 'Warning sign count mismatch'.\n"
+        "  - Estimate reading level. If above 6.5: simplify before returning.\n"
+        f"  - For Hmong, Mien/Iu Mien, Khmer: always set interpreter_recommended: true.\n"
+        "  - List ALL cultural adaptations beyond literal translation in cultural_adaptations.\n"
+        "  - when_to_call.emergency_instruction must contain '911' for US patients.\n\n"
+        "Return ONLY valid JSON. No prose. No markdown fences."
+    )
+
+
+def validate_translation(source_plan: "dict | str", translation: dict, lang_config: dict) -> dict:
+    """Server-side clinical safety validation after translation."""
+    meta = translation.setdefault("meta", {})
+    reasons = meta.setdefault("review_reasons", [])
+    adaptations = meta.setdefault("cultural_adaptations", [])
+
+    if isinstance(source_plan, str):
+        try:
+            source_plan = json.loads(source_plan)
+        except Exception:
+            source_plan = {}
+
+    # 1. Drug name integrity
+    src_meds = {m.get("name", "").lower() for m in source_plan.get("medications", []) if m.get("name")}
+    out_meds = {m.get("name_display", "").lower() for m in translation.get("medications", []) if m.get("name_display")}
+    missing = src_meds - out_meds
+    if missing:
+        meta["requires_clinician_review"] = True
+        reasons.append(f"Drug name may be altered or missing: {', '.join(missing)}")
+
+    # 2. Warning sign count
+    src_count = len(source_plan.get("warning_signs", []))
+    out_count = len(translation.get("warning_signs", []))
+    if src_count > 0 and out_count < src_count:
+        meta["requires_clinician_review"] = True
+        reasons.append(f"Warning sign count: source has {src_count}, output has {out_count}")
+
+    # 3. Ensure 911 in emergency instruction
+    wc = translation.setdefault("when_to_call", {})
+    ei = wc.get("emergency_instruction", "")
+    if "911" not in ei:
+        wc["emergency_instruction"] = (ei + " -- " if ei else "") + "Call 911 (US emergency)"
+        adaptations.append("Appended 911 emergency number to when_to_call.emergency_instruction")
+
+    # 4. Interpreter recommended for low-literacy languages
+    if lang_config.get("locale") in _LOW_LITERACY_LOCALES or lang_config.get("name") in _LOW_LITERACY_NAMES:
+        meta["interpreter_recommended"] = True
+        if "interpreter_recommended set: low-literacy language group" not in adaptations:
+            adaptations.append("interpreter_recommended set: low-literacy language group")
+
+    # 5. RTL completeness check — flag if text fields look like English-only placeholders
+    if lang_config.get("direction") == "rtl":
+        rtl_chars = "؀-ۿ֐-׿"  # Arabic/Persian and Hebrew ranges
+        import unicodedata
+        diag = translation.get("diagnosis", {})
+        content = diag.get("content", "") or ""
+        has_rtl = any(unicodedata.category(c) in ("Lo",) and "؀" <= c <= "ۿ" for c in content)
+        if content and not has_rtl:
+            meta["requires_clinician_review"] = True
+            reasons.append("RTL translation may be incomplete — diagnosis content appears to be English")
+
+    return translation
+
+
+@app.post("/api/multilingual/generate")
+@limiter.limit("20/minute")
+async def generate_multilingual_instructions(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    target_lang = (body.get("target_language") or "").strip().lower()
+    source_plan = (body.get("discharge_plan") or "").strip()
+
+    if not target_lang or target_lang not in LANGUAGE_CONFIGS:
+        return JSONResponse(
+            {"error": f"Unsupported language: '{target_lang}'.",
+             "supported": list(LANGUAGE_CONFIGS.keys())},
+            status_code=400,
+        )
+    if not source_plan:
+        return JSONResponse({"error": "discharge_plan is required"}, status_code=400)
+
+    lang_config = LANGUAGE_CONFIGS[target_lang]
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "Server not configured"}, status_code=500)
+
+    system_prompt = build_multilingual_system_prompt(lang_config)
+    user_prompt = f"Translate this discharge plan to {lang_config['name']}:\n\n{source_plan}"
+
+    def _call_api():
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            temperature=0,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return resp.content[0].text
+
+    try:
+        raw = await asyncio.to_thread(_call_api)
+    except anthropic.APIError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    clean = raw.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+        clean = re.sub(r"\n?```$", "", clean).strip()
+
+    try:
+        result = json.loads(clean)
+    except json.JSONDecodeError as e:
+        return JSONResponse({"success": False, "error": f"JSON parse failed: {e}", "raw": raw}, status_code=500)
+
+    result = validate_translation(source_plan, result, lang_config)
+
+    return JSONResponse({
+        "success": True,
+        "translation": result,
+        "language": lang_config["name"],
+        "direction": lang_config["direction"],
+        "interpreter_recommended": result.get("meta", {}).get("interpreter_recommended", False),
+        "requires_review": result.get("meta", {}).get("requires_clinician_review", False),
+    })
