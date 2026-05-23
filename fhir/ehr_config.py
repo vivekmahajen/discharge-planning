@@ -72,7 +72,7 @@ def _build_registry() -> dict[str, EHRConfig]:
             client_secret=None,
             is_public_client=True,
             scopes=FHIR_SCOPES_PHASE1,
-            smart_version="v2",
+            smart_version="v1",
             # Derive from URL pattern — avoids SMART discovery which Epic blocks
             # server-side. Override with EPIC_AUTH_ENDPOINT for non-standard instances.
             auth_endpoint_override=os.getenv(
