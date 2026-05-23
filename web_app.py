@@ -11,11 +11,31 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import anthropic
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+
+from fhir.ehr_config import get_ehr_config, list_ehr_display
+from fhir.auth import (
+    FHIR_SESSION_COOKIE,
+    FHIR_SESSION_TTL,
+    FHIR_STATE_COOKIE,
+    FHIR_STATE_TTL,
+    decode_fhir_session_cookie,
+    decode_fhir_state_cookie,
+    discover_smart_endpoints,
+    encode_fhir_cookie,
+    exchange_code_for_token,
+    generate_pkce_pair,
+    generate_secure_state,
+    needs_refresh,
+    refresh_access_token,
+)
+from fhir.client import FHIRAuthError, FHIRClient, FHIRForbiddenError
+from fhir.normalizers import fhir_bundle_to_agent_data
 
 load_dotenv()
 
@@ -937,8 +957,6 @@ async def create_plan(request: Request):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
-import httpx
-
 APP_URL = os.environ.get("NEXT_PUBLIC_APP_URL", "https://discharge-planning.vercel.app")
 FHIR_REDIRECT_URI = os.getenv("FHIR_REDIRECT_URI", f"{APP_URL}/api/fhir/callback")
 
@@ -965,25 +983,6 @@ async def epic_callback_legacy(request: Request, code: str = None, state: str = 
 
 
 # ── FHIR R4 connector routes ──────────────────────────────────────────────────
-
-from fhir.ehr_config import get_ehr_config, list_ehr_display
-from fhir.auth import (
-    FHIR_SESSION_COOKIE,
-    FHIR_SESSION_TTL,
-    FHIR_STATE_COOKIE,
-    FHIR_STATE_TTL,
-    decode_fhir_session_cookie,
-    decode_fhir_state_cookie,
-    discover_smart_endpoints,
-    encode_fhir_cookie,
-    exchange_code_for_token,
-    generate_pkce_pair,
-    generate_secure_state,
-    needs_refresh,
-    refresh_access_token,
-)
-from fhir.client import FHIRAuthError, FHIRClient, FHIRForbiddenError
-from fhir.normalizers import fhir_bundle_to_agent_data
 
 _fhir_audit_logger = logging.getLogger("fhir.audit")
 logging.basicConfig(level=logging.INFO)

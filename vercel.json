@@ -3,7 +3,18 @@
   "builds": [
     {
       "src": "api/index.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": [
+          "web_app.py",
+          "orchestrator.py",
+          "sample_patient.py",
+          "fhir/**",
+          "agents/**",
+          "utils/**",
+          "static/**"
+        ]
+      }
     }
   ],
   "routes": [
