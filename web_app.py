@@ -15,7 +15,8 @@ from urllib.parse import urlencode
 import anthropic
 import httpx
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Request
+from dataclasses import dataclass
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from typing import Any
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -282,6 +283,17 @@ COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
 # Postgres URL — Vercel injects POSTGRES_URL automatically; DATABASE_URL is the fallback
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
+# Default org UUID used in file-based / test mode (no real DB)
+DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001"
+
+
+@dataclass
+class OrgContext:
+    """Decoded, verified identity from session cookie — org_id and role included."""
+    email: str
+    org_id: str
+    role: str
+
 # ── HIPAA audit log ───────────────────────────────────────────────────────────
 _audit_logger = logging.getLogger("hipaa.audit")
 logging.basicConfig(level=logging.INFO)
@@ -485,16 +497,48 @@ async def startup():
 
 # ── Session helpers ──────────────────────────────────────────────────────────
 
-def make_session_cookie(email: str) -> str:
-    return _serializer.dumps({"email": email})
+def make_session_cookie(email: str, org_id: str = DEFAULT_ORG_ID,
+                        role: str = "clinician") -> str:
+    return _serializer.dumps({"email": email, "org_id": org_id, "role": role})
 
 
 def verify_session_cookie(token: str) -> str | None:
+    """Return the email from a valid session cookie (used by legacy helpers)."""
     try:
         data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
         return data.get("email")
     except (BadSignature, SignatureExpired):
         return None
+
+
+def get_current_org(request: Request) -> OrgContext:
+    """FastAPI dependency — extract and validate org context from signed session cookie.
+
+    In file-based mode (DATABASE_URL is None) the org_id defaults to
+    DEFAULT_ORG_ID so tests work without a real database.
+    """
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    org_id = data.get("org_id", DEFAULT_ORG_ID)
+    role = data.get("role", "clinician")
+    return OrgContext(email=email, org_id=org_id, role=role)
+
+
+def require_role(*roles: str):
+    """Factory: returns a FastAPI dependency that enforces one of the given roles."""
+    def _dep(ctx: OrgContext = Depends(get_current_org)) -> OrgContext:
+        if ctx.role not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return ctx
+    return _dep
 
 
 def get_current_user(request: Request) -> str | None:
@@ -510,10 +554,12 @@ def require_login(request: Request):
     return None
 
 
-def _set_session(response: JSONResponse, email: str) -> JSONResponse:
+def _set_session(response: JSONResponse, email: str,
+                 org_id: str = DEFAULT_ORG_ID,
+                 role: str = "clinician") -> JSONResponse:
     response.set_cookie(
         key=COOKIE_NAME,
-        value=make_session_cookie(email),
+        value=make_session_cookie(email, org_id, role),
         httponly=True,
         samesite="lax",
         secure=True,
@@ -591,11 +637,8 @@ async def logout(request: Request):
 
 @app.get("/api/me")
 @limiter.limit("120/hour")
-async def me(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    return JSONResponse({"email": user})
+async def me(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    return JSONResponse({"email": ctx.email, "org_id": ctx.org_id, "role": ctx.role})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -609,9 +652,8 @@ async def index(request: Request):
 
 @app.get("/api/sample-patient")
 @limiter.limit("60/hour")
-async def get_sample_patient(request: Request):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+async def get_sample_patient(request: Request,
+                             ctx: OrgContext = Depends(get_current_org)):
     from sample_patient import SAMPLE_PATIENT_WEB
     return JSONResponse(dict(SAMPLE_PATIENT_WEB))
 
@@ -825,13 +867,10 @@ async def readmission_tracker_page(request: Request):
     with open(STATIC_DIR / "readmission-tracker.html", encoding="utf-8") as f:
         return f.read()
 
-
 @app.post("/api/roi/generate")
 @limiter.limit("30/hour")
-async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={}),
+                               ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -875,10 +914,8 @@ async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(def
 
 @app.post("/api/hrrp/generate")
 @limiter.limit("30/hour")
-async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(default={}),
+                                 ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -922,10 +959,8 @@ async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(d
 
 @app.post("/api/cdph-compliance/analyze")
 @limiter.limit("30/hour")
-async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(default={}),
+                                  ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -972,10 +1007,8 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
 
 @app.post("/api/teachback/generate")
 @limiter.limit("30/hour")
-async def generate_teachback(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_teachback(request: Request, body: dict[str, Any] = Body(default={}),
+                             ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -1033,10 +1066,8 @@ async def generate_teachback(request: Request, body: dict[str, Any] = Body(defau
 
 @app.post("/api/discharge-summary/generate")
 @limiter.limit("20/hour")
-async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] = Body(default={}),
+                                        org: OrgContext = Depends(get_current_org)):
     ctx = body.get("ctx", {})
     notes = body.get("notes", "")
     if not notes.strip():
@@ -1186,10 +1217,8 @@ async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] =
 
 @app.post("/api/summary/generate")
 @limiter.limit("20/hour")
-async def generate_summary(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_summary(request: Request, body: dict[str, Any] = Body(default={}),
+                           ctx: OrgContext = Depends(get_current_org)):
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=500)
@@ -1275,11 +1304,29 @@ Rules:
 
 @app.post("/api/plan/stream")
 @limiter.limit("10/hour")
-async def create_plan(request: Request, patient_data: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+async def create_plan(request: Request, patient_data: dict[str, Any] = Body(default={}),
+                      ctx: OrgContext = Depends(get_current_org)):
+    async def _stream_with_tcm():
+        coordinator_output: str | None = None
+        async for chunk in stream_plan(patient_data):
+            yield chunk
+            try:
+                event_str = chunk.removeprefix("data: ").strip()
+                event_data = json.loads(event_str)
+                if event_data.get("type") == "coordinator_complete":
+                    coordinator_output = event_data.get("output", "")
+            except Exception:
+                pass
+        if DATABASE_URL and coordinator_output is not None:
+            tcm_result = await _maybe_create_tcm_episode(
+                coordinator_output, patient_data, ctx.org_id, ctx.email)
+            if tcm_result:
+                yield f"data: {json.dumps({'type': 'tcm_episode_created', **tcm_result})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'tcm_not_applicable'})}\n\n"
+
     return StreamingResponse(
-        stream_plan(patient_data),
+        _stream_with_tcm(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -1912,10 +1959,8 @@ def validate_translation(source_plan: "dict | str", translation: dict, lang_conf
 
 @app.post("/api/multilingual/generate")
 @limiter.limit("30/hour")
-async def generate_multilingual_instructions(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_multilingual_instructions(request: Request, body: dict[str, Any] = Body(default={}),
+                                             ctx: OrgContext = Depends(get_current_org)):
     target_lang = (body.get("target_language") or "").strip().lower()
     source_plan = (body.get("discharge_plan") or "").strip()
 
@@ -1972,3 +2017,598 @@ async def generate_multilingual_instructions(request: Request, body: dict[str, A
         "interpreter_recommended": result.get("meta", {}).get("interpreter_recommended", False),
         "requires_review": result.get("meta", {}).get("requires_clinician_review", False),
     })
+
+
+# ── Multi-tenant org provisioning ─────────────────────────────────────────────
+
+@app.post("/api/onboard/create-org")
+@limiter.limit("5/hour", key_func=_get_ip_key)
+async def create_org(request: Request, body: dict[str, Any] = Body(default={})):
+    """Create a new organization and seed its first admin user.
+
+    Available without an existing session — used during initial SaaS onboarding.
+    When DATABASE_URL is not set, returns a stub response for local dev.
+    """
+    name = (body.get("name") or "").strip()
+    slug = (body.get("slug") or "").strip().lower()
+    admin_email = (body.get("admin_email") or "").strip().lower()
+    admin_password = body.get("admin_password") or ""
+    domain = (body.get("domain") or "").strip() or None
+
+    if not name or not slug or not admin_email or not admin_password:
+        return JSONResponse({"error": "name, slug, admin_email, and admin_password are required"},
+                            status_code=400)
+    if "@" not in admin_email or "." not in admin_email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid admin_email"}, status_code=400)
+    if len(admin_password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        return JSONResponse({"error": "slug must be lowercase alphanumeric with hyphens only"},
+                            status_code=400)
+
+    if not DATABASE_URL:
+        # File-based dev mode: just sign up and return default org info
+        err = register_user(admin_email, admin_password)
+        if err:
+            return JSONResponse({"error": err}, status_code=409)
+        response = JSONResponse({
+            "ok": True,
+            "org": {"id": DEFAULT_ORG_ID, "name": name, "slug": slug},
+        })
+        return _set_session(response, admin_email, DEFAULT_ORG_ID, "org_admin")
+
+    # DB mode
+    from db import create_organization, slug_exists, register_user_db
+    if slug_exists(slug):
+        return JSONResponse({"error": "This slug is already taken."}, status_code=409)
+    try:
+        org = create_organization(name=name, slug=slug, domain=domain, plan="trial")
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to create organization: {exc}"}, status_code=500)
+
+    err = register_user_db(org["id"], admin_email, admin_password, role="org_admin")
+    if err:
+        return JSONResponse({"error": err}, status_code=409)
+
+    response = JSONResponse({
+        "ok": True,
+        "org": {"id": str(org["id"]), "name": org["name"], "slug": org["slug"]},
+    })
+    return _set_session(response, admin_email, str(org["id"]), "org_admin")
+
+
+@app.get("/api/onboard/check-slug")
+@limiter.limit("30/minute", key_func=_get_ip_key)
+async def check_slug(request: Request, slug: str = ""):
+    """Check whether an org slug is available."""
+    slug = slug.strip().lower()
+    if not slug or not re.match(r"^[a-z0-9-]+$", slug):
+        return JSONResponse({"available": False, "reason": "Invalid slug format"})
+    if not DATABASE_URL:
+        return JSONResponse({"available": True})
+    from db import slug_exists
+    return JSONResponse({"available": not slug_exists(slug)})
+
+
+# ── Invitation flow ───────────────────────────────────────────────────────────
+
+@app.get("/api/invite/accept")
+@limiter.limit("20/hour", key_func=_get_ip_key)
+async def invite_info(request: Request, token: str = ""):
+    """Return invitation metadata so the frontend can pre-fill the signup form."""
+    if not token:
+        return JSONResponse({"error": "token is required"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+    from db import get_invitation_by_token
+    invite = get_invitation_by_token(token)
+    if not invite:
+        return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+    return JSONResponse({
+        "email": invite["email"],
+        "role": invite["role"],
+        "org_name": invite.get("org_name"),
+        "org_slug": invite.get("org_slug"),
+    })
+
+
+@app.post("/api/invite/accept")
+@limiter.limit("10/hour", key_func=_get_ip_key)
+async def accept_invite(request: Request, body: dict[str, Any] = Body(default={})):
+    """Accept an invitation: create user account and set session."""
+    token = (body.get("token") or "").strip()
+    password = body.get("password") or ""
+    if not token or not password:
+        return JSONResponse({"error": "token and password are required"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+
+    from db import get_invitation_by_token, register_user_db, mark_invitation_accepted
+    invite = get_invitation_by_token(token)
+    if not invite:
+        return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+
+    org_id = str(invite["organization_id"])
+    email = invite["email"]
+    role = invite["role"]
+
+    err = register_user_db(org_id, email, password, role=role)
+    if err:
+        return JSONResponse({"error": err}, status_code=409)
+
+    mark_invitation_accepted(token)
+    response = JSONResponse({"ok": True, "email": email, "org_id": org_id, "role": role})
+    return _set_session(response, email, org_id, role)
+
+
+# ── Admin endpoints (org_admin and above) ─────────────────────────────────────
+
+@app.get("/api/admin/users")
+@limiter.limit("60/hour")
+async def admin_list_users(request: Request,
+                           ctx: OrgContext = Depends(require_role("org_admin", "super_admin"))):
+    """List all users in the current org."""
+    if not DATABASE_URL:
+        return JSONResponse({"users": [], "note": "file-based mode — no user records"})
+    from db import list_users
+    return JSONResponse({"users": list_users(ctx.org_id)})
+
+
+@app.post("/api/admin/invite")
+@limiter.limit("30/hour")
+async def admin_invite_user(request: Request, body: dict[str, Any] = Body(default={}),
+                            ctx: OrgContext = Depends(require_role("org_admin", "super_admin"))):
+    """Send an invitation to a new user within the current org."""
+    email = (body.get("email") or "").strip().lower()
+    role = (body.get("role") or "clinician").strip()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid email"}, status_code=400)
+    if role not in ("org_admin", "clinician", "read_only"):
+        return JSONResponse({"error": "Invalid role"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+    from db import create_invitation
+    invite = create_invitation(ctx.org_id, email, role)
+    return JSONResponse({"ok": True, "token": invite["token"], "email": email, "role": role})
+
+
+# ── Superadmin endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/superadmin/orgs")
+@limiter.limit("30/hour")
+async def superadmin_list_orgs(request: Request,
+                               ctx: OrgContext = Depends(require_role("super_admin"))):
+    """List all organizations (super_admin only)."""
+    if not DATABASE_URL:
+        return JSONResponse({"orgs": [{"id": DEFAULT_ORG_ID, "name": "Original Users",
+                                        "slug": "original-users"}]})
+    from db import list_all_organizations
+    return JSONResponse({"orgs": list_all_organizations()})
+
+
+# ── TCM Billing CPT Automation ────────────────────────────────────────────────
+# CMS TCM MLN Fact Sheet ICN908628 / Medicare Claims Processing Manual Ch.12 Sec.30.6
+
+async def _maybe_create_tcm_episode(  # pragma: no cover
+    discharge_plan: str,
+    patient_data: dict,
+    org_id: str,
+    user_email: str,
+) -> dict | None:
+    """Auto-assess TCM eligibility after plan generation. Non-blocking — never raises.
+
+    Returns a summary dict if a TCM episode was created, None otherwise.
+    Requires discharge_date, discharge_setting, patient_mrn, patient_name,
+    discharge_diagnosis, attending_provider_npi, attending_provider_name.
+    """
+    required = [
+        "discharge_date", "discharge_setting", "patient_mrn", "patient_name",
+        "discharge_diagnosis", "attending_provider_npi", "attending_provider_name",
+    ]
+    if not all(patient_data.get(f) for f in required):
+        return None
+    try:
+        from tcm_module import assess_mdm_complexity
+        from datetime import date as _date
+        import db as _db
+        discharge_date = _date.fromisoformat(str(patient_data["discharge_date"]))
+        mdm = await assess_mdm_complexity(
+            discharge_plan=discharge_plan,
+            discharge_date=discharge_date,
+            discharge_setting=patient_data["discharge_setting"],
+        )
+        if mdm.get("eligibility") != "eligible":
+            return None
+        episode_id = await asyncio.to_thread(
+            _db.create_tcm_episode, org_id,
+            {
+                **patient_data,
+                "discharge_date": discharge_date,
+                "recommended_cpt": mdm.get("recommended_cpt"),
+                "mdm_complexity": mdm.get("mdm_complexity"),
+                "mdm_rationale": mdm.get("mdm_rationale"),
+                "mdm_rationale_json": json.dumps(mdm),
+                "mdm_assessed_by": "ai_assisted",
+                "status": "pending_contact",
+                "created_by": None,
+            },
+        )
+        rates = mdm.get("estimated_reimbursement", {})
+        return {
+            "episode_id": episode_id,
+            "cpt": mdm.get("recommended_cpt"),
+            "contact_deadline": mdm.get("contact_deadline"),
+            "estimated_revenue": rates.get("rate_non_facility", 0),
+        }
+    except Exception as e:
+        logging.getLogger("tcm").warning("TCM auto-assessment skipped: %s", e)
+        return None
+
+
+@app.post("/api/tcm/episodes")
+@limiter.limit("30/hour")
+async def create_tcm_episode_endpoint(
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Create a TCM episode and run AI MDM assessment.
+
+    Requires DATABASE_URL. Returns MDM assessment with CPT recommendation,
+    contact deadline (2 business days), and visit deadline (7 or 14 days).
+    """
+    required_fields = [
+        "patient_mrn", "patient_name", "discharge_date", "discharge_setting",
+        "discharge_diagnosis", "attending_provider_npi", "attending_provider_name",
+        "discharge_plan_text",
+    ]
+    for field in required_fields:
+        if not body.get(field):
+            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+
+    valid_settings = [
+        "inpatient_hospital", "snf", "irf", "ltch", "observation", "partial_hospitalization",
+    ]
+    if body["discharge_setting"] not in valid_settings:
+        return JSONResponse(
+            {"error": f"Invalid discharge_setting. Must be one of: {valid_settings}"},
+            status_code=400,
+        )
+
+    from datetime import date as _date
+    try:
+        discharge_date = _date.fromisoformat(body["discharge_date"])
+    except ValueError:
+        return JSONResponse(
+            {"error": "discharge_date must be YYYY-MM-DD format"}, status_code=400)
+
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    from tcm_module import assess_mdm_complexity
+    try:
+        mdm = await assess_mdm_complexity(
+            discharge_plan=body["discharge_plan_text"],
+            discharge_date=discharge_date,
+            discharge_setting=body["discharge_setting"],
+        )
+    except Exception as e:
+        return JSONResponse({"error": f"MDM assessment failed: {e}"}, status_code=500)
+
+    import db as _db
+    episode_id = await asyncio.to_thread(
+        _db.create_tcm_episode, ctx.org_id,
+        {
+            **body,
+            "discharge_date": discharge_date,
+            "recommended_cpt": mdm.get("recommended_cpt"),
+            "mdm_complexity": mdm.get("mdm_complexity"),
+            "mdm_rationale": mdm.get("mdm_rationale"),
+            "mdm_rationale_json": json.dumps(mdm),
+            "mdm_assessed_by": "ai_assisted",
+            "status": ("pending_contact" if mdm.get("eligibility") == "eligible"
+                       else "not_eligible"),
+            "created_by": None,
+        },
+    )
+
+    cpt = mdm.get("recommended_cpt", "not_eligible")
+    return JSONResponse({
+        "ok": True,
+        "episode_id": episode_id,
+        "mdm_assessment": mdm,
+        "contact_deadline": mdm.get("contact_deadline"),
+        "visit_deadline": (mdm.get("visit_deadline_7day") if cpt == "99496"
+                           else mdm.get("visit_deadline_14day")),
+    })
+
+
+@app.post("/api/tcm/episodes/{episode_id}/contacts")
+@limiter.limit("60/hour")
+async def record_tcm_contact(
+    episode_id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Record a contact attempt (qualifying or non-qualifying) for a TCM episode."""
+    required_fields = ["contact_date", "contact_time", "contact_method",
+                       "contact_result", "contacted_by"]
+    for f in required_fields:
+        if not body.get(f):
+            return JSONResponse({"error": f"Missing: {f}"}, status_code=400)
+    if body["contact_method"] not in ("phone", "video", "in_person"):
+        return JSONResponse(
+            {"error": "contact_method must be phone, video, or in_person"}, status_code=400)
+    if body["contact_result"] not in (
+        "reached", "left_voicemail", "no_answer", "patient_declined"
+    ):
+        return JSONResponse({"error": "Invalid contact_result"}, status_code=400)
+
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    import db as _db
+    contact_id = await asyncio.to_thread(
+        _db.create_tcm_contact, ctx.org_id, episode_id,
+        {**body, "contacted_by_id": None},
+    )
+    if body["contact_result"] == "reached":
+        await asyncio.to_thread(
+            _db.update_episode_status, ctx.org_id, episode_id, "contact_completed")
+    return JSONResponse({
+        "ok": True,
+        "contact_id": contact_id,
+        "qualifying": body["contact_result"] == "reached",
+    })
+
+
+@app.post("/api/tcm/episodes/{episode_id}/visits")
+@limiter.limit("30/hour")
+async def record_tcm_visit(
+    episode_id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Record a face-to-face visit for a TCM episode."""
+    for f in ("visit_date", "visit_type", "provider_npi", "provider_name"):
+        if not body.get(f):
+            return JSONResponse({"error": f"Missing: {f}"}, status_code=400)
+
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    import db as _db
+    visit_id = await asyncio.to_thread(
+        _db.create_tcm_visit, ctx.org_id, episode_id, body)
+    await asyncio.to_thread(
+        _db.update_episode_status, ctx.org_id, episode_id, "visit_completed")
+    return JSONResponse({"ok": True, "visit_id": visit_id})
+
+
+@app.get("/api/tcm/episodes/{episode_id}")
+@limiter.limit("120/hour")
+async def get_tcm_episode_endpoint(
+    episode_id: str,
+    request: Request,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Get a single TCM episode with real-time window status."""
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    import db as _db
+    from tcm_module import compute_window_status
+    ep = await asyncio.to_thread(_db.get_tcm_episode, ctx.org_id, episode_id)
+    if not ep:
+        return JSONResponse({"error": "Episode not found"}, status_code=404)
+    contacts = await asyncio.to_thread(_db.get_tcm_contacts, ctx.org_id, episode_id)
+    visits = await asyncio.to_thread(_db.get_tcm_visits, ctx.org_id, episode_id)
+    window = compute_window_status(ep, contacts, visits)
+    return JSONResponse({
+        "episode": {k: str(v) if hasattr(v, "isoformat") else v for k, v in ep.items()},
+        "contacts": contacts,
+        "visits": visits,
+        "window_status": {
+            **window.__dict__,
+            "discharge_date": str(window.discharge_date),
+            "contact_deadline": str(window.contact_deadline),
+            "contact_date": str(window.contact_date) if window.contact_date else None,
+            "visit_deadline": str(window.visit_deadline),
+            "visit_date": str(window.visit_date) if window.visit_date else None,
+            "overall_status": window.overall_status.value,
+        },
+    })
+
+
+@app.get("/api/tcm/dashboard")
+@limiter.limit("60/hour")
+async def tcm_dashboard(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    """Dashboard: all active TCM episodes with alert levels and revenue estimate."""
+    if not DATABASE_URL:
+        return JSONResponse({
+            "episodes": [], "total_active": 0, "red_alerts": 0,
+            "amber_alerts": 0, "claim_ready": 0, "estimated_monthly_revenue": 0,
+            "note": "TCM module requires PostgreSQL",
+        })
+
+    import db as _db
+    from tcm_module import compute_window_status, _get_reimbursement_rates
+    episodes = await asyncio.to_thread(_db.get_active_tcm_episodes, ctx.org_id)
+    dashboard = []
+    total_revenue = 0.0
+    for ep in episodes:
+        contacts = await asyncio.to_thread(_db.get_tcm_contacts, ctx.org_id, str(ep["id"]))
+        visits = await asyncio.to_thread(_db.get_tcm_visits, ctx.org_id, str(ep["id"]))
+        window = compute_window_status(ep, contacts, visits)
+        rates = _get_reimbursement_rates(ep.get("cpt_final") or ep.get("recommended_cpt"))
+        row = {
+            "episode_id": str(ep["id"]),
+            "patient_name": ep["patient_name"],
+            "discharge_date": str(ep["discharge_date"]),
+            "cpt_code": ep.get("cpt_final") or ep.get("recommended_cpt"),
+            "alert_level": window.alert_level,
+            "alert_message": window.alert_message,
+            "contact_deadline": str(window.contact_deadline),
+            "contact_completed": window.contact_completed,
+            "visit_deadline": str(window.visit_deadline),
+            "visit_completed": window.visit_completed,
+            "status": window.overall_status.value,
+            "estimated_revenue": rates["rate_non_facility"],
+        }
+        dashboard.append(row)
+        if window.claim_eligible:
+            total_revenue += rates["rate_non_facility"]
+
+    return JSONResponse({
+        "episodes": dashboard,
+        "total_active": len(dashboard),
+        "red_alerts": sum(1 for d in dashboard if d["alert_level"] == "red"),
+        "amber_alerts": sum(1 for d in dashboard if d["alert_level"] == "amber"),
+        "claim_ready": sum(1 for d in dashboard if d["status"] == "claim_ready"),
+        "estimated_monthly_revenue": round(total_revenue, 2),
+    })
+
+
+@app.post("/api/tcm/episodes/{episode_id}/generate-claim")
+@limiter.limit("30/hour")
+async def generate_tcm_claim_endpoint(
+    episode_id: str,
+    request: Request,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Generate and persist a claim-ready billing record for a TCM episode."""
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    import db as _db
+    from tcm_module import generate_tcm_claim, compute_window_status
+    ep = await asyncio.to_thread(_db.get_tcm_episode, ctx.org_id, episode_id)
+    if not ep:
+        return JSONResponse({"error": "Episode not found"}, status_code=404)
+    contacts = await asyncio.to_thread(_db.get_tcm_contacts, ctx.org_id, episode_id)
+    visits = await asyncio.to_thread(_db.get_tcm_visits, ctx.org_id, episode_id)
+    mdm = json.loads(ep.get("mdm_rationale_json") or "{}")
+    claim = generate_tcm_claim(ep, contacts, visits, mdm)
+    if not claim["claimable"]:
+        return JSONResponse({"error": claim["reason"]}, status_code=400)
+    claim_id = await asyncio.to_thread(_db.save_tcm_claim, ctx.org_id, episode_id, claim)
+    await asyncio.to_thread(
+        _db.update_episode_status, ctx.org_id, episode_id, "claim_ready")
+    return JSONResponse({"ok": True, "claim_id": claim_id, "claim": claim})
+
+
+@app.get("/api/tcm/claims/export")
+@limiter.limit("10/hour")
+async def export_tcm_claims(
+    request: Request,
+    format: str = "csv",
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Export all claim-ready episodes as CSV or JSON for clearinghouse submission."""
+    if not DATABASE_URL:
+        return JSONResponse(
+            {"error": "TCM module requires PostgreSQL — set POSTGRES_URL"}, status_code=503)
+
+    import db as _db
+    from tcm_module import generate_tcm_claim
+    episodes = await asyncio.to_thread(_db.get_claim_ready_episodes, ctx.org_id)
+    claims = []
+    for ep in episodes:
+        contacts = await asyncio.to_thread(_db.get_tcm_contacts, ctx.org_id, str(ep["id"]))
+        visits = await asyncio.to_thread(_db.get_tcm_visits, ctx.org_id, str(ep["id"]))
+        mdm = json.loads(ep.get("mdm_rationale_json") or "{}")
+        claim = generate_tcm_claim(ep, contacts, visits, mdm)
+        if claim["claimable"]:
+            claims.append(claim)
+
+    if format == "json":
+        return JSONResponse({
+            "claims": claims,
+            "count": len(claims),
+            "total_estimated": round(sum(c["estimated_reimbursement"] for c in claims), 2),
+        })
+
+    if not claims:
+        return JSONResponse({"error": "No claim-ready episodes found"}, status_code=404)
+    import csv, io
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output, fieldnames=list(claims[0].keys()), extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(claims)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=tcm_claims_{__import__('datetime').date.today()}.csv"
+            )
+        },
+    )
+
+
+# ── TCM deadline alert scheduler (6 AM daily) ────────────────────────────────
+
+@app.on_event("startup")
+async def start_tcm_scheduler():  # pragma: no cover
+    """Start APScheduler daily job that scans TCM deadlines.
+
+    Note: requires a persistent process — does not run on serverless deployments.
+    """
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+    except ImportError:
+        logging.getLogger("tcm.scheduler").warning(
+            "apscheduler not installed — TCM deadline alerts disabled. "
+            "Run: pip install apscheduler"
+        )
+        return
+
+    async def _run_deadline_scan():
+        if not DATABASE_URL:
+            return
+        import db as _db
+        from tcm_module import compute_window_status
+        log = logging.getLogger("tcm.scheduler")
+        log.info("Running TCM deadline alert scan...")
+        orgs = await asyncio.to_thread(_db.list_all_organizations)
+        total_alerts = 0
+        for org in orgs:
+            episodes = await asyncio.to_thread(_db.get_active_tcm_episodes, str(org["id"]))
+            for ep in episodes:
+                contacts = await asyncio.to_thread(
+                    _db.get_tcm_contacts, str(org["id"]), str(ep["id"]))
+                visits = await asyncio.to_thread(
+                    _db.get_tcm_visits, str(org["id"]), str(ep["id"]))
+                window = compute_window_status(ep, contacts, visits)
+                if window.alert_level in ("red", "amber"):
+                    total_alerts += 1
+                    log.warning(json.dumps({
+                        "alert_type": "tcm_deadline",
+                        "org_id": str(org["id"])[:8],
+                        "episode_id": str(ep["id"])[:8],
+                        "alert_level": window.alert_level,
+                        "alert_msg": window.alert_message,
+                        "cpt_code": window.cpt_code,
+                    }))
+        log.info("TCM alert scan complete. %d alerts.", total_alerts)
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        _run_deadline_scan,
+        CronTrigger(hour=6, minute=0),
+        id="tcm_deadline_alerts",
+        misfire_grace_time=3600,
+    )
+    scheduler.start()
+    logging.getLogger("tcm.scheduler").info("TCM deadline alert scheduler started")
