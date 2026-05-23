@@ -991,43 +991,6 @@ APP_URL = os.environ.get("NEXT_PUBLIC_APP_URL", "https://discharge-planning.verc
 FHIR_REDIRECT_URI = os.getenv("FHIR_REDIRECT_URI", f"{APP_URL}/api/fhir/callback")
 
 
-@app.get("/api/fhir/debug-params")
-async def fhir_debug_params(ehr: str = "epic"):
-    """Return the exact OAuth parameters and full authorize URL — no redirect."""
-    if _FHIR_IMPORT_ERROR:
-        return _fhir_unavailable()
-    try:
-        config = get_ehr_config(ehr)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    auth_endpoint = config.auth_endpoint_override or "(would use SMART discovery)"
-    use_pkce = config.smart_version != "v1"
-    params: dict = {
-        "response_type": "code",
-        "client_id": config.client_id or "NOT_SET",
-        "redirect_uri": FHIR_REDIRECT_URI,
-        "scope": " ".join(config.scopes),
-        "state": "DEBUG_TEST_STATE",
-        "aud": config.fhir_base_url,
-    }
-    if use_pkce:
-        params["code_challenge"] = "DEBUG_CHALLENGE"
-        params["code_challenge_method"] = "S256"
-    full_url = auth_endpoint + "?" + urlencode(params)
-    return JSONResponse({
-        "ehr": ehr,
-        "smart_version": config.smart_version,
-        "use_pkce": use_pkce,
-        "client_id": config.client_id or "(NOT SET)",
-        "redirect_uri": FHIR_REDIRECT_URI,
-        "scopes": config.scopes,
-        "scope_string": " ".join(config.scopes),
-        "fhir_base_url": config.fhir_base_url,
-        "auth_endpoint": auth_endpoint,
-        "token_endpoint": config.token_endpoint_override or "(SMART discovery)",
-        "full_authorize_url": full_url,
-    })
-
 
 # ── Legacy Epic SMART launch (kept for backward-compatibility) ────────────────
 # New integrations should use /api/fhir/authorize?ehr=epic instead.
