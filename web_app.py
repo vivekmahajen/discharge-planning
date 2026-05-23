@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -17,6 +18,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 try:
     from fhir.ehr_config import get_ehr_config, list_ehr_display
@@ -59,7 +63,10 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Discharge Planning AI")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -75,8 +82,64 @@ async def healthz():
         "routes": sorted(routes),
     }
 
-# Auth config
-SECRET_KEY = os.getenv("SECRET_KEY", "discharge-planning-dev-secret-change-in-prod")
+
+@app.get("/fhir/metadata", response_class=JSONResponse)
+async def capability_statement():
+    """FHIR R4 CapabilityStatement — required for 170.315(g)(10) ATL testing."""
+    base = "http://hl7.org/fhir/us/core/StructureDefinition"
+    def _res(resource_type, profile, searches):
+        return {
+            "type": resource_type,
+            "profile": f"{base}/{profile}",
+            "interaction": [{"code": "read"}, {"code": "search-type"}],
+            "searchParam": [{"name": n, "type": t} for n, t in searches],
+        }
+    return {
+        "resourceType": "CapabilityStatement",
+        "status": "active",
+        "date": "2026-05-01",
+        "kind": "instance",
+        "fhirVersion": "4.0.1",
+        "format": ["application/fhir+json"],
+        "implementationGuide": [
+            "http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core"
+        ],
+        "rest": [{
+            "mode": "server",
+            "security": {
+                "extension": [{
+                    "url": "http://fhir-registry.smarthealthit.org/StructureDefinition/capabilities",
+                    "valueCode": "launch-ehr",
+                }],
+                "service": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/restful-security-service", "code": "SMART-on-FHIR"}]}],
+            },
+            "resource": [
+                _res("Patient", "us-core-patient", [("_id", "token"), ("identifier", "token"), ("family", "string"), ("birthdate", "date")]),
+                _res("AllergyIntolerance", "us-core-allergyintolerance", [("patient", "reference"), ("clinical-status", "token")]),
+                _res("CarePlan", "us-core-careplan", [("patient", "reference"), ("status", "token"), ("category", "token")]),
+                _res("CareTeam", "us-core-careteam", [("patient", "reference"), ("status", "token")]),
+                _res("Condition", "us-core-condition", [("patient", "reference"), ("clinical-status", "token"), ("category", "token")]),
+                _res("DiagnosticReport", "us-core-diagnosticreport-note", [("patient", "reference"), ("category", "token"), ("date", "date")]),
+                _res("DocumentReference", "us-core-documentreference", [("patient", "reference"), ("type", "token"), ("date", "date")]),
+                _res("Encounter", "us-core-encounter", [("patient", "reference"), ("status", "token"), ("date", "date")]),
+                _res("Goal", "us-core-goal", [("patient", "reference"), ("lifecycle-status", "token")]),
+                _res("Immunization", "us-core-immunization", [("patient", "reference"), ("status", "token"), ("date", "date")]),
+                _res("MedicationRequest", "us-core-medicationrequest", [("patient", "reference"), ("status", "token"), ("intent", "token")]),
+                _res("Observation", "us-core-vital-signs", [("patient", "reference"), ("category", "token"), ("code", "token"), ("date", "date")]),
+                _res("Procedure", "us-core-procedure", [("patient", "reference"), ("status", "token"), ("date", "date")]),
+                _res("Provenance", "us-core-provenance", [("patient", "reference"), ("target", "reference")]),
+                _res("Device", "us-core-implantable-device", [("patient", "reference"), ("type", "token")]),
+                _res("Location", "us-core-location", [("name", "string"), ("address", "string")]),
+                _res("Organization", "us-core-organization", [("name", "string"), ("identifier", "token")]),
+                _res("Practitioner", "us-core-practitioner", [("name", "string"), ("identifier", "token")]),
+            ],
+        }],
+    }
+
+# Auth config — SECRET_KEY must be set in environment; no insecure fallback
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required and not set.")
 ALLOWED_EMAILS_RAW = os.getenv("ALLOWED_EMAILS", "")
 ALLOWED_EMAILS = {e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.strip()}
 
@@ -86,6 +149,60 @@ COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
 
 # Postgres URL — Vercel injects POSTGRES_URL automatically; DATABASE_URL is the fallback
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
+
+# ── HIPAA audit log ───────────────────────────────────────────────────────────
+_audit_logger = logging.getLogger("hipaa.audit")
+logging.basicConfig(level=logging.INFO)
+
+_AUDITED_PREFIXES = ("/api/plan", "/api/fhir", "/api/summary", "/api/discharge",
+                     "/api/teachback", "/api/cdph", "/api/hrrp", "/api/medications",
+                     "/api/multilingual", "/api/immunisation")
+
+async def _audit_log_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _AUDITED_PREFIXES):
+        user = get_current_user(request)
+        if user:
+            await asyncio.to_thread(_write_audit_entry, {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user_hash": hashlib.sha256(user.encode()).hexdigest()[:16],
+                "endpoint": path,
+                "method": request.method,
+                "status": response.status_code,
+                "ip": request.client.host if request.client else "unknown",
+            })
+    return response
+
+def _write_audit_entry(entry: dict) -> None:
+    if DATABASE_URL:
+        try:
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS audit_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            user_hash TEXT,
+                            endpoint TEXT,
+                            method TEXT,
+                            status INT,
+                            ip TEXT
+                        )
+                    """)
+                    cur.execute(
+                        "INSERT INTO audit_log (ts, user_hash, endpoint, method, status, ip) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (entry["timestamp"], entry["user_hash"], entry["endpoint"],
+                         entry["method"], entry["status"], entry["ip"]),
+                    )
+                conn.commit()
+        except Exception:
+            _audit_logger.exception("Audit log write failed")
+    else:
+        _audit_logger.info("AUDIT %s", entry)
+
+app.middleware("http")(_audit_log_middleware)
 
 
 # ── Password helpers ─────────────────────────────────────────────────────────
@@ -190,8 +307,7 @@ def authenticate_user(email: str, password: str) -> str | None:
 @app.on_event("startup")
 async def startup():
     if DATABASE_URL:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _ensure_table)
+        await asyncio.to_thread(_ensure_table)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────
@@ -227,7 +343,7 @@ def _set_session(response: JSONResponse, email: str) -> JSONResponse:
         value=make_session_cookie(email),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=True,
         max_age=COOKIE_MAX_AGE,
     )
     return response
@@ -242,6 +358,7 @@ async def login_page():
 
 
 @app.post("/api/auth/signup")
+@limiter.limit("5/minute")
 async def do_signup(request: Request):
     body = await request.json()
     email = (body.get("email") or "").strip().lower()
@@ -263,6 +380,7 @@ async def do_signup(request: Request):
 
 
 @app.post("/api/auth/login")
+@limiter.limit("5/minute")
 async def do_login(request: Request):
     body = await request.json()
     email = (body.get("email") or "").strip().lower()
@@ -524,6 +642,7 @@ async def readmission_tracker_page(request: Request):
 
 
 @app.post("/api/roi/generate")
+@limiter.limit("20/minute")
 async def generate_roi_summary(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -552,9 +671,8 @@ async def generate_roi_summary(request: Request):
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -572,6 +690,7 @@ async def generate_roi_summary(request: Request):
 
 
 @app.post("/api/hrrp/generate")
+@limiter.limit("20/minute")
 async def generate_hrrp_briefing(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -600,9 +719,8 @@ async def generate_hrrp_briefing(request: Request):
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -651,9 +769,8 @@ async def analyze_cdph_compliance(request: Request):
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -671,6 +788,7 @@ async def analyze_cdph_compliance(request: Request):
 
 
 @app.post("/api/teachback/generate")
+@limiter.limit("20/minute")
 async def generate_teachback(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -710,9 +828,8 @@ async def generate_teachback(request: Request):
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -733,6 +850,7 @@ async def generate_teachback(request: Request):
 
 
 @app.post("/api/discharge-summary/generate")
+@limiter.limit("20/minute")
 async def generate_discharge_summary_v2(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -866,9 +984,8 @@ async def generate_discharge_summary_v2(request: Request):
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -887,6 +1004,7 @@ async def generate_discharge_summary_v2(request: Request):
 
 
 @app.post("/api/summary/generate")
+@limiter.limit("20/minute")
 async def generate_summary(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -951,9 +1069,8 @@ Rules:
         )
         return response.content[0].text
 
-    loop = asyncio.get_event_loop()
     try:
-        raw_text = await loop.run_in_executor(None, _call_api)
+        raw_text = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -977,6 +1094,7 @@ Rules:
 
 
 @app.post("/api/plan/stream")
+@limiter.limit("20/minute")
 async def create_plan(request: Request):
     if not get_current_user(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -1153,6 +1271,7 @@ async def fhir_authorize(
         max_age=FHIR_STATE_TTL,
         httponly=True,
         samesite="lax",
+        secure=True,
     )
     return response
 
@@ -1240,6 +1359,7 @@ async def fhir_callback(
         max_age=FHIR_SESSION_TTL,
         httponly=True,
         samesite="lax",
+        secure=True,
     )
     response.delete_cookie(FHIR_STATE_COOKIE)
     return response
@@ -1300,6 +1420,7 @@ def _apply_refreshed_cookie(response, new_cookie: str | None) -> None:
             max_age=FHIR_SESSION_TTL,
             httponly=True,
             samesite="lax",
+            secure=True,
         )
 
 
