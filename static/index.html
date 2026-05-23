@@ -906,7 +906,7 @@ async function loadFhirPatient(patientId) {
       errEl.textContent = 'FHIR load failed: ' + (j.error || res.status);
       return;
     }
-    const d = await res.json();
+    const { form_data: d } = await res.json();
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
     set('patient_name', d.patient_name);
     set('age', d.age);
@@ -916,6 +916,8 @@ async function loadFhirPatient(patientId) {
     set('secondary_diagnoses', d.secondary_diagnoses);
     set('admission_medications', d.admission_medications);
     set('inpatient_medications', d.inpatient_medications);
+    set('discharge_medications', d.discharge_medications);
+    set('additional_clinical_notes', d.additional_clinical_notes);
     set('primary_language', d.primary_language);
     errEl.textContent = '';
     errEl.style.color = 'green';
