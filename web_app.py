@@ -15,7 +15,8 @@ from urllib.parse import urlencode
 import anthropic
 import httpx
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Request
+from dataclasses import dataclass
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from typing import Any
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -282,6 +283,17 @@ COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
 # Postgres URL — Vercel injects POSTGRES_URL automatically; DATABASE_URL is the fallback
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
+# Default org UUID used in file-based / test mode (no real DB)
+DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001"
+
+
+@dataclass
+class OrgContext:
+    """Decoded, verified identity from session cookie — org_id and role included."""
+    email: str
+    org_id: str
+    role: str
+
 # ── HIPAA audit log ───────────────────────────────────────────────────────────
 _audit_logger = logging.getLogger("hipaa.audit")
 logging.basicConfig(level=logging.INFO)
@@ -485,16 +497,48 @@ async def startup():
 
 # ── Session helpers ──────────────────────────────────────────────────────────
 
-def make_session_cookie(email: str) -> str:
-    return _serializer.dumps({"email": email})
+def make_session_cookie(email: str, org_id: str = DEFAULT_ORG_ID,
+                        role: str = "clinician") -> str:
+    return _serializer.dumps({"email": email, "org_id": org_id, "role": role})
 
 
 def verify_session_cookie(token: str) -> str | None:
+    """Return the email from a valid session cookie (used by legacy helpers)."""
     try:
         data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
         return data.get("email")
     except (BadSignature, SignatureExpired):
         return None
+
+
+def get_current_org(request: Request) -> OrgContext:
+    """FastAPI dependency — extract and validate org context from signed session cookie.
+
+    In file-based mode (DATABASE_URL is None) the org_id defaults to
+    DEFAULT_ORG_ID so tests work without a real database.
+    """
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    org_id = data.get("org_id", DEFAULT_ORG_ID)
+    role = data.get("role", "clinician")
+    return OrgContext(email=email, org_id=org_id, role=role)
+
+
+def require_role(*roles: str):
+    """Factory: returns a FastAPI dependency that enforces one of the given roles."""
+    def _dep(ctx: OrgContext = Depends(get_current_org)) -> OrgContext:
+        if ctx.role not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return ctx
+    return _dep
 
 
 def get_current_user(request: Request) -> str | None:
@@ -510,10 +554,12 @@ def require_login(request: Request):
     return None
 
 
-def _set_session(response: JSONResponse, email: str) -> JSONResponse:
+def _set_session(response: JSONResponse, email: str,
+                 org_id: str = DEFAULT_ORG_ID,
+                 role: str = "clinician") -> JSONResponse:
     response.set_cookie(
         key=COOKIE_NAME,
-        value=make_session_cookie(email),
+        value=make_session_cookie(email, org_id, role),
         httponly=True,
         samesite="lax",
         secure=True,
@@ -591,11 +637,8 @@ async def logout(request: Request):
 
 @app.get("/api/me")
 @limiter.limit("120/hour")
-async def me(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    return JSONResponse({"email": user})
+async def me(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    return JSONResponse({"email": ctx.email, "org_id": ctx.org_id, "role": ctx.role})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -609,9 +652,8 @@ async def index(request: Request):
 
 @app.get("/api/sample-patient")
 @limiter.limit("60/hour")
-async def get_sample_patient(request: Request):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+async def get_sample_patient(request: Request,
+                             ctx: OrgContext = Depends(get_current_org)):
     from sample_patient import SAMPLE_PATIENT_WEB
     return JSONResponse(dict(SAMPLE_PATIENT_WEB))
 
@@ -828,10 +870,8 @@ async def readmission_tracker_page(request: Request):
 
 @app.post("/api/roi/generate")
 @limiter.limit("30/hour")
-async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={}),
+                               ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -875,10 +915,8 @@ async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(def
 
 @app.post("/api/hrrp/generate")
 @limiter.limit("30/hour")
-async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(default={}),
+                                 ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -922,10 +960,8 @@ async def generate_hrrp_briefing(request: Request, body: dict[str, Any] = Body(d
 
 @app.post("/api/cdph-compliance/analyze")
 @limiter.limit("30/hour")
-async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(default={}),
+                                  ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -972,10 +1008,8 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
 
 @app.post("/api/teachback/generate")
 @limiter.limit("30/hour")
-async def generate_teachback(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_teachback(request: Request, body: dict[str, Any] = Body(default={}),
+                             ctx: OrgContext = Depends(get_current_org)):
     user_prompt = body.get("prompt", "")
     if not user_prompt.strip():
         return JSONResponse({"error": "prompt is required"}, status_code=400)
@@ -1033,10 +1067,8 @@ async def generate_teachback(request: Request, body: dict[str, Any] = Body(defau
 
 @app.post("/api/discharge-summary/generate")
 @limiter.limit("20/hour")
-async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] = Body(default={}),
+                                        org: OrgContext = Depends(get_current_org)):
     ctx = body.get("ctx", {})
     notes = body.get("notes", "")
     if not notes.strip():
@@ -1186,10 +1218,8 @@ async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] =
 
 @app.post("/api/summary/generate")
 @limiter.limit("20/hour")
-async def generate_summary(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_summary(request: Request, body: dict[str, Any] = Body(default={}),
+                           ctx: OrgContext = Depends(get_current_org)):
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=500)
@@ -1275,9 +1305,8 @@ Rules:
 
 @app.post("/api/plan/stream")
 @limiter.limit("10/hour")
-async def create_plan(request: Request, patient_data: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+async def create_plan(request: Request, patient_data: dict[str, Any] = Body(default={}),
+                      ctx: OrgContext = Depends(get_current_org)):
     return StreamingResponse(
         stream_plan(patient_data),
         media_type="text/event-stream",
@@ -1912,10 +1941,8 @@ def validate_translation(source_plan: "dict | str", translation: dict, lang_conf
 
 @app.post("/api/multilingual/generate")
 @limiter.limit("30/hour")
-async def generate_multilingual_instructions(request: Request, body: dict[str, Any] = Body(default={})):
-    if not get_current_user(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
+async def generate_multilingual_instructions(request: Request, body: dict[str, Any] = Body(default={}),
+                                             ctx: OrgContext = Depends(get_current_org)):
     target_lang = (body.get("target_language") or "").strip().lower()
     source_plan = (body.get("discharge_plan") or "").strip()
 
@@ -1972,3 +1999,172 @@ async def generate_multilingual_instructions(request: Request, body: dict[str, A
         "interpreter_recommended": result.get("meta", {}).get("interpreter_recommended", False),
         "requires_review": result.get("meta", {}).get("requires_clinician_review", False),
     })
+
+
+# ── Multi-tenant org provisioning ─────────────────────────────────────────────
+
+@app.post("/api/onboard/create-org")
+@limiter.limit("5/hour", key_func=_get_ip_key)
+async def create_org(request: Request, body: dict[str, Any] = Body(default={})):
+    """Create a new organization and seed its first admin user.
+
+    Available without an existing session — used during initial SaaS onboarding.
+    When DATABASE_URL is not set, returns a stub response for local dev.
+    """
+    name = (body.get("name") or "").strip()
+    slug = (body.get("slug") or "").strip().lower()
+    admin_email = (body.get("admin_email") or "").strip().lower()
+    admin_password = body.get("admin_password") or ""
+    domain = (body.get("domain") or "").strip() or None
+
+    if not name or not slug or not admin_email or not admin_password:
+        return JSONResponse({"error": "name, slug, admin_email, and admin_password are required"},
+                            status_code=400)
+    if "@" not in admin_email or "." not in admin_email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid admin_email"}, status_code=400)
+    if len(admin_password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        return JSONResponse({"error": "slug must be lowercase alphanumeric with hyphens only"},
+                            status_code=400)
+
+    if not DATABASE_URL:
+        # File-based dev mode: just sign up and return default org info
+        err = register_user(admin_email, admin_password)
+        if err:
+            return JSONResponse({"error": err}, status_code=409)
+        response = JSONResponse({
+            "ok": True,
+            "org": {"id": DEFAULT_ORG_ID, "name": name, "slug": slug},
+        })
+        return _set_session(response, admin_email, DEFAULT_ORG_ID, "org_admin")
+
+    # DB mode
+    from db import create_organization, slug_exists, register_user_db
+    if slug_exists(slug):
+        return JSONResponse({"error": "This slug is already taken."}, status_code=409)
+    try:
+        org = create_organization(name=name, slug=slug, domain=domain, plan="trial")
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to create organization: {exc}"}, status_code=500)
+
+    err = register_user_db(org["id"], admin_email, admin_password, role="org_admin")
+    if err:
+        return JSONResponse({"error": err}, status_code=409)
+
+    response = JSONResponse({
+        "ok": True,
+        "org": {"id": str(org["id"]), "name": org["name"], "slug": org["slug"]},
+    })
+    return _set_session(response, admin_email, str(org["id"]), "org_admin")
+
+
+@app.get("/api/onboard/check-slug")
+@limiter.limit("30/minute", key_func=_get_ip_key)
+async def check_slug(request: Request, slug: str = ""):
+    """Check whether an org slug is available."""
+    slug = slug.strip().lower()
+    if not slug or not re.match(r"^[a-z0-9-]+$", slug):
+        return JSONResponse({"available": False, "reason": "Invalid slug format"})
+    if not DATABASE_URL:
+        return JSONResponse({"available": True})
+    from db import slug_exists
+    return JSONResponse({"available": not slug_exists(slug)})
+
+
+# ── Invitation flow ───────────────────────────────────────────────────────────
+
+@app.get("/api/invite/accept")
+@limiter.limit("20/hour", key_func=_get_ip_key)
+async def invite_info(request: Request, token: str = ""):
+    """Return invitation metadata so the frontend can pre-fill the signup form."""
+    if not token:
+        return JSONResponse({"error": "token is required"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+    from db import get_invitation_by_token
+    invite = get_invitation_by_token(token)
+    if not invite:
+        return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+    return JSONResponse({
+        "email": invite["email"],
+        "role": invite["role"],
+        "org_name": invite.get("org_name"),
+        "org_slug": invite.get("org_slug"),
+    })
+
+
+@app.post("/api/invite/accept")
+@limiter.limit("10/hour", key_func=_get_ip_key)
+async def accept_invite(request: Request, body: dict[str, Any] = Body(default={})):
+    """Accept an invitation: create user account and set session."""
+    token = (body.get("token") or "").strip()
+    password = body.get("password") or ""
+    if not token or not password:
+        return JSONResponse({"error": "token and password are required"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+
+    from db import get_invitation_by_token, register_user_db, mark_invitation_accepted
+    invite = get_invitation_by_token(token)
+    if not invite:
+        return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+
+    org_id = str(invite["organization_id"])
+    email = invite["email"]
+    role = invite["role"]
+
+    err = register_user_db(org_id, email, password, role=role)
+    if err:
+        return JSONResponse({"error": err}, status_code=409)
+
+    mark_invitation_accepted(token)
+    response = JSONResponse({"ok": True, "email": email, "org_id": org_id, "role": role})
+    return _set_session(response, email, org_id, role)
+
+
+# ── Admin endpoints (org_admin and above) ─────────────────────────────────────
+
+@app.get("/api/admin/users")
+@limiter.limit("60/hour")
+async def admin_list_users(request: Request,
+                           ctx: OrgContext = Depends(require_role("org_admin", "super_admin"))):
+    """List all users in the current org."""
+    if not DATABASE_URL:
+        return JSONResponse({"users": [], "note": "file-based mode — no user records"})
+    from db import list_users
+    return JSONResponse({"users": list_users(ctx.org_id)})
+
+
+@app.post("/api/admin/invite")
+@limiter.limit("30/hour")
+async def admin_invite_user(request: Request, body: dict[str, Any] = Body(default={}),
+                            ctx: OrgContext = Depends(require_role("org_admin", "super_admin"))):
+    """Send an invitation to a new user within the current org."""
+    email = (body.get("email") or "").strip().lower()
+    role = (body.get("role") or "clinician").strip()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse({"error": "Invalid email"}, status_code=400)
+    if role not in ("org_admin", "clinician", "read_only"):
+        return JSONResponse({"error": "Invalid role"}, status_code=400)
+    if not DATABASE_URL:
+        return JSONResponse({"error": "Invitations require database mode"}, status_code=503)
+    from db import create_invitation
+    invite = create_invitation(ctx.org_id, email, role)
+    return JSONResponse({"ok": True, "token": invite["token"], "email": email, "role": role})
+
+
+# ── Superadmin endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/superadmin/orgs")
+@limiter.limit("30/hour")
+async def superadmin_list_orgs(request: Request,
+                               ctx: OrgContext = Depends(require_role("super_admin"))):
+    """List all organizations (super_admin only)."""
+    if not DATABASE_URL:
+        return JSONResponse({"orgs": [{"id": DEFAULT_ORG_ID, "name": "Original Users",
+                                        "slug": "original-users"}]})
+    from db import list_all_organizations
+    return JSONResponse({"orgs": list_all_organizations()})
