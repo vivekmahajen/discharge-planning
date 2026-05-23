@@ -1,7 +1,8 @@
 """EHR-specific SMART on FHIR configuration.
 
-Auth/token endpoints are discovered dynamically from each EHR's
-/.well-known/smart-configuration unless an override env var is provided.
+Auth/token endpoints are derived from each EHR's known URL pattern or from
+env var overrides. SMART discovery (/.well-known/smart-configuration) is only
+used for custom hospital instances where the base URL has been overridden.
 """
 
 from __future__ import annotations
@@ -43,21 +44,41 @@ class EHRConfig:
     token_endpoint_override: Optional[str] = None
 
 
+def _epic_oauth_root(fhir_base: str) -> str:
+    """Derive the Epic OAuth root from the FHIR base URL.
+
+    Epic FHIR base:  https://host/path/api/FHIR/R4
+    Epic OAuth root: https://host/path
+    Auth endpoint:   https://host/path/oauth2/authorize
+    Token endpoint:  https://host/path/oauth2/token
+    """
+    return fhir_base.rstrip("/").removesuffix("/api/FHIR/R4")
+
+
 def _build_registry() -> dict[str, EHRConfig]:
+    epic_fhir_base = os.getenv(
+        "FHIR_BASE_URL_EPIC",
+        "https://fhir.epic.com/interconnect-ambu-oauth/api/FHIR/R4",
+    )
+    _epic_root = _epic_oauth_root(epic_fhir_base)
+
     return {
         "epic": EHRConfig(
             name="epic",
             display_name="Epic",
-            fhir_base_url=os.getenv(
-                "FHIR_BASE_URL_EPIC",
-                "https://fhir.epic.com/interconnect-ambu-oauth/api/FHIR/R4",
-            ),
+            fhir_base_url=epic_fhir_base,
             client_id=os.getenv("FHIR_CLIENT_ID_EPIC", ""),
             client_secret=None,
             is_public_client=True,
             scopes=FHIR_SCOPES_PHASE1,
-            auth_endpoint_override=os.getenv("EPIC_AUTH_ENDPOINT"),
-            token_endpoint_override=os.getenv("EPIC_TOKEN_ENDPOINT"),
+            # Derive from URL pattern — avoids SMART discovery which Epic blocks
+            # server-side. Override with EPIC_AUTH_ENDPOINT for non-standard instances.
+            auth_endpoint_override=os.getenv(
+                "EPIC_AUTH_ENDPOINT", f"{_epic_root}/oauth2/authorize"
+            ),
+            token_endpoint_override=os.getenv(
+                "EPIC_TOKEN_ENDPOINT", f"{_epic_root}/oauth2/token"
+            ),
         ),
         "cerner": EHRConfig(
             name="cerner",

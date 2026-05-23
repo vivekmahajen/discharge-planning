@@ -1025,19 +1025,41 @@ async def fhir_authorize(
             status_code=500,
         )
 
-    # Discover SMART endpoints (or use overrides)
+    # Resolve FHIR base and auth/token endpoints.
+    # Priority: iss_override (EHR-embedded launch) > env var overrides > URL-derived defaults.
     fhir_base = iss_override or config.fhir_base_url
-    try:
-        if config.auth_endpoint_override and config.token_endpoint_override:
-            auth_endpoint = config.auth_endpoint_override
-            token_endpoint = config.token_endpoint_override
-        else:
+
+    if iss_override:
+        # EHR-embedded launch supplies a hospital-specific ISS — must discover endpoints.
+        try:
             smart_config = await discover_smart_endpoints(fhir_base)
-            auth_endpoint = config.auth_endpoint_override or smart_config.get("authorization_endpoint", "")
-            token_endpoint = config.token_endpoint_override or smart_config.get("token_endpoint", "")
-    except Exception as exc:
-        _fhir_audit_logger.error("SMART discovery failed: ehr=%s error=%s", ehr, type(exc).__name__)
-        return JSONResponse({"error": "Could not reach EHR SMART configuration endpoint."}, status_code=502)
+            auth_endpoint = smart_config.get("authorization_endpoint", "")
+            token_endpoint = smart_config.get("token_endpoint", "")
+        except Exception as exc:
+            _fhir_audit_logger.error(
+                "SMART discovery failed for iss_override: ehr=%s error=%s", ehr, type(exc).__name__
+            )
+            return JSONResponse(
+                {"error": "Could not reach the EHR SMART configuration endpoint. "
+                          "Verify the EHR base URL is reachable."},
+                status_code=502,
+            )
+    elif config.auth_endpoint_override and config.token_endpoint_override:
+        # Use pre-configured endpoints (avoids a server-side SMART discovery call
+        # that some EHRs block outside browser context).
+        auth_endpoint = config.auth_endpoint_override
+        token_endpoint = config.token_endpoint_override
+    else:
+        # Fallback: attempt SMART discovery for EHRs without hardcoded endpoints.
+        try:
+            smart_config = await discover_smart_endpoints(fhir_base)
+            auth_endpoint = smart_config.get("authorization_endpoint", "")
+            token_endpoint = smart_config.get("token_endpoint", "")
+        except Exception as exc:
+            _fhir_audit_logger.error("SMART discovery failed: ehr=%s error=%s", ehr, type(exc).__name__)
+            return JSONResponse(
+                {"error": "Could not reach EHR SMART configuration endpoint."}, status_code=502
+            )
 
     if not auth_endpoint or not token_endpoint:
         return JSONResponse({"error": "EHR did not return SMART authorization endpoints."}, status_code=502)
