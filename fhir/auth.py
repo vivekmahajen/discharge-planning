@@ -92,10 +92,10 @@ async def discover_smart_endpoints(fhir_base: str) -> dict:
 
 async def exchange_code_for_token(
     code: str,
-    code_verifier: str,
     token_endpoint: str,
     client_id: str,
     redirect_uri: str,
+    code_verifier: Optional[str] = None,
     client_secret: Optional[str] = None,
 ) -> dict:
     """Exchange authorization code for access + refresh tokens."""
@@ -104,8 +104,9 @@ async def exchange_code_for_token(
         "code": code,
         "redirect_uri": redirect_uri,
         "client_id": client_id,
-        "code_verifier": code_verifier,
     }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     if client_secret:

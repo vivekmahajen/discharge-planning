@@ -1135,7 +1135,12 @@ async def fhir_authorize(
     if not auth_endpoint or not token_endpoint:
         return JSONResponse({"error": "EHR did not return SMART authorization endpoints."}, status_code=502)
 
-    code_verifier, code_challenge = generate_pkce_pair()
+    use_pkce = config.smart_version != "v1"
+    if use_pkce:
+        code_verifier, code_challenge = generate_pkce_pair()
+    else:
+        code_verifier = code_challenge = None
+
     state = generate_secure_state()
 
     auth_state = {
@@ -1153,10 +1158,11 @@ async def fhir_authorize(
         "redirect_uri": FHIR_REDIRECT_URI,
         "scope": " ".join(config.scopes),
         "state": state,
-        "aud": fhir_base,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
     }
+    if use_pkce:
+        params["aud"] = fhir_base
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     if launch:
         params["launch"] = launch
 
@@ -1213,10 +1219,10 @@ async def fhir_callback(
     try:
         tokens = await exchange_code_for_token(
             code=code,
-            code_verifier=auth_state["code_verifier"],
             token_endpoint=auth_state["token_endpoint"],
             client_id=config.client_id,
             redirect_uri=FHIR_REDIRECT_URI,
+            code_verifier=auth_state.get("code_verifier"),
             client_secret=config.client_secret,
         )
     except Exception as exc:
