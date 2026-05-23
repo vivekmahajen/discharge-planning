@@ -222,6 +222,76 @@ class TestOnboardEndpoints:
             json={"token": "tok", "password": "Password1!"})
         assert r2.status_code == 503
 
+    async def test_invite_info_empty_token_returns_400(self, client):
+        r = await client.get("/api/invite/accept")
+        assert r.status_code == 400
+
+    async def test_accept_invite_missing_credentials_returns_400(self, client):
+        r = await client.post("/api/invite/accept", json={})
+        assert r.status_code == 400
+
+    async def test_accept_invite_short_password_returns_400(self, client):
+        r = await client.post("/api/invite/accept", json={"token": "tok", "password": "abc"})
+        assert r.status_code == 400
+
+    async def test_admin_invite_invalid_email_returns_400(self, client, tmp_path, monkeypatch):
+        import web_app
+        from web_app import app
+        monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+        app.dependency_overrides[web_app.get_current_org] = lambda: web_app.OrgContext(
+            "admin@x.com", web_app.DEFAULT_ORG_ID, "org_admin")
+        try:
+            r = await client.post("/api/admin/invite",
+                                  json={"email": "not-an-email", "role": "clinician"})
+            assert r.status_code == 400
+        finally:
+            del app.dependency_overrides[web_app.get_current_org]
+
+    async def test_admin_invite_invalid_role_returns_400(self, client, tmp_path, monkeypatch):
+        import web_app
+        from web_app import app
+        monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+        app.dependency_overrides[web_app.get_current_org] = lambda: web_app.OrgContext(
+            "admin@x.com", web_app.DEFAULT_ORG_ID, "org_admin")
+        try:
+            r = await client.post("/api/admin/invite",
+                                  json={"email": "user@hospital.com", "role": "super_villain"})
+            assert r.status_code == 400
+        finally:
+            del app.dependency_overrides[web_app.get_current_org]
+
+    async def test_admin_invite_valid_data_requires_db(self, client, tmp_path, monkeypatch):
+        import web_app
+        from web_app import app
+        monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+        monkeypatch.setattr(web_app, "DATABASE_URL", None)
+        app.dependency_overrides[web_app.get_current_org] = lambda: web_app.OrgContext(
+            "admin@x.com", web_app.DEFAULT_ORG_ID, "org_admin")
+        try:
+            r = await client.post("/api/admin/invite",
+                                  json={"email": "nurse@hospital.com", "role": "clinician"})
+            assert r.status_code == 503
+        finally:
+            del app.dependency_overrides[web_app.get_current_org]
+
+    async def test_create_org_invalid_email_returns_400(self, client, tmp_path, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+        r = await client.post("/api/onboard/create-org", json={
+            "name": "Test Hospital", "slug": "test-hospital",
+            "admin_email": "not-an-email", "admin_password": "SecurePass1!",
+        })
+        assert r.status_code == 400
+
+    async def test_create_org_short_password_returns_400(self, client, tmp_path, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+        r = await client.post("/api/onboard/create-org", json={
+            "name": "Test Hospital", "slug": "test-hospital",
+            "admin_email": "admin@hospital.com", "admin_password": "abc",
+        })
+        assert r.status_code == 400
+
 
 # ── PostgreSQL integration tests (skipped without DB) ─────────────────────────
 

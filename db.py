@@ -310,3 +310,190 @@ def get_audit_log(org_id: str, limit: int = 500) -> list[dict]:  # pragma: no co
             (org_id, limit),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+# ── TCM Billing functions ─────────────────────────────────────────────────────
+
+def create_tcm_episode(org_id: str, data: dict) -> str:  # pragma: no cover
+    """Insert a new TCM episode. Returns the episode UUID as a string."""
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            """
+            INSERT INTO tcm_episodes (
+                organization_id, patient_mrn, patient_name, patient_dob,
+                patient_medicare_id, discharge_date, discharge_setting,
+                admitting_diagnosis, discharge_diagnosis,
+                attending_provider_npi, attending_provider_name,
+                practice_tin, practice_npi,
+                recommended_cpt, mdm_complexity, mdm_rationale,
+                mdm_rationale_json, mdm_assessed_by, status, created_by
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            ) RETURNING id
+            """,
+            (
+                org_id,
+                data["patient_mrn"],
+                data["patient_name"],
+                data.get("patient_dob"),
+                data.get("patient_medicare_id"),
+                data["discharge_date"],
+                data["discharge_setting"],
+                data.get("admitting_diagnosis", "Not provided"),
+                data["discharge_diagnosis"],
+                data["attending_provider_npi"],
+                data["attending_provider_name"],
+                data.get("practice_tin"),
+                data.get("practice_npi"),
+                data.get("recommended_cpt"),
+                data.get("mdm_complexity"),
+                data.get("mdm_rationale"),
+                data.get("mdm_rationale_json"),
+                data.get("mdm_assessed_by", "ai_assisted"),
+                data.get("status", "pending_contact"),
+                data.get("created_by"),
+            ),
+        )
+        return str(cur.fetchone()["id"])
+
+
+def update_episode_status(org_id: str, episode_id: str,
+                          status: str) -> None:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            "UPDATE tcm_episodes SET status = %s, updated_at = NOW()"
+            " WHERE id = %s AND organization_id = %s",
+            (status, episode_id, org_id),
+        )
+
+
+def get_tcm_episode(org_id: str, episode_id: str) -> dict | None:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            "SELECT * FROM tcm_episodes WHERE id = %s AND organization_id = %s",
+            (episode_id, org_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_active_tcm_episodes(org_id: str) -> list[dict]:  # pragma: no cover
+    """Return all non-terminal episodes for the dashboard."""
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            """
+            SELECT * FROM tcm_episodes
+            WHERE organization_id = %s
+              AND status NOT IN ('claim_paid', 'claim_denied', 'not_eligible')
+            ORDER BY discharge_date DESC
+            """,
+            (org_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_claim_ready_episodes(org_id: str) -> list[dict]:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            "SELECT * FROM tcm_episodes WHERE organization_id = %s AND status = 'claim_ready'"
+            " ORDER BY discharge_date",
+            (org_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def create_tcm_contact(org_id: str, episode_id: str,
+                       data: dict) -> str:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            """
+            INSERT INTO tcm_contacts (
+                episode_id, organization_id, contact_date, contact_time,
+                contact_method, contact_result, contacted_by,
+                contacted_by_id, notes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                episode_id, org_id,
+                data["contact_date"], data["contact_time"],
+                data["contact_method"], data["contact_result"],
+                data["contacted_by"], data.get("contacted_by_id"),
+                data.get("notes"),
+            ),
+        )
+        return str(cur.fetchone()["id"])
+
+
+def get_tcm_contacts(org_id: str, episode_id: str) -> list[dict]:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            "SELECT * FROM tcm_contacts WHERE episode_id = %s AND organization_id = %s"
+            " ORDER BY contact_date, contact_time",
+            (episode_id, org_id),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def create_tcm_visit(org_id: str, episode_id: str,
+                     data: dict) -> str:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            """
+            INSERT INTO tcm_visits (
+                episode_id, organization_id, visit_date, visit_type,
+                provider_npi, provider_name, visit_notes, time_spent_mins
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                episode_id, org_id,
+                data["visit_date"], data["visit_type"],
+                data["provider_npi"], data["provider_name"],
+                data.get("visit_notes"), data.get("time_spent_mins"),
+            ),
+        )
+        return str(cur.fetchone()["id"])
+
+
+def get_tcm_visits(org_id: str, episode_id: str) -> list[dict]:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            "SELECT * FROM tcm_visits WHERE episode_id = %s AND organization_id = %s"
+            " ORDER BY visit_date",
+            (episode_id, org_id),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def save_tcm_claim(org_id: str, episode_id: str,
+                   claim: dict) -> str:  # pragma: no cover
+    with org_scoped_cursor(org_id) as cur:
+        cur.execute(
+            """
+            INSERT INTO tcm_claims (
+                episode_id, organization_id, cpt_code, icd10_primary,
+                icd10_additional, service_date, date_of_discharge,
+                place_of_service, rendering_provider_npi, billing_provider_npi,
+                billing_provider_tin, claim_amount, audit_trail
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                episode_id, org_id,
+                claim["cpt_code"],
+                claim["icd10_primary"],
+                claim.get("icd10_secondary", []),
+                claim["date_of_service"],
+                claim["date_of_discharge"],
+                claim.get("place_of_service", "11"),
+                claim["rendering_provider_npi"],
+                claim["billing_provider_npi"],
+                claim["billing_provider_tin"],
+                claim.get("charge_amount", 0),
+                json.dumps(claim.get("audit_trail", {})),
+            ),
+        )
+        return str(cur.fetchone()["id"])
+

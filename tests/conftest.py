@@ -85,6 +85,39 @@ def mock_claude(monkeypatch):
 
 
 @pytest.fixture
+async def db_authed_client(client, tmp_path, monkeypatch):
+    """Client with a valid session cookie + DATABASE_URL mocked to a non-None value.
+
+    Allows testing the DB-mode code paths without a real PostgreSQL instance.
+    All db module functions are replaced with no-op stubs.
+    """
+    import web_app
+    import db as _db
+
+    # Sign up in file mode to get a session cookie
+    monkeypatch.setattr(web_app, "_LOCAL_USERS_FILE", tmp_path / "users.json")
+    monkeypatch.setattr(web_app, "DATABASE_URL", None)
+    r = await client.post(
+        "/api/auth/signup",
+        json={"email": "dbtest@example.com", "password": "SecurePass123!"},
+    )
+    assert r.status_code == 200, f"Signup failed: {r.text}"
+
+    # Switch to fake DB mode — all db calls are stubbed out
+    monkeypatch.setattr(web_app, "DATABASE_URL", "postgresql://fake/db")
+    monkeypatch.setattr(_db, "get_active_tcm_episodes", lambda org_id: [])
+    monkeypatch.setattr(_db, "get_tcm_contacts", lambda org_id, ep_id: [])
+    monkeypatch.setattr(_db, "get_tcm_visits", lambda org_id, ep_id: [])
+    monkeypatch.setattr(_db, "get_tcm_episode", lambda org_id, ep_id: None)
+    monkeypatch.setattr(_db, "create_tcm_contact", lambda *a: "contact-uuid-001")
+    monkeypatch.setattr(_db, "create_tcm_visit", lambda *a: "visit-uuid-001")
+    monkeypatch.setattr(_db, "update_episode_status", lambda *a: None)
+    monkeypatch.setattr(_db, "save_tcm_claim", lambda *a: "claim-uuid-001")
+    monkeypatch.setattr(_db, "get_claim_ready_episodes", lambda org_id: [])
+    yield client
+
+
+@pytest.fixture
 def mock_stream_plan(monkeypatch):
     """Replace stream_plan with a minimal fake emitting the expected SSE event sequence."""
     import web_app
