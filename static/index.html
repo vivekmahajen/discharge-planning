@@ -894,6 +894,62 @@ function resetForm() {
   document.getElementById('progressPanel').style.display = 'none';
   goTab(0);
 }
+
+// ── FHIR auto-populate ───────────────────────────────────────────────────────
+async function loadFhirPatient(patientId) {
+  const errEl = document.getElementById('errorMsg');
+  errEl.textContent = 'Loading patient data from EHR…';
+  try {
+    const res = await fetch(`/api/fhir/patient/${encodeURIComponent(patientId)}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      errEl.textContent = 'FHIR load failed: ' + (j.error || res.status);
+      return;
+    }
+    const { form_data: d } = await res.json();
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    set('patient_name', d.patient_name);
+    set('age', d.age);
+    set('gender', d.gender);
+    set('mrn', d.mrn);
+    set('primary_diagnosis', d.primary_diagnosis);
+    set('secondary_diagnoses', d.secondary_diagnoses);
+    set('admission_medications', d.admission_medications);
+    set('inpatient_medications', d.inpatient_medications);
+    set('discharge_medications', d.discharge_medications);
+    set('additional_clinical_notes', d.additional_clinical_notes);
+    set('primary_language', d.primary_language);
+    errEl.textContent = '';
+    errEl.style.color = 'green';
+    errEl.textContent = 'Patient data loaded from EHR.';
+    setTimeout(() => { errEl.textContent = ''; errEl.style.color = ''; }, 4000);
+    goTab(0);
+  } catch (e) {
+    errEl.textContent = 'FHIR load error: ' + e.message;
+  }
+}
+
+// On page load — check if returning from FHIR OAuth
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('source') !== 'fhir') return;
+  // Clean up the URL so refresh doesn't re-trigger
+  window.history.replaceState({}, '', '/');
+  let patientId = params.get('patient') || '';
+  if (!patientId) {
+    // No patient in URL — ask the session for it
+    try {
+      const s = await fetch('/api/fhir/session');
+      if (s.ok) { const j = await s.json(); patientId = j.patient_id || ''; }
+    } catch (_) {}
+  }
+  if (patientId) {
+    await loadFhirPatient(patientId);
+  } else {
+    document.getElementById('errorMsg').textContent =
+      'Connected to EHR — enter a Patient ID to load data.';
+  }
+})();
 </script>
 </body>
 </html>
