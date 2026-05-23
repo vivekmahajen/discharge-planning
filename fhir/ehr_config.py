@@ -23,7 +23,6 @@ FHIR_SCOPES_PHASE1 = [
     "patient/CareTeam.read",
     "patient/DocumentReference.read",
     "openid",
-    "fhirUser",
 ]
 
 # athenahealth uses the same standalone scope set.
