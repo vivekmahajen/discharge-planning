@@ -1429,7 +1429,10 @@ async def get_fhir_patient_bundle(request: Request, patient_id: str):
         )
 
     from dataclasses import asdict
-    response = JSONResponse({"bundle": asdict(bundle)})
+    response = JSONResponse({
+        "bundle": asdict(bundle),
+        "form_data": fhir_bundle_to_agent_data(bundle),
+    })
     _apply_refreshed_cookie(response, new_cookie)
     return response
 
