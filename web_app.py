@@ -2,10 +2,13 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
+import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import anthropic
 from dotenv import load_dotenv
@@ -933,11 +936,6 @@ async def create_plan(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-import hashlib
-import base64
-import time
-from urllib.parse import urlencode
 
 import httpx
 
