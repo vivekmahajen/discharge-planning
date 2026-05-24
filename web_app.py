@@ -714,8 +714,7 @@ async def sso_callback(
             _audit_logger.error("SSO user lookup/provision failed for %s: %s", email, exc)
             raise HTTPException(
                 status_code=503,
-                detail="SSO login succeeded but account provisioning failed — "
-                       "run migrations/004_sso_users.sql and try again.",
+                detail=f"SSO provisioning failed: {exc}",
             )
 
     response = RedirectResponse(url="/", status_code=302)
