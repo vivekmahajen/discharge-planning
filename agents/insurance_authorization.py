@@ -172,6 +172,35 @@ INSURANCE FLAGS:
                     lines.append(f"  {k}: {v}")
         lines.append("")
 
+        # Real-time eligibility result (from Stedi pre-flight, if ELIGIBILITY_ENABLED=true)
+        elig = patient_data.get("_eligibility_result")
+        if elig:
+            status = "ACTIVE" if elig.get("is_eligible") else "INACTIVE"
+            lines.append("REAL-TIME ELIGIBILITY VERIFICATION:")
+            lines.append(f"  Status: {status}")
+            lines.append(f"  Payer: {elig.get('payer_name', 'Unknown')} (ID: {elig.get('payer_id', 'N/A')})")
+            if elig.get("plan_name"):
+                lines.append(f"  Plan: {elig['plan_name']} ({elig.get('plan_type', 'N/A')})")
+            if elig.get("coverage_start"):
+                end = elig.get("coverage_end") or "ongoing"
+                lines.append(f"  Coverage: {elig['coverage_start']} — {end}")
+            if elig.get("group_number"):
+                lines.append(f"  Group: {elig['group_number']}")
+            if elig.get("deductible_individual") is not None:
+                met = elig.get("deductible_met") or 0.0
+                lines.append(f"  Deductible: ${elig['deductible_individual']:.2f} (met: ${met:.2f})")
+            if elig.get("out_of_pocket_max") is not None:
+                oop_met = elig.get("out_of_pocket_met") or 0.0
+                lines.append(f"  OOP Max: ${elig['out_of_pocket_max']:.2f} (met: ${oop_met:.2f})")
+            if elig.get("snf_days_remaining") is not None:
+                lines.append(f"  SNF Days Remaining: {elig['snf_days_remaining']}")
+            if elig.get("prior_auth_required"):
+                lines.append("  Prior Auth: REQUIRED")
+            if elig.get("error_message"):
+                lines.append(f"  Note: {elig['error_message']}")
+            lines.append(f"  Source: {elig.get('source', 'unknown').upper()}")
+            lines.append("")
+
         # Identified post-discharge needs (from clinical assessment context)
         needs = patient_data.get("anticipated_post_discharge_needs", [])
         if needs:

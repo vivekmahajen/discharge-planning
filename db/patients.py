@@ -81,7 +81,17 @@ def run_migrations() -> None:
     CREATE INDEX IF NOT EXISTS idx_patients_mrn_org     ON patients(mrn, org_domain);
     CREATE INDEX IF NOT EXISTS idx_plan_runs_patient    ON plan_runs(patient_id);
     CREATE INDEX IF NOT EXISTS idx_agent_outputs_run    ON agent_outputs(run_id);
-    CREATE INDEX IF NOT EXISTS idx_notes_patient        ON patient_notes(patient_id)
+    CREATE INDEX IF NOT EXISTS idx_notes_patient        ON patient_notes(patient_id);
+    CREATE TABLE IF NOT EXISTS eligibility_cache (
+        id              SERIAL PRIMARY KEY,
+        cache_key       VARCHAR(64)  NOT NULL UNIQUE,
+        payer_id        VARCHAR(50)  NOT NULL,
+        result_json     JSONB        NOT NULL,
+        checked_at      TIMESTAMPTZ  DEFAULT NOW(),
+        expires_at      TIMESTAMPTZ  NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eligibility_cache_key ON eligibility_cache(cache_key);
+    CREATE INDEX IF NOT EXISTS idx_eligibility_cache_exp ON eligibility_cache(expires_at)
     """
     try:
         conn = get_db_conn()
@@ -297,6 +307,43 @@ def delete_patient_note(note_id: int, author_email: str) -> bool:
                     (note_id, author_email)
                 )
                 return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_cached_eligibility(cache_key: str) -> Optional[dict]:
+    """Return cached eligibility result if not expired, else None."""
+    conn = get_db_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT result_json FROM eligibility_cache WHERE cache_key=%s AND expires_at > NOW()",
+                    (cache_key,),
+                )
+                row = cur.fetchone()
+                return dict(row["result_json"]) if row else None
+    finally:
+        conn.close()
+
+
+def cache_eligibility_result(cache_key: str, result_json: dict, payer_id: str, ttl_hours: int = 4) -> None:
+    """Insert or replace eligibility cache entry."""
+    conn = get_db_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO eligibility_cache (cache_key, payer_id, result_json, expires_at)
+                    VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour' * %s)
+                    ON CONFLICT (cache_key) DO UPDATE SET
+                        result_json = EXCLUDED.result_json,
+                        checked_at  = NOW(),
+                        expires_at  = EXCLUDED.expires_at
+                    """,
+                    (cache_key, payer_id, json.dumps(result_json), ttl_hours),
+                )
     finally:
         conn.close()
 

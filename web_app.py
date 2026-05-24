@@ -83,6 +83,22 @@ try:
 except Exception:
     pass
 
+# Eligibility service (imported lazily)
+_ELIGIBILITY_AVAILABLE = False
+ELIGIBILITY_ENABLED = os.getenv("ELIGIBILITY_ENABLED", "false").lower() == "true"
+ELIGIBILITY_MOCK = os.getenv("ELIGIBILITY_MOCK", "false").lower() == "true"
+try:
+    from services.eligibility import (
+        check_eligibility as _check_eligibility,
+        get_mock_result as _get_mock_result,
+        detect_payer_id as _detect_payer_id,
+        KNOWN_PAYERS as _KNOWN_PAYERS,
+        _make_cache_key as _elig_cache_key,
+    )
+    _ELIGIBILITY_AVAILABLE = True
+except Exception:
+    pass
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent
@@ -867,6 +883,41 @@ async def stream_plan(patient_data: dict):
         }
 
     agent_data = build_agent_data(patient_data)
+
+    # Pre-flight eligibility check — emits eligibility_result SSE event if successful.
+    # If ELIGIBILITY_ENABLED=false or STEDI_API_KEY is unset, this block is skipped entirely
+    # so the insurance agent runs with AI-only output exactly as before.
+    if ELIGIBILITY_ENABLED and _ELIGIBILITY_AVAILABLE:
+        _member_id = patient_data.get("insurance_member_id", "").strip()
+        _payer_name = patient_data.get("primary_insurance", "")
+        _payer_id, _resolved_payer = _detect_payer_id(_payer_name)
+        _npi = os.getenv("HOSPITAL_NPI", "").strip()
+        _stedi_key = os.getenv("STEDI_API_KEY", "").strip()
+        _can_check = bool(_member_id and _payer_id != "UNKNOWN" and _npi and
+                         (ELIGIBILITY_MOCK or _stedi_key))
+        if _can_check:
+            try:
+                import dataclasses as _dc
+                if ELIGIBILITY_MOCK:
+                    _elig = _get_mock_result(_payer_id, _resolved_payer)
+                else:
+                    _first = patient_data.get("patient_first_name", "").strip()
+                    _last = patient_data.get("patient_last_name", "").strip()
+                    _dob = patient_data.get("date_of_birth", "").strip()
+                    _elig = await _check_eligibility(_member_id, _first, _last, _dob, _payer_id, _npi)
+                _elig_dict = _dc.asdict(_elig)
+                agent_data["_eligibility_result"] = _elig_dict
+                yield f"data: {json.dumps({'type': 'eligibility_result', 'data': _elig_dict})}\n\n"
+                if DATABASE_URL and _PATIENT_DB_AVAILABLE:
+                    try:
+                        from db.patients import cache_eligibility_result as _cer
+                        _ck = _elig_cache_key(_member_id, _payer_id,
+                                              datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                        await asyncio.to_thread(_cer, _ck, _elig_dict, _payer_id)
+                    except Exception:
+                        pass
+            except Exception as _ee:
+                logging.getLogger(__name__).warning("Eligibility pre-flight failed: %s", _ee)
 
     from agents.predictive_los import PredictiveLOSAgent
     agents = {
@@ -1957,6 +2008,107 @@ async def directory_sync_status_endpoint(request: Request, ctx: OrgContext = Dep
     except Exception as e:
         return JSONResponse({"last_sync": None, "total_active_facilities": 0, "error": str(e)})
 
+
+# ── Eligibility endpoints ─────────────────────────────────────────────────────
+
+@app.get("/api/eligibility/payers")
+@limiter.limit("120/hour")
+async def eligibility_payers(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not _ELIGIBILITY_AVAILABLE:
+        return JSONResponse({"payers": []})
+    return JSONResponse({"payers": [
+        {"payer_id": v["payer_id"], "name": v["name"]}
+        for v in _KNOWN_PAYERS.values()
+    ]})
+
+
+@app.post("/api/eligibility/mock")
+@limiter.limit("60/hour")
+async def eligibility_mock_endpoint(request: Request, body: dict[str, Any] = Body(default={}),
+                                    ctx: OrgContext = Depends(get_current_org)):
+    if not _ELIGIBILITY_AVAILABLE:
+        return JSONResponse({"error": "Eligibility service unavailable"}, status_code=503)
+    payer_name = body.get("payer_name", "Medicare Traditional")
+    payer_id, resolved_name = _detect_payer_id(payer_name)
+    result = _get_mock_result(payer_id, resolved_name)
+    import dataclasses
+    return JSONResponse(dataclasses.asdict(result))
+
+
+@app.post("/api/eligibility/check")
+@limiter.limit("30/hour")
+async def eligibility_check_endpoint(request: Request, body: dict[str, Any] = Body(default={}),
+                                     ctx: OrgContext = Depends(get_current_org)):
+    if not _ELIGIBILITY_AVAILABLE:
+        return JSONResponse({"error": "Eligibility service unavailable"}, status_code=503)
+    if not ELIGIBILITY_ENABLED:
+        return JSONResponse(
+            {"error": "Eligibility verification not enabled. Set ELIGIBILITY_ENABLED=true."},
+            status_code=503,
+        )
+    stedi_key = os.getenv("STEDI_API_KEY", "").strip()
+    if not stedi_key:
+        return JSONResponse({"error": "STEDI_API_KEY not configured"}, status_code=503)
+    member_id = body.get("member_id", "").strip()
+    payer_id = body.get("payer_id", "").strip()
+    npi = os.getenv("HOSPITAL_NPI", body.get("npi", "")).strip()
+    first = body.get("first_name", "").strip()
+    last = body.get("last_name", "").strip()
+    dob = body.get("date_of_birth", "").strip()
+    if not all([member_id, payer_id, npi]):
+        return JSONResponse({"error": "member_id, payer_id, and npi are required"}, status_code=400)
+    import dataclasses
+    # Try DB cache first
+    if DATABASE_URL and _PATIENT_DB_AVAILABLE:
+        try:
+            from db.patients import get_cached_eligibility as _gce
+            _ck = _elig_cache_key(member_id, payer_id,
+                                   datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+            cached = await asyncio.to_thread(_gce, _ck)
+            if cached:
+                cached["source"] = "cache"
+                return JSONResponse(cached)
+        except Exception:
+            pass
+    try:
+        result = await _check_eligibility(member_id, first, last, dob, payer_id, npi)
+        result_dict = dataclasses.asdict(result)
+        if DATABASE_URL and _PATIENT_DB_AVAILABLE:
+            try:
+                from db.patients import cache_eligibility_result as _cer
+                _ck = _elig_cache_key(member_id, payer_id,
+                                       datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                await asyncio.to_thread(_cer, _ck, result_dict, payer_id)
+            except Exception:
+                pass
+        return JSONResponse(result_dict)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=422)
+    except Exception as e:
+        return JSONResponse({"error": f"Eligibility check failed: {str(e)}"}, status_code=500)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "settings.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/settings")
+@limiter.limit("60/hour")
+async def get_settings(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    return JSONResponse({
+        "eligibility_enabled": ELIGIBILITY_ENABLED,
+        "eligibility_mock": ELIGIBILITY_MOCK,
+        "stedi_configured": bool(os.getenv("STEDI_API_KEY", "")),
+        "hospital_npi_configured": bool(os.getenv("HOSPITAL_NPI", "")),
+        "db_available": _PATIENT_DB_AVAILABLE,
+        "directory_available": _DIRECTORY_DB_AVAILABLE,
+        "eligibility_service_available": _ELIGIBILITY_AVAILABLE,
+    })
 
 
 # ── Legacy Epic SMART launch (kept for backward-compatibility) ────────────────

@@ -354,6 +354,7 @@
   <a href="/imm-prompt-system" class="signout-btn">IMM</a>
   <a href="/multilingual-prompt-system" class="signout-btn">Multilingual</a>
   <a href="/post-acute-directory" class="signout-btn">Facilities</a>
+  <a href="/settings" class="signout-btn">Settings</a>
   <a href="/api/auth/logout" class="signout-btn">Sign Out</a>
 </header>
 
@@ -447,6 +448,22 @@
     <div class="tab-panel" id="tab-2">
       <div class="section-title">Insurance &amp; Coverage</div>
       <div class="form-grid">
+        <div class="field">
+          <label>Patient First Name</label>
+          <input type="text" id="patient_first_name" placeholder="For eligibility verification" />
+        </div>
+        <div class="field">
+          <label>Patient Last Name</label>
+          <input type="text" id="patient_last_name" placeholder="For eligibility verification" />
+        </div>
+        <div class="field">
+          <label>Date of Birth</label>
+          <input type="date" id="date_of_birth" />
+        </div>
+        <div class="field">
+          <label>Insurance Member ID</label>
+          <input type="text" id="insurance_member_id" placeholder="Member / subscriber ID" />
+        </div>
         <div class="field full">
           <label>Primary Insurance</label>
           <input type="text" id="primary_insurance" placeholder="e.g. Medicare Traditional, BlueCross PPO" />
@@ -469,6 +486,14 @@
           <span class="hint">Medicare covers up to 100 SNF days per benefit period</span>
         </div>
       </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-secondary" onclick="quickEligibilityCheck()" id="eligibilityBtn">
+          ⚡ Quick Eligibility Check
+        </button>
+        <span id="eligibilityCheckMsg" style="font-size:.82rem;color:#64748b;margin-left:10px;"></span>
+      </div>
+      <!-- Inline eligibility result card -->
+      <div id="eligibilityInlineCard" style="display:none;margin-top:14px;padding:14px 16px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;font-size:.85rem;"></div>
       <div class="nav-row">
         <button class="btn btn-secondary" onclick="goTab(1)">← Back</button>
         <button class="btn btn-primary" onclick="goTab(3)">Next →</button>
@@ -620,6 +645,19 @@
     </div>
   </div>
 
+  <!-- Eligibility result card (shown when eligibility_result SSE event arrives) -->
+  <div id="eligibilityBanner" style="display:none;border-radius:10px;padding:16px 20px;margin-top:16px;border:1px solid #e2e8f0;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:1.4rem" id="elig-icon">💳</span>
+      <div>
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b">Real-Time Eligibility</div>
+        <div style="font-size:1rem;font-weight:700" id="elig-status">—</div>
+      </div>
+      <span id="elig-source-badge" style="margin-left:auto;font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#e2e8f0;color:#475569">—</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:.82rem" id="elig-details"></div>
+  </div>
+
   <!-- Progress panel -->
   <div class="progress-panel" id="progressPanel">
     <h2>🔄 Running Specialist Agents in Parallel…</h2>
@@ -722,6 +760,10 @@ function collectFormData() {
     primary_diagnosis:        v('primary_diagnosis'),
     secondary_diagnoses:      v('secondary_diagnoses'),
     additional_clinical_notes:v('additional_clinical_notes'),
+    patient_first_name:       v('patient_first_name'),
+    patient_last_name:        v('patient_last_name'),
+    date_of_birth:            v('date_of_birth'),
+    insurance_member_id:      v('insurance_member_id'),
     primary_insurance:        v('primary_insurance'),
     secondary_insurance:      v('secondary_insurance'),
     medicare_part_a:          v('medicare_part_a'),
@@ -817,6 +859,7 @@ async function generatePlan() {
     setStatus(a, 'waiting', 'Waiting')
   );
   document.getElementById('losBanner').style.display = 'none';
+  document.getElementById('eligibilityBanner').style.display = 'none';
 
   try {
     const res = await fetch('/api/plan/stream', {
@@ -891,6 +934,10 @@ function handleEvent(event) {
       showReport(event.output);
       break;
 
+    case 'eligibility_result':
+      renderEligibilityCard(event.data);
+      break;
+
     case 'patient_record':
       showSaveConfirmation(event.data);
       break;
@@ -934,6 +981,97 @@ function showReport(text) {
   btn.innerHTML = '🤖 Generate Discharge Plan';
 }
 
+function renderEligibilityCard(e, targetId) {
+  if (!e) return;
+  const eligible = e.is_eligible;
+  const color = eligible ? '#16a34a' : '#dc2626';
+  const bg = eligible ? '#dcfce7' : '#fee2e2';
+  const icon = eligible ? '✅' : '❌';
+  const statusText = eligible ? 'Active Coverage' : 'Inactive / Not Eligible';
+  const banner = document.getElementById(targetId || 'eligibilityBanner');
+  if (!banner) return;
+  document.getElementById('elig-icon').textContent = icon;
+  const statusEl = document.getElementById('elig-status');
+  statusEl.textContent = statusText;
+  statusEl.style.color = color;
+  banner.style.borderColor = color;
+  banner.style.background = bg;
+  const srcBadge = document.getElementById('elig-source-badge');
+  if (srcBadge) {
+    srcBadge.textContent = (e.source || 'live').toUpperCase();
+    srcBadge.style.background = e.source === 'mock' ? '#fef3c7' : e.source === 'cached' ? '#ede9fe' : '#dcfce7';
+    srcBadge.style.color = e.source === 'mock' ? '#92400e' : e.source === 'cached' ? '#5b21b6' : '#15803d';
+  }
+  const rows = [];
+  if (e.payer_name) rows.push(['Payer', e.payer_name]);
+  if (e.plan_name)  rows.push(['Plan', e.plan_name]);
+  if (e.plan_type)  rows.push(['Type', e.plan_type]);
+  if (e.coverage_start) rows.push(['Coverage Start', e.coverage_start]);
+  if (e.coverage_end)   rows.push(['Coverage End', e.coverage_end]);
+  if (e.group_number)   rows.push(['Group #', e.group_number]);
+  if (e.deductible_individual != null) rows.push(['Deductible', `$${e.deductible_individual.toFixed(2)} (met: $${(e.deductible_met||0).toFixed(2)})`]);
+  if (e.out_of_pocket_max != null)     rows.push(['OOP Max', `$${e.out_of_pocket_max.toFixed(2)} (met: $${(e.out_of_pocket_met||0).toFixed(2)})`]);
+  if (e.snf_days_remaining != null)    rows.push(['SNF Days Left', String(e.snf_days_remaining)]);
+  if (e.prior_auth_required)           rows.push(['Prior Auth', '⚠ Required']);
+  if (e.error_message)                 rows.push(['Note', e.error_message]);
+  const detailsEl = document.getElementById('elig-details');
+  if (detailsEl) {
+    detailsEl.innerHTML = rows.map(([k, v]) =>
+      `<div style="background:rgba(255,255,255,.6);border-radius:6px;padding:6px 10px">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#64748b;margin-bottom:2px">${k}</div>
+        <div style="font-weight:600;color:#1e293b">${v}</div>
+       </div>`
+    ).join('');
+  }
+  banner.style.display = 'block';
+}
+
+async function quickEligibilityCheck() {
+  const btn = document.getElementById('eligibilityBtn');
+  const msg = document.getElementById('eligibilityCheckMsg');
+  const v = id => document.getElementById(id)?.value?.trim() ?? '';
+  const memberId = v('insurance_member_id');
+  const payerName = v('primary_insurance');
+  if (!memberId || !payerName) {
+    msg.textContent = 'Enter Member ID and Primary Insurance first.';
+    return;
+  }
+  btn.disabled = true;
+  msg.textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/eligibility/mock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payer_name: payerName }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error || 'Check unavailable';
+      return;
+    }
+    msg.textContent = '';
+    const inlineCard = document.getElementById('eligibilityInlineCard');
+    if (inlineCard) {
+      const eligible = data.is_eligible;
+      const color = eligible ? '#16a34a' : '#dc2626';
+      const bg = eligible ? '#dcfce7' : '#fee2e2';
+      inlineCard.style.borderColor = color;
+      inlineCard.style.background = bg;
+      let html = `<strong>${eligible ? '✅ Active Coverage' : '❌ Not Eligible'}</strong> — ${data.payer_name || payerName}`;
+      if (data.plan_name) html += ` · ${data.plan_name}`;
+      if (data.snf_days_remaining != null) html += ` · SNF days left: ${data.snf_days_remaining}`;
+      if (data.prior_auth_required) html += ` · ⚠ Prior auth required`;
+      html += `<span style="float:right;font-size:.68rem;color:#64748b">${(data.source||'mock').toUpperCase()}</span>`;
+      inlineCard.innerHTML = html;
+      inlineCard.style.display = 'block';
+    }
+  } catch (e) {
+    msg.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function copyReport() {
   navigator.clipboard.writeText(_rawReportText).then(() => alert('Report copied to clipboard.'));
 }
@@ -947,6 +1085,9 @@ function resetForm() {
   document.getElementById('reportPanel').style.display = 'none';
   document.getElementById('progressPanel').style.display = 'none';
   document.getElementById('losBanner').style.display = 'none';
+  document.getElementById('eligibilityBanner').style.display = 'none';
+  const ic = document.getElementById('eligibilityInlineCard');
+  if (ic) ic.style.display = 'none';
   goTab(0);
 }
 
@@ -1012,6 +1153,7 @@ function showWarningBanner(message) {
 function populateForm(data) {
   const fields = ['patient_name','mrn','age','gender','admission_date','expected_discharge_date',
     'attending_physician','primary_diagnosis','secondary_diagnoses','additional_clinical_notes',
+    'patient_first_name','patient_last_name','date_of_birth','insurance_member_id',
     'primary_insurance','secondary_insurance','medicare_part_a','snf_days_used',
     'admission_medications','inpatient_medications','discharge_medications',
     'pt_evaluation','ot_evaluation','st_evaluation','living_situation','housing_type',

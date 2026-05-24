@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Settings — Discharge Planning AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f4f8; color: #1e293b; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #1a56db, #1e3a8a);
+    color: #fff;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .logo { font-size: 1.4rem; }
+  header h1 { font-size: 1rem; font-weight: 700; }
+  header p { font-size: 0.72rem; opacity: 0.75; }
+  .spacer { flex: 1; }
+  header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.82rem; padding: 6px 10px; border-radius: 6px; transition: background 0.15s; }
+  header a:hover { background: rgba(255,255,255,0.15); }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 32px 20px; }
+  h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 24px; }
+
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+  .setting-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-size: 0.88rem; font-weight: 600; }
+  .setting-desc { font-size: 0.78rem; color: #64748b; margin-top: 3px; }
+  .setting-value { flex-shrink: 0; }
+
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 10px; border-radius: 999px; }
+  .badge-green { background: #dcfce7; color: #15803d; }
+  .badge-amber { background: #fef3c7; color: #92400e; }
+  .badge-red { background: #fee2e2; color: #dc2626; }
+  .badge-gray { background: #f1f5f9; color: #475569; }
+  .badge-blue { background: #dbeafe; color: #1d4ed8; }
+
+  code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.82rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  .code-block {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin-top: 12px;
+  }
+  .code-block .cm { color: #64748b; }
+  .code-block .kw { color: #93c5fd; }
+  .code-block .st { color: #86efac; }
+
+  .quick-check-form { display: flex; flex-direction: column; gap: 12px; }
+  .quick-check-form label { font-size: 0.78rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; }
+  .quick-check-form input, .quick-check-form select {
+    width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.88rem;
+  }
+  .quick-check-form input:focus, .quick-check-form select:focus { outline: none; border-color: #1a56db; }
+  .btn-check { background: #1a56db; color: #fff; border: none; border-radius: 6px; padding: 10px 20px; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+  .btn-check:hover { background: #1646b8; }
+  .btn-check:disabled { opacity: 0.6; cursor: default; }
+  #checkResult { margin-top: 12px; padding: 12px; border-radius: 8px; font-size: 0.85rem; display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Settings</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/">← Planner</a>
+  <a href="/my-patients">My Patients</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div class="container">
+  <h2>Settings &amp; Configuration</h2>
+
+  <!-- System Status -->
+  <div class="card">
+    <h3>⚙️ System Status</h3>
+    <div id="statusRows">Loading…</div>
+  </div>
+
+  <!-- Eligibility Setup -->
+  <div class="card">
+    <h3>💳 Real-Time Insurance Eligibility</h3>
+    <p style="font-size:.88rem;color:#64748b;margin-bottom:16px;">
+      DischargeIQ integrates with the <strong>Stedi clearinghouse</strong> to perform live X12 270/271 eligibility checks.
+      Configure the following environment variables to enable real-time verification.
+    </p>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">ELIGIBILITY_ENABLED</div>
+        <div class="setting-desc">Master toggle. Set to <code>true</code> to enable eligibility checks on plan generation.</div>
+      </div>
+      <div class="setting-value" id="badge-eligibility-enabled"><span class="badge badge-gray">—</span></div>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">ELIGIBILITY_MOCK</div>
+        <div class="setting-desc">Set to <code>true</code> to use deterministic mock data instead of calling Stedi. Safe for testing.</div>
+      </div>
+      <div class="setting-value" id="badge-eligibility-mock"><span class="badge badge-gray">—</span></div>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">STEDI_API_KEY</div>
+        <div class="setting-desc">Stedi clearinghouse API key. Obtain from <strong>app.stedi.com</strong> → API Keys.</div>
+      </div>
+      <div class="setting-value" id="badge-stedi"><span class="badge badge-gray">—</span></div>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">HOSPITAL_NPI</div>
+        <div class="setting-desc">Your facility's 10-digit NPI. Used as the rendering provider in eligibility requests.</div>
+      </div>
+      <div class="setting-value" id="badge-npi"><span class="badge badge-gray">—</span></div>
+    </div>
+
+    <div class="code-block">
+      <span class="cm"># .env — add these to enable live eligibility</span><br>
+      <span class="kw">ELIGIBILITY_ENABLED</span>=<span class="st">true</span><br>
+      <span class="kw">ELIGIBILITY_MOCK</span>=<span class="st">false</span><br>
+      <span class="kw">STEDI_API_KEY</span>=<span class="st">your-stedi-api-key-here</span><br>
+      <span class="kw">HOSPITAL_NPI</span>=<span class="st">1234567890</span>
+    </div>
+  </div>
+
+  <!-- Payer Directory -->
+  <div class="card">
+    <h3>🗂️ Supported Payers</h3>
+    <p style="font-size:.88rem;color:#64748b;margin-bottom:14px;">
+      The following payers are auto-detected from insurance names entered in the planner.
+    </p>
+    <div id="payerList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;font-size:.82rem;">
+      Loading…
+    </div>
+  </div>
+
+  <!-- Quick Eligibility Test -->
+  <div class="card">
+    <h3>⚡ Quick Eligibility Test</h3>
+    <p style="font-size:.88rem;color:#64748b;margin-bottom:16px;">
+      Test the mock eligibility response for any supported payer. No real API call is made.
+    </p>
+    <div class="quick-check-form">
+      <div>
+        <label>Payer Name</label>
+        <input type="text" id="testPayerName" placeholder="e.g. Medicare Traditional, Kaiser Permanente" value="Medicare Traditional" />
+      </div>
+      <div>
+        <button class="btn-check" onclick="runMockCheck()">Run Mock Check</button>
+      </div>
+    </div>
+    <div id="checkResult"></div>
+  </div>
+
+  <!-- Security Notice -->
+  <div class="card">
+    <h3>🔒 Security &amp; HIPAA</h3>
+    <div style="font-size:.85rem;color:#475569;line-height:1.7;">
+      <p>• The <code>eligibility_cache</code> table stores structured eligibility results and is PHI — ensure your PostgreSQL provider has a signed <strong>HIPAA BAA</strong>.</p>
+      <p style="margin-top:8px">• Raw eligibility responses (X12 271) are never logged or stored — only structured fields are persisted.</p>
+      <p style="margin-top:8px">• Audit logs record only: timestamp, payer_id, check duration (ms), is_eligible (boolean), and source. No member IDs, names, or DOB are logged.</p>
+      <p style="margin-top:8px">• <code>STEDI_API_KEY</code> is read from environment only — never stored in the database or committed to source control.</p>
+      <p style="margin-top:8px">• Cache TTL is 4 hours. Eligibility status can change; always verify before acting on cached results.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    if (r.status === 401) { location.href = '/login'; return; }
+    const s = await r.json();
+
+    const b = (val, trueLabel, falseLabel, trueClass, falseClass) =>
+      `<span class="badge ${val ? trueClass : falseClass}">${val ? trueLabel : falseLabel}</span>`;
+
+    document.getElementById('statusRows').innerHTML = `
+      <div class="setting-row">
+        <div><div class="setting-label">Eligibility Service</div><div class="setting-desc">Python service module loaded</div></div>
+        <div>${b(s.eligibility_service_available, 'Available', 'Unavailable', 'badge-green', 'badge-red')}</div>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Patient DB</div><div class="setting-desc">Patient record persistence</div></div>
+        <div>${b(s.db_available, 'Connected', 'Not connected', 'badge-green', 'badge-amber')}</div>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Provider Directory</div><div class="setting-desc">Post-acute facility directory</div></div>
+        <div>${b(s.directory_available, 'Connected', 'Not connected', 'badge-green', 'badge-amber')}</div>
+      </div>
+    `;
+
+    document.getElementById('badge-eligibility-enabled').innerHTML =
+      b(s.eligibility_enabled, 'Enabled', 'Disabled', 'badge-green', 'badge-gray');
+    document.getElementById('badge-eligibility-mock').innerHTML =
+      b(s.eligibility_mock, 'Mock mode', 'Live mode', 'badge-amber', 'badge-blue');
+    document.getElementById('badge-stedi').innerHTML =
+      b(s.stedi_configured, 'Configured', 'Not set', 'badge-green', 'badge-red');
+    document.getElementById('badge-npi').innerHTML =
+      b(s.hospital_npi_configured, 'Configured', 'Not set', 'badge-green', 'badge-amber');
+  } catch (e) {
+    document.getElementById('statusRows').textContent = 'Could not load settings: ' + e.message;
+  }
+}
+
+async function loadPayers() {
+  try {
+    const r = await fetch('/api/eligibility/payers');
+    if (!r.ok) { document.getElementById('payerList').textContent = 'Unavailable'; return; }
+    const { payers } = await r.json();
+    document.getElementById('payerList').innerHTML = payers.map(p =>
+      `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px">
+        <div style="font-weight:600">${p.name}</div>
+        <div style="font-size:.75rem;color:#94a3b8">ID: ${p.payer_id}</div>
+       </div>`
+    ).join('');
+  } catch (e) {
+    document.getElementById('payerList').textContent = 'Could not load payer list.';
+  }
+}
+
+async function runMockCheck() {
+  const payerName = document.getElementById('testPayerName').value.trim();
+  if (!payerName) return;
+  const resultEl = document.getElementById('checkResult');
+  resultEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/eligibility/mock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payer_name: payerName }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      resultEl.style.background = '#fee2e2';
+      resultEl.style.border = '1px solid #fca5a5';
+      resultEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+      resultEl.style.display = 'block';
+      return;
+    }
+    const eligible = data.is_eligible;
+    resultEl.style.background = eligible ? '#dcfce7' : '#fee2e2';
+    resultEl.style.border = `1px solid ${eligible ? '#86efac' : '#fca5a5'}`;
+    const rows = [
+      ['Status', eligible ? '✅ Active Coverage' : '❌ Not Eligible'],
+      ['Payer', data.payer_name || payerName],
+      ['Plan', data.plan_name || '—'],
+      ['Type', data.plan_type || '—'],
+      ['Coverage Start', data.coverage_start || '—'],
+      ['Deductible', data.deductible_individual != null ? `$${data.deductible_individual.toFixed(2)}` : '—'],
+      ['OOP Max', data.out_of_pocket_max != null ? `$${data.out_of_pocket_max.toFixed(2)}` : '—'],
+      ['SNF Days Left', data.snf_days_remaining != null ? String(data.snf_days_remaining) : '—'],
+      ['Prior Auth', data.prior_auth_required ? '⚠ Required' : 'Not required'],
+      ['Source', (data.source || 'mock').toUpperCase()],
+    ];
+    resultEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.82rem">` +
+      rows.map(([k, v]) =>
+        `<tr><td style="padding:3px 8px 3px 0;color:#475569;font-weight:600;width:140px">${k}</td><td style="padding:3px 0">${v}</td></tr>`
+      ).join('') + `</table>`;
+    resultEl.style.display = 'block';
+  } catch (e) {
+    resultEl.style.background = '#fee2e2';
+    resultEl.textContent = 'Error: ' + e.message;
+    resultEl.style.display = 'block';
+  }
+}
+
+loadSettings();
+loadPayers();
+</script>
+</body>
+</html>
