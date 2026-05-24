@@ -10,6 +10,7 @@ from agents.insurance_authorization import InsuranceAuthorizationAgent
 from agents.medication_reconciliation import MedicationReconciliationAgent
 from agents.social_determinants import SocialDeterminantsAgent
 from agents.coordinator import CoordinatorAgent
+from agents.predictive_los import PredictiveLOSAgent
 from utils.formatting import print_section_header, format_patient_summary
 
 
@@ -28,6 +29,7 @@ class DischargeOrchestrator:
         """
         self.client = anthropic.Anthropic(api_key=api_key)
         self.agents: dict = {
+            "predictive_los": PredictiveLOSAgent(None),
             "clinical": ClinicalAssessmentAgent(self.client),
             "care_needs": CareNeedsAgent(self.client),
             "insurance": InsuranceAuthorizationAgent(self.client),

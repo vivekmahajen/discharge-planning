@@ -42,15 +42,15 @@ class TestPlanStreamEventSequence:
         r = await authed_client.post("/api/plan/stream", json=sample_patient)
         events = parse_sse(r.text)
         start_events = [e for e in events if e.get("type") == "agent_start"]
-        assert len(start_events) == 5, (
-            f"Expected 5 agent_start events, got {len(start_events)}")
+        assert len(start_events) == 6, (
+            f"Expected 6 agent_start events, got {len(start_events)}")
 
     async def test_stream_emits_agent_complete_events(
             self, authed_client, sample_patient, mock_stream_plan):
         r = await authed_client.post("/api/plan/stream", json=sample_patient)
         events = parse_sse(r.text)
         complete_events = [e for e in events if e.get("type") == "agent_complete"]
-        assert len(complete_events) == 5
+        assert len(complete_events) == 6
 
     async def test_stream_emits_coordinator_start_event(
             self, authed_client, sample_patient, mock_stream_plan):
@@ -119,7 +119,7 @@ class TestPlanStreamErrorHandling:
 class TestStreamPlanFunction:
     """Run stream_plan directly with mocked agents to cover the generator code."""
 
-    async def test_real_stream_plan_emits_five_agent_start_events(
+    async def test_real_stream_plan_emits_six_agent_start_events(
             self, authed_client, sample_patient, monkeypatch):
         from unittest.mock import AsyncMock, MagicMock
         import web_app
@@ -129,15 +129,6 @@ class TestStreamPlanFunction:
         mock_coord = MagicMock()
         mock_coord.run = AsyncMock(return_value="## Discharge Plan\nCoordinated output.")
 
-        for agent_cls in [
-            "web_app.ClinicalAssessmentAgent",
-            "web_app.CareNeedsAgent",
-            "web_app.InsuranceAuthorizationAgent",
-            "web_app.MedicationReconciliationAgent",
-            "web_app.SocialDeterminantsAgent",
-        ]:
-            monkeypatch.setattr(agent_cls, lambda *a, **kw: mock_agent, raising=False)
-
         # Patch at the stream_plan function's local import scope
         from unittest.mock import patch
         with patch("agents.clinical_assessment.ClinicalAssessmentAgent", return_value=mock_agent), \
@@ -145,6 +136,7 @@ class TestStreamPlanFunction:
              patch("agents.insurance_authorization.InsuranceAuthorizationAgent", return_value=mock_agent), \
              patch("agents.medication_reconciliation.MedicationReconciliationAgent", return_value=mock_agent), \
              patch("agents.social_determinants.SocialDeterminantsAgent", return_value=mock_agent), \
+             patch("agents.predictive_los.PredictiveLOSAgent", return_value=mock_agent), \
              patch("agents.coordinator.CoordinatorAgent", return_value=mock_coord):
             events = []
             async for chunk in web_app.stream_plan(sample_patient):
@@ -153,7 +145,7 @@ class TestStreamPlanFunction:
                         events.append(json.loads(line[6:]))
 
         start_events = [e for e in events if e.get("type") == "agent_start"]
-        assert len(start_events) == 5
+        assert len(start_events) == 6
 
         complete_events = [e for e in events if e.get("type") == "coordinator_complete"]
         assert len(complete_events) == 1

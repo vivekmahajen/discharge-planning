@@ -12,7 +12,8 @@
           "../fhir/**",
           "../agents/**",
           "../utils/**",
-          "../static/**"
+          "../static/**",
+          "../models/**"
         ]
       }
     }

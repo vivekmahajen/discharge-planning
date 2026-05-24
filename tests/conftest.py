@@ -124,7 +124,7 @@ def mock_stream_plan(monkeypatch):
 
     async def _fake(patient_data):
         import json as _j
-        for agent in ["clinical", "care_needs", "insurance", "medications", "social"]:
+        for agent in ["predictive_los", "clinical", "care_needs", "insurance", "medications", "social"]:
             start = _j.dumps({"type": "agent_start", "agent": agent})
             done = _j.dumps({"type": "agent_complete", "agent": agent, "output": "ok"})
             yield f"data: {start}\n\n"

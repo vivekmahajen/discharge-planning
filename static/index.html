@@ -342,6 +342,7 @@
     <p>Multi-Agent Clinical Decision Support &nbsp;·&nbsp; All outputs require clinician review before action</p>
   </div>
   <div class="spacer"></div>
+  <a href="/predictive-discharge" class="signout-btn">Predict LOS</a>
   <a href="/discharge-summary-generator" class="signout-btn">Summary Tool</a>
   <a href="/teachback-checklist" class="signout-btn">Teach-back</a>
   <a href="/cdph-compliance" class="signout-btn">CDPH</a>
@@ -598,10 +599,37 @@
 
   </div><!-- /form-card -->
 
+  <!-- LOS Prediction Banner (shown immediately when predictive_los agent completes) -->
+  <div id="losBanner" style="display:none;background:linear-gradient(135deg,#1a56db,#1e3a8a);color:#fff;border-radius:10px;padding:20px 24px;margin-top:20px;box-shadow:0 4px 16px rgba(26,86,219,.3)">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="font-size:1.8rem">📅</div>
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:.72rem;font-weight:700;opacity:.8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">ML Predicted Discharge</div>
+        <div style="font-size:1.5rem;font-weight:800" id="los-banner-date">—</div>
+      </div>
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:.72rem;font-weight:700;opacity:.8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Predicted LOS</div>
+        <div style="font-size:1.3rem;font-weight:700" id="los-banner-los">—</div>
+        <div style="font-size:.75rem;opacity:.75" id="los-banner-ci">80% CI: —</div>
+      </div>
+      <div style="flex:0 0 auto">
+        <span id="los-banner-tier" style="display:inline-block;padding:6px 16px;border-radius:20px;font-size:.85rem;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35)">—</span>
+      </div>
+      <div style="flex:0 0 auto;font-size:.68rem;opacity:.65;font-weight:600">Powered by ML ·<br>50k CA admissions</div>
+    </div>
+  </div>
+
   <!-- Progress panel -->
   <div class="progress-panel" id="progressPanel">
     <h2>🔄 Running Specialist Agents in Parallel…</h2>
     <div class="agent-grid">
+      <div class="agent-card" id="card-predictive_los" style="border-left:3px solid #1a56db">
+        <div class="agent-icon">📊</div>
+        <div>
+          <div class="agent-name">Predictive LOS (ML)</div>
+          <span class="agent-status status-waiting" id="status-predictive_los">Waiting</span>
+        </div>
+      </div>
       <div class="agent-card" id="card-clinical">
         <div class="agent-icon">🏥</div>
         <div>
@@ -784,9 +812,10 @@ async function generatePlan() {
   document.getElementById('reportPanel').style.display = 'none';
 
   // Reset all statuses
-  ['clinical','care_needs','insurance','medications','social','coordinator'].forEach(a =>
+  ['predictive_los','clinical','care_needs','insurance','medications','social','coordinator'].forEach(a =>
     setStatus(a, 'waiting', 'Waiting')
   );
+  document.getElementById('losBanner').style.display = 'none';
 
   try {
     const res = await fetch('/api/plan/stream', {
@@ -826,6 +855,7 @@ async function generatePlan() {
 
 function handleEvent(event) {
   const NAMES = {
+    predictive_los: 'Predictive LOS (ML)',
     clinical: 'Clinical Assessment',
     care_needs: 'Care Needs',
     insurance: 'Insurance & Auth',
@@ -847,6 +877,10 @@ function handleEvent(event) {
       setStatus(event.agent, 'error', 'Error ✗');
       break;
 
+    case 'los_prediction':
+      renderLosBanner(event.data);
+      break;
+
     case 'coordinator_start':
       setStatus('coordinator', 'running', 'Synthesizing…');
       break;
@@ -862,6 +896,19 @@ function handleEvent(event) {
       document.getElementById('generateBtn').innerHTML = '🤖 Generate Discharge Plan';
       break;
   }
+}
+
+function renderLosBanner(p) {
+  if (!p) return;
+  const fmtD = iso => {
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  document.getElementById('los-banner-date').textContent = fmtD(p.predicted_discharge_date);
+  document.getElementById('los-banner-los').textContent  = p.predicted_los_days + ' days';
+  document.getElementById('los-banner-ci').textContent   = '80% CI: ' + p.los_p10 + '–' + p.los_p90 + ' days';
+  document.getElementById('los-banner-tier').textContent = p.risk_tier;
+  document.getElementById('losBanner').style.display = 'block';
 }
 
 let _rawReportText = '';
@@ -892,6 +939,7 @@ function resetForm() {
   document.getElementById('snf_days_used').value = '0';
   document.getElementById('reportPanel').style.display = 'none';
   document.getElementById('progressPanel').style.display = 'none';
+  document.getElementById('losBanner').style.display = 'none';
   goTab(0);
 }
 
