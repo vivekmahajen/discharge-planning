@@ -73,6 +73,16 @@ except Exception:
     def _get_org_domain(email: str) -> str:
         return email.split("@")[-1].lower() if "@" in email else "unknown"
 
+# Directory DB (imported lazily)
+_DIRECTORY_DB_AVAILABLE = False
+try:
+    from db.directory import (run_directory_migrations, search_facilities as _search_facilities,
+                               get_facility_by_ccn, get_county_summary, get_sync_status,
+                               seed_zip_coordinates)
+    _DIRECTORY_DB_AVAILABLE = True
+except Exception:
+    pass
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent
@@ -505,6 +515,27 @@ async def startup():
             run_migrations()
         except Exception as _e:
             logging.getLogger(__name__).warning("Patient migrations failed: %s", _e)
+    if DATABASE_URL and _DIRECTORY_DB_AVAILABLE:
+        try:
+            run_directory_migrations()
+            # Seed zip codes if needed
+            csv_path = str(BASE_DIR / "data" / "ca_zips.csv")
+            if os.path.exists(csv_path):
+                seed_zip_coordinates(csv_path)
+            # Background sync if stale
+            import threading
+            from services.directory_sync import run_full_sync as _dir_sync
+            from db.directory import get_sync_status as _get_sync_status
+            def _startup_sync():
+                try:
+                    status = _get_sync_status()
+                    if status["total_active_facilities"] == 0 or status.get("data_freshness_hours", 999) > 24:
+                        _dir_sync(triggered_by="startup")
+                except Exception as e:
+                    logging.getLogger(__name__).warning("Directory startup sync failed: %s", e)
+            threading.Thread(target=_startup_sync, daemon=True).start()
+        except Exception as e:
+            logging.getLogger(__name__).warning("Directory setup failed: %s", e)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────
@@ -1450,8 +1481,27 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
     request.state.audit_mrn = patient_data.get("mrn") or None
     async def _stream_with_tcm():
         coordinator_output: str | None = None
-        mrn = patient_data.get("mrn", "").strip()
-        admission_date_val = patient_data.get("admission_date", "").strip()
+        # Make a mutable copy so we can enrich with nearby facilities
+        _patient_data = dict(patient_data)
+        mrn = _patient_data.get("mrn", "").strip()
+        # Enrich with nearby facilities if zip_code provided
+        if _patient_data.get("zip_code") and DATABASE_URL and _DIRECTORY_DB_AVAILABLE:
+            try:
+                from db.directory import search_facilities as _sf_enrich
+                nearby = await asyncio.to_thread(
+                    _sf_enrich, _patient_data["zip_code"], 25.0, None, None, None, None, False, "rating", 5
+                )
+                if nearby:
+                    _patient_data["nearby_facilities"] = [
+                        {"name": f["name"], "distance_miles": f["distance_miles"],
+                         "rating": f["overall_rating"], "city": f["city"],
+                         "beds": f.get("licensed_total_beds") or f.get("certified_beds"),
+                         "medi_cal": f["accepts_medi_cal"], "phone": f["phone"]}
+                        for f in nearby[:5]
+                    ]
+            except Exception:
+                pass
+        admission_date_val = _patient_data.get("admission_date", "").strip()
         user_email = ctx.email
 
         patient_id: int | None = None
@@ -1463,9 +1513,9 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
                 from db.patients import (get_or_create_patient, save_snapshot,
                                          start_plan_run, get_org_domain)
                 org_d = get_org_domain(user_email)
-                pat = await asyncio.to_thread(get_or_create_patient, mrn, admission_date_val, user_email, patient_data)
+                pat = await asyncio.to_thread(get_or_create_patient, mrn, admission_date_val, user_email, _patient_data)
                 patient_id = pat["id"]
-                snap_id = await asyncio.to_thread(save_snapshot, patient_id, patient_data, user_email)
+                snap_id = await asyncio.to_thread(save_snapshot, patient_id, _patient_data, user_email)
                 run_id = await asyncio.to_thread(start_plan_run, patient_id, snap_id, user_email)
                 yield f"data: {json.dumps({'type': 'patient_record', 'data': {'patient_id': patient_id, 'run_id': run_id, 'mrn': mrn}})}\n\n"
             except Exception as _pe:
@@ -1473,7 +1523,7 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
         elif not mrn or not admission_date_val:
             yield f"data: {json.dumps({'type': 'warning', 'message': 'No MRN or admission date provided — this plan will not be saved to patient record.'})}\n\n"
 
-        async for chunk in stream_plan(patient_data):
+        async for chunk in stream_plan(_patient_data):
             yield chunk
             try:
                 event_str = chunk.removeprefix("data: ").strip()
@@ -1502,7 +1552,7 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
                 los_pred = None
                 try:
                     from agents.predictive_los import predict_los
-                    los_pred = dataclasses.asdict(predict_los(patient_data))
+                    los_pred = dataclasses.asdict(predict_los(_patient_data))
                 except Exception:
                     pass
                 await asyncio.to_thread(complete_plan_run, run_id, coordinator_output, los_pred)
@@ -1511,7 +1561,7 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
 
         if DATABASE_URL and coordinator_output is not None:
             tcm_result = await _maybe_create_tcm_episode(
-                coordinator_output, patient_data, ctx.org_id, ctx.email)
+                coordinator_output, _patient_data, ctx.org_id, ctx.email)
             if tcm_result:
                 yield f"data: {json.dumps({'type': 'tcm_episode_created', **tcm_result})}\n\n"
             else:
@@ -1796,6 +1846,116 @@ async def patient_detail_page(request: Request, patient_id: int):
 
 APP_URL = os.environ.get("NEXT_PUBLIC_APP_URL", "https://discharge-planning.vercel.app")
 FHIR_REDIRECT_URI = os.getenv("FHIR_REDIRECT_URI", f"{APP_URL}/api/fhir/callback")
+
+
+# ── Post-Acute Provider Directory API ────────────────────────────────────────
+
+@app.get("/api/directory/search")
+@limiter.limit("120/hour")
+async def directory_search(request: Request, zip: str = "", radius: float = 25.0,
+                           types: str = "SNF,IRF,LTACH", min_rating: int = None,
+                           medi_cal: str = None, medicare: str = None,
+                           exclude_sff: str = "false", sort: str = "distance",
+                           limit: int = 50, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        return JSONResponse({"results": [], "total": 0, "error": "Directory database not available"})
+    zip = zip.strip()
+    if not zip or not zip.isdigit() or len(zip) != 5:
+        return JSONResponse({"results": [], "total": 0, "error": "Valid 5-digit ZIP code required"}, status_code=400)
+    radius = max(1.0, min(100.0, radius))
+    limit = max(1, min(100, limit))
+    facility_types = [t.strip().upper() for t in types.split(",") if t.strip()] if types else None
+    try:
+        from db.directory import search_facilities as _sf, get_sync_status as _gss
+        results = await asyncio.to_thread(
+            _sf, zip, radius, facility_types,
+            min_rating if min_rating else None,
+            True if medi_cal == "true" else (False if medi_cal == "false" else None),
+            True if medicare == "true" else (False if medicare == "false" else None),
+            exclude_sff == "true", sort, limit
+        )
+        sync = await asyncio.to_thread(_gss)
+        freshness = f"Synced {int(sync.get('data_freshness_hours', 0))} hours ago" if sync.get('last_sync') else "Not yet synced"
+        return JSONResponse({"results": results, "total": len(results), "zip": zip,
+                             "radius_miles": radius, "data_freshness": freshness})
+    except Exception as e:
+        return JSONResponse({"results": [], "total": 0, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/directory/facility/{ccn}")
+@limiter.limit("120/hour")
+async def directory_facility_detail(request: Request, ccn: str,
+                                     ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Directory database not available")
+    try:
+        from db.directory import get_facility_by_ccn as _gf
+        import datetime as _dt
+        facility = await asyncio.to_thread(_gf, ccn)
+        if not facility:
+            raise HTTPException(status_code=404, detail="Facility not found")
+        def _ser(v):
+            if isinstance(v, (_dt.datetime, _dt.date)): return v.isoformat()
+            return v
+        return JSONResponse({"facility": {k: _ser(v) for k, v in facility.items()}})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/directory/county-summary")
+@limiter.limit("60/hour")
+async def directory_county_summary(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        return JSONResponse({"counties": []})
+    try:
+        from db.directory import get_county_summary as _gcs
+        counties = await asyncio.to_thread(_gcs)
+        return JSONResponse({"counties": counties})
+    except Exception as e:
+        return JSONResponse({"counties": [], "error": str(e)})
+
+
+@app.post("/api/directory/sync")
+@limiter.limit("5/hour")
+async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Directory database not available")
+    try:
+        from db.directory import get_sync_status as _gss
+        status = await asyncio.to_thread(_gss)
+        fh = status.get("data_freshness_hours", 999)
+        if fh is not None and fh < 1:
+            return JSONResponse({"message": "Sync completed recently — no refresh needed",
+                                 "data_freshness_hours": fh})
+        import threading
+        from services.directory_sync import run_full_sync as _rfs
+        from db.directory import start_sync_log
+        log_id = await asyncio.to_thread(start_sync_log, "manual")
+        threading.Thread(target=_rfs, args=("manual",), daemon=True).start()
+        return JSONResponse({"message": "Sync started", "sync_id": log_id})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/directory/sync-status")
+@limiter.limit("120/hour")
+async def directory_sync_status_endpoint(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        return JSONResponse({"last_sync": None, "total_active_facilities": 0})
+    try:
+        from db.directory import get_sync_status as _gss
+        import datetime as _dt
+        status = await asyncio.to_thread(_gss)
+        def _ser(v):
+            if isinstance(v, (_dt.datetime, _dt.date)): return v.isoformat()
+            return v
+        if status.get("last_sync"):
+            status["last_sync"] = {k: _ser(v) for k, v in status["last_sync"].items()}
+        return JSONResponse(status)
+    except Exception as e:
+        return JSONResponse({"last_sync": None, "total_active_facilities": 0, "error": str(e)})
 
 
 

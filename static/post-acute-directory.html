@@ -3,89 +3,435 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Post-Acute Directory — Discharge Planning AI</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <title>Post-Acute Provider Directory — Discharge Planning AI</title>
   <style>
-    /* ── Reset ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* ── CSS design tokens ── */
-    :root {
-      --font-sans: "Source Sans 3", system-ui, sans-serif;
-      --font-mono: "Source Code Pro", "Courier New", monospace;
-
-      --color-background-primary:   #FFFFFF;
-      --color-background-secondary: #F5F3EE;
-      --color-background-success:   #E8F5EE;
-      --color-background-warning:   #FEF0DC;
-      --color-background-danger:    #FAEBE8;
-      --color-background-info:      #E8F0F8;
-
-      --color-text-primary:   #1A1917;
-      --color-text-secondary: #6A6560;
-      --color-text-success:   #1B4332;
-      --color-text-warning:   #B86B0C;
-      --color-text-danger:    #B03020;
-      --color-text-info:      #1A5276;
-
-      --color-border-tertiary: #E8E4DA;
-      --color-border-secondary:#DDD8CE;
-      --color-border-success:  #A7DFC4;
-      --color-border-warning:  #F0D99A;
-      --color-border-danger:   #F5C4B3;
-      --color-border-info:     #B5D4F4;
-
-      --border-radius-lg: 10px;
-      --border-radius-md: 6px;
-    }
-
     body {
-      font-family: var(--font-sans);
-      background: #F5F3EE;
-      color: var(--color-text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f8;
+      color: #1e293b;
+      min-height: 100vh;
     }
 
-    /* ── App header ── */
     header {
-      background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
-      color: white; padding: 10px 18px;
-      display: flex; align-items: center; gap: 10px;
+      background: #1a56db;
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+      flex-wrap: wrap;
     }
-    header .logo { font-size: 1.3rem; }
-    header h1 { font-size: .95rem; font-weight: 700; }
-    header p  { font-size: .68rem; opacity: .85; margin-top: 1px; }
-    header .spacer { flex: 1; }
+    header .logo { font-size: 1.6rem; }
+    header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: -.2px; }
+    header p  { font-size: .75rem; opacity: .85; margin-top: 1px; }
+    header .spacer { flex: 1; min-width: 8px; }
+    header .nav-links { display: flex; gap: 4px; flex-wrap: wrap; }
     header a {
-      color: rgba(255,255,255,.85); text-decoration: none;
-      font-size: .72rem; padding: 4px 10px; border-radius: 5px;
-      background: rgba(255,255,255,.15); margin-left: 5px;
-      transition: background .15s; white-space: nowrap;
+      padding: 5px 11px;
+      border-radius: 5px;
+      font-size: .72rem;
+      font-weight: 600;
+      color: rgba(255,255,255,.9);
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.25);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background .15s;
+      white-space: nowrap;
     }
     header a:hover { background: rgba(255,255,255,.28); }
-
-    /* ── Form controls (used by the filter panel) ── */
-    input[type="text"], input[type="search"], select {
-      padding: 6px 9px; font-size: 12px; font-family: var(--font-sans);
-      border: 0.5px solid var(--color-border-secondary);
-      border-radius: var(--border-radius-md);
-      background: var(--color-background-primary);
-      color: var(--color-text-primary);
-      width: 100%;
+    header a.active { background: rgba(255,255,255,.32); font-weight: 700; }
+    .freshness-badge {
+      font-size: .68rem;
+      background: rgba(255,255,255,.18);
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 4px;
+      padding: 3px 8px;
+      color: rgba(255,255,255,.85);
+      white-space: nowrap;
     }
-    input[type="range"] { accent-color: #1D9E75; }
-    input:focus, select:focus { outline: 2px solid #1D9E75; outline-offset: 1px; }
 
-    #root { padding: 16px 20px 40px; }
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
 
+    /* Search bar */
+    .search-bar {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 20px 24px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .search-bar .field { display: flex; flex-direction: column; gap: 4px; }
+    .search-bar label { font-size: .75rem; font-weight: 600; color: #475569; }
+    .search-bar input, .search-bar select {
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: .85rem;
+      background: #fff;
+      color: #1e293b;
+      min-width: 100px;
+    }
+    .search-bar input:focus, .search-bar select:focus {
+      outline: 2px solid #1a56db;
+      outline-offset: 1px;
+    }
+    .btn-search {
+      padding: 9px 22px;
+      background: #1a56db;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+      height: 38px;
+    }
+    .btn-search:hover { background: #1544b0; }
+    .btn-search:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    /* Filters panel */
+    .filters-panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .filters-panel h3 {
+      font-size: .8rem;
+      font-weight: 700;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 12px;
+    }
+    .filters-grid {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .filters-grid .field { display: flex; flex-direction: column; gap: 4px; }
+    .filters-grid label { font-size: .72rem; font-weight: 600; color: #64748b; }
+    .filters-grid select, .filters-grid input[type="number"] {
+      padding: 6px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      font-size: .8rem;
+      background: #fff;
+      color: #1e293b;
+      min-width: 90px;
+    }
+    .checkbox-group { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; padding-top: 20px; }
+    .checkbox-label { display: flex; align-items: center; gap: 5px; font-size: .8rem; cursor: pointer; color: #334155; }
+    .checkbox-label input { width: 14px; height: 14px; cursor: pointer; }
+
+    /* Results header */
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .results-count { font-size: .85rem; color: #64748b; font-weight: 500; }
+    .btn-county-toggle, .btn-refresh {
+      padding: 6px 14px;
+      font-size: .78rem;
+      font-weight: 600;
+      border-radius: 5px;
+      cursor: pointer;
+      border: 1px solid;
+      transition: background .15s;
+    }
+    .btn-county-toggle {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+    .btn-county-toggle:hover { background: #e2e8f0; }
+    .btn-refresh {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #1d4ed8;
+    }
+    .btn-refresh:hover { background: #dbeafe; }
+    .btn-refresh:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* County summary table */
+    .county-table {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .county-table table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .county-table th {
+      background: #f8fafc;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 700;
+      color: #475569;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .county-table td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; }
+    .county-table tr:last-child td { border-bottom: none; }
+    .county-table tr:hover td { background: #f8fafc; }
+
+    /* Facility cards */
+    .facility-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      transition: box-shadow .15s;
+    }
+    .facility-card:hover { box-shadow: 0 3px 12px rgba(0,0,0,.1); }
+    .facility-card.sff-warning { border-left: 4px solid #f59e0b; }
+    .facility-card.abuse-warning { border-left: 4px solid #ef4444; }
+
+    .card-header {
+      padding: 14px 18px 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .card-main { flex: 1; min-width: 0; }
+    .card-name {
+      font-size: .95rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 3px;
+    }
+    .card-meta {
+      font-size: .75rem;
+      color: #64748b;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+    .card-meta span { display: flex; align-items: center; gap: 3px; }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    /* Type badge */
+    .type-badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .type-SNF { background: #dbeafe; color: #1e40af; }
+    .type-IRF { background: #dcfce7; color: #15803d; }
+    .type-LTACH { background: #fae8ff; color: #9333ea; }
+    .type-default { background: #f1f5f9; color: #475569; }
+
+    /* Stars */
+    .stars { font-size: .85rem; color: #f59e0b; letter-spacing: .03em; white-space: nowrap; }
+    .stars .star-num { font-size: .72rem; color: #94a3b8; margin-left: 2px; }
+
+    /* Flags */
+    .flag-sff {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      color: #92400e;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: .68rem;
+      font-weight: 700;
+    }
+    .flag-abuse {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: .68rem;
+      font-weight: 700;
+    }
+
+    /* Cert pills */
+    .cert-pills { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+    .pill {
+      padding: 2px 7px;
+      border-radius: 20px;
+      font-size: .65rem;
+      font-weight: 600;
+    }
+    .pill-green { background: #dcfce7; color: #15803d; }
+    .pill-blue  { background: #dbeafe; color: #1e40af; }
+    .pill-gray  { background: #f1f5f9; color: #64748b; }
+    .pill-red   { background: #fee2e2; color: #991b1b; }
+
+    /* Buttons */
+    .btn-sm {
+      padding: 5px 11px;
+      border-radius: 5px;
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid;
+      transition: background .15s;
+    }
+    .btn-detail {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+    .btn-detail:hover { background: #e2e8f0; }
+    .btn-detail.expanded { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+    .btn-add-plan {
+      background: #1a56db;
+      border-color: #1544b0;
+      color: #fff;
+    }
+    .btn-add-plan:hover { background: #1544b0; }
+
+    /* Phone link */
+    .phone-link {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-size: .8rem;
+    }
+    .phone-link:hover { text-decoration: underline; }
+
+    /* Detail panel */
+    .detail-panel {
+      padding: 14px 18px;
+      border-top: 1px solid #f1f5f9;
+      background: #fafbfc;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px 16px;
+    }
+    .detail-item { }
+    .detail-label { font-size: .65rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; }
+    .detail-value { font-size: .8rem; color: #334155; margin-top: 1px; }
+
+    /* Rating breakdown bars */
+    .rating-bars { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+    .rating-row { display: flex; align-items: center; gap: 8px; }
+    .rating-row-label { font-size: .72rem; color: #64748b; width: 120px; flex-shrink: 0; }
+    .rating-bar-bg { flex: 1; background: #e2e8f0; border-radius: 3px; height: 7px; }
+    .rating-bar-fill { height: 7px; border-radius: 3px; transition: width .3s; }
+    .rb-1 { background: #ef4444; }
+    .rb-2 { background: #f97316; }
+    .rb-3 { background: #eab308; }
+    .rb-4 { background: #22c55e; }
+    .rb-5 { background: #16a34a; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1a56db;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: .85rem;
+      font-weight: 600;
+      box-shadow: 0 4px 16px rgba(0,0,0,.2);
+      z-index: 9999;
+      animation: fadeIn .2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    /* States */
+    .empty-state {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 48px 24px;
+      text-align: center;
+      color: #94a3b8;
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 10px; }
+    .empty-state h3 { font-size: 1rem; color: #64748b; margin-bottom: 6px; }
+    .empty-state p { font-size: .85rem; }
+
+    .loading-state {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 40px 24px;
+      text-align: center;
+      color: #64748b;
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #1a56db;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 12px;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media print {
-      header, .no-print { display: none !important; }
-      body { background: white !important; }
+
+    .error-state {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      padding: 16px 20px;
+      color: #991b1b;
+      font-size: .85rem;
+      margin-bottom: 12px;
+    }
+
+    /* Sync polling banner */
+    .sync-banner {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: .82rem;
+      color: #92400e;
+    }
+
+    /* Distance chip */
+    .distance-chip {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      color: #0369a1;
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: .7rem;
+      font-weight: 600;
     }
   </style>
 </head>
@@ -95,517 +441,505 @@
   <div class="logo">🏥</div>
   <div>
     <h1>Discharge Planning AI</h1>
-    <p>Post-Acute Facility Directory</p>
+    <p>Live Post-Acute Provider Directory</p>
   </div>
   <div class="spacer"></div>
-  <a href="/my-patients">My Patients</a>
-  <a href="/">← Planner</a>
-  <a href="/discharge-summary-generator">Summary</a>
-  <a href="/teachback-checklist">Teach-back</a>
-  <a href="/cdph-compliance">CDPH</a>
-  <a href="/hrrp-flagging">HRRP</a>
-  <a href="/roi-tracker">ROI</a>
-  <a href="/readmission-tracker">Tracker</a>
-  <a href="/summary-generator">Prompts</a>
-  <a href="/imm-prompt-system">IMM</a>
-  <a href="/multilingual-prompt-system">Multilingual</a>
-  <a href="/predictive-discharge">Predict LOS</a>
-  <a href="/api/auth/logout">Sign Out</a>
+  <span class="freshness-badge" id="freshnessLabel">Loading...</span>
+  <div class="nav-links">
+    <a href="/my-patients">My Patients</a>
+    <a href="/">Planner</a>
+    <a href="/discharge-summary-generator">Summary</a>
+    <a href="/teachback-checklist">Teach-back</a>
+    <a href="/cdph-compliance">CDPH</a>
+    <a href="/hrrp-flagging">HRRP</a>
+    <a href="/roi-tracker">ROI</a>
+    <a href="/readmission-tracker">Tracker</a>
+    <a href="/summary-generator">Prompts</a>
+    <a href="/imm-prompt-system">IMM</a>
+    <a href="/multilingual-prompt-system">Multilingual</a>
+    <a href="/predictive-discharge">Predict LOS</a>
+    <a href="/post-acute-directory" class="active">Directory</a>
+    <a href="/api/auth/logout">Sign Out</a>
+  </div>
 </header>
 
-<div id="root"></div>
+<div class="container">
+
+  <!-- Search bar -->
+  <div class="search-bar">
+    <div class="field">
+      <label for="zipInput">ZIP Code</label>
+      <input type="text" id="zipInput" placeholder="e.g. 94103" maxlength="5" style="width:100px" />
+    </div>
+    <div class="field">
+      <label for="radiusSelect">Radius</label>
+      <select id="radiusSelect">
+        <option value="5">5 mi</option>
+        <option value="10">10 mi</option>
+        <option value="25" selected>25 mi</option>
+        <option value="50">50 mi</option>
+        <option value="100">100 mi</option>
+      </select>
+    </div>
+    <button class="btn-search" id="searchBtn" onclick="doSearch()">Search</button>
+  </div>
+
+  <!-- Filters panel -->
+  <div class="filters-panel">
+    <h3>Filters</h3>
+    <div class="filters-grid">
+      <div class="field">
+        <label>Facility Types</label>
+        <select id="typesSelect">
+          <option value="SNF,IRF,LTACH">All Types</option>
+          <option value="SNF">SNF Only</option>
+          <option value="IRF">IRF Only</option>
+          <option value="LTACH">LTACH Only</option>
+          <option value="SNF,IRF">SNF + IRF</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Min Star Rating</label>
+        <select id="minRatingSelect">
+          <option value="">Any</option>
+          <option value="2">2+ Stars</option>
+          <option value="3">3+ Stars</option>
+          <option value="4">4+ Stars</option>
+          <option value="5">5 Stars</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Medi-Cal</label>
+        <select id="mediCalSelect">
+          <option value="">Any</option>
+          <option value="true">Accepts Medi-Cal</option>
+          <option value="false">Does Not</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Medicare</label>
+        <select id="medicareSelect">
+          <option value="">Any</option>
+          <option value="true">Medicare Certified</option>
+          <option value="false">Not Certified</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Sort By</label>
+        <select id="sortSelect">
+          <option value="distance">Distance</option>
+          <option value="rating">Rating</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+      <div class="checkbox-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="excludeSffCheck" />
+          Exclude SFF Facilities
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync polling banner -->
+  <div class="sync-banner" id="syncBanner" style="display:none">
+    <div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0"></div>
+    <span>Syncing facility data from CMS — this takes about 60 seconds on first load. Results will appear automatically...</span>
+  </div>
+
+  <!-- Results area -->
+  <div class="results-header" id="resultsHeader" style="display:none">
+    <span class="results-count" id="resultsCount"></span>
+    <div style="display:flex;gap:8px">
+      <button class="btn-county-toggle" onclick="toggleCounty()">County Summary</button>
+      <button class="btn-refresh" id="refreshBtn" onclick="triggerSync()">&#x21bb; Refresh Data</button>
+    </div>
+  </div>
+
+  <!-- County summary (hidden by default) -->
+  <div class="county-table" id="countyTable" style="display:none">
+    <table>
+      <thead>
+        <tr>
+          <th>County</th>
+          <th>Facilities</th>
+          <th>Avg Rating</th>
+          <th>Total Beds</th>
+          <th>Medi-Cal</th>
+        </tr>
+      </thead>
+      <tbody id="countyTableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Results list -->
+  <div id="resultsArea"></div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" style="display:none"></div>
+
+</div>
 
 <script>
-  fetch('/api/me').then(r => {
-    if (!r.ok) window.location.href = '/login';
-  }).catch(() => { window.location.href = '/login'; });
-</script>
+let currentResults = [];
+let syncPollInterval = null;
+let countyVisible = false;
 
-<script type="text/babel">
-const { useState, useEffect, useMemo, useCallback } = React;
+// On load: check auth, load sync status, auto-populate zip from sessionStorage
+window.addEventListener('DOMContentLoaded', async () => {
+  // Auth check
+  try {
+    const r = await fetch('/api/me');
+    if (!r.ok) { window.location.href = '/login'; return; }
+  } catch(e) { window.location.href = '/login'; return; }
 
-/* ─── Reference point: Folsom / El Dorado Hills ──────────────────────────── */
-const REF = { lat: 38.6779, lon: -121.1764, label: "Folsom, CA" };
+  // Auto-populate zip
+  const savedZip = sessionStorage.getItem('patient_zip') || sessionStorage.getItem('zip_code');
+  if (savedZip) {
+    document.getElementById('zipInput').value = savedZip;
+  }
 
-/* ─── Haversine distance (miles) ─────────────────────────────────────────── */
-function miles(lat1, lon1, lat2, lon2) {
-  const R = 3959, d = (a, b) => (b - a) * Math.PI / 180;
-  const a = Math.sin(d(lat1, lat2) / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(d(lon1, lon2) / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-/* ─── CMS API endpoints ───────────────────────────────────────────────────── */
-const CMS_SNF = "https://data.cms.gov/data-api/v1/dataset/4pq5-n9py/data";
-
-/* ─── Sacramento + El Dorado county city lists ───────────────────────────── */
-const SAC_CITIES = new Set(["SACRAMENTO","ELK GROVE","CITRUS HEIGHTS","RANCHO CORDOVA",
-  "FOLSOM","GALT","ORANGEVALE","CARMICHAEL","FAIR OAKS","NORTH HIGHLANDS",
-  "ANTELOPE","RIO LINDA","ISLETON","ARDEN ARCADE","GOLD RIVER","MATHER","HERALD"]);
-const ELD_CITIES = new Set(["PLACERVILLE","EL DORADO HILLS","CAMERON PARK",
-  "SHINGLE SPRINGS","DIAMOND SPRINGS","POLLOCK PINES","SOUTH LAKE TAHOE",
-  "EL DORADO","RESCUE","COOL","GARDEN VALLEY","GEORGETOWN","PILOT HILL"]);
-
-/* ─── Geocoordinate lookup for known cities ───────────────────────────────── */
-const CITY_COORDS = {
-  "SACRAMENTO":       [38.5816,-121.4944], "ELK GROVE":       [38.4088,-121.3716],
-  "CITRUS HEIGHTS":   [38.7073,-121.2785], "RANCHO CORDOVA":  [38.5891,-121.3027],
-  "FOLSOM":           [38.6779,-121.1764], "GALT":            [38.2541,-121.2997],
-  "ORANGEVALE":       [38.6789,-121.2274], "CARMICHAEL":      [38.6200,-121.3280],
-  "FAIR OAKS":        [38.6488,-121.2716], "NORTH HIGHLANDS": [38.6618,-121.3763],
-  "ANTELOPE":         [38.7152,-121.3607], "RIO LINDA":       [38.6907,-121.4502],
-  "PLACERVILLE":      [38.7296,-120.7981], "EL DORADO HILLS": [38.6770,-121.0714],
-  "CAMERON PARK":     [38.6720,-121.0467], "SHINGLE SPRINGS": [38.6591,-120.9350],
-  "DIAMOND SPRINGS":  [38.6977,-120.8285], "SOUTH LAKE TAHOE":[38.9399,-119.9772],
-  "POLLOCK PINES":    [38.7615,-120.5741], "RESCUE":          [38.7315,-121.0091],
-};
-
-function getCoords(city) {
-  return CITY_COORDS[city?.toUpperCase().trim()] || null;
-}
-
-/* ─── Seed data ───────────────────────────────────────────────────────────── */
-const SEED_FACILITIES = [
-  { id:"s1",  type:"SNF", name:"Folsom Extended Care & Rehabilitation",      city:"Folsom",          county:"El Dorado",  address:"1971 Clintwood Dr",        zip:"95630", phone:"(916) 983-6028", beds:99,  stars:4, health:4, staffing:3, quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina"],                lat:38.6831, lon:-121.1621, provnum:"555401", last_survey:"2025-11-12" },
-  { id:"s2",  type:"SNF", name:"El Dorado Hills Care Center",               city:"El Dorado Hills", county:"El Dorado",  address:"1400 Country Club Dr",     zip:"95762", phone:"(916) 933-5456", beds:99,  stars:3, health:3, staffing:3, quality:3, medicare:true, medi_cal:true, managed_care:["Health Net","Molina"],                         lat:38.6770, lon:-121.0714, provnum:"555402", last_survey:"2025-09-24" },
-  { id:"s3",  type:"SNF", name:"Cameron Park Rehabilitation Center",        city:"Cameron Park",    county:"El Dorado",  address:"3399 Coach Lane",          zip:"95682", phone:"(530) 677-2291", beds:89,  stars:5, health:5, staffing:4, quality:5, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina","IEHP"],         lat:38.6720, lon:-121.0467, provnum:"555403", last_survey:"2025-12-03" },
-  { id:"s4",  type:"SNF", name:"Eskaton Care Center Gold Hill",             city:"Rescue",          county:"El Dorado",  address:"5850 Gold Hill Rd",        zip:"95672", phone:"(916) 652-7254", beds:53,  stars:4, health:4, staffing:5, quality:4, medicare:true, medi_cal:true, managed_care:["Health Net"],                                  lat:38.7315, lon:-121.0091, provnum:"555404", last_survey:"2025-10-18" },
-  { id:"s5",  type:"SNF", name:"Heritage Oaks Care Center",                city:"Sacramento",      county:"Sacramento", address:"4850 El Camino Ave",       zip:"95821", phone:"(916) 484-8561", beds:180, stars:3, health:2, staffing:3, quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Molina","LA Care"],                   lat:38.6050, lon:-121.3933, provnum:"555405", last_survey:"2025-08-30" },
-  { id:"s6",  type:"SNF", name:"Orangevale Healthcare Center",              city:"Orangevale",      county:"Sacramento", address:"9225 Greenback Ln",        zip:"95662", phone:"(916) 988-5041", beds:118, stars:4, health:4, staffing:3, quality:5, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina"],                lat:38.6789, lon:-121.2274, provnum:"555406", last_survey:"2025-11-07" },
-  { id:"s7",  type:"SNF", name:"Citrus Heights Nursing & Rehabilitation",   city:"Citrus Heights",  county:"Sacramento", address:"6333 Auburn Blvd",         zip:"95621", phone:"(916) 726-3314", beds:99,  stars:2, health:2, staffing:2, quality:3, medicare:true, medi_cal:true, managed_care:["Molina"],                                       lat:38.7073, lon:-121.2785, provnum:"555407", last_survey:"2025-07-22" },
-  { id:"s8",  type:"SNF", name:"Roseville Gardens Care Center",             city:"Roseville",       county:"Sacramento", address:"200 Conference Center Dr", zip:"95678", phone:"(916) 780-8900", beds:144, stars:5, health:5, staffing:4, quality:5, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina","Blue Shield"],  lat:38.7521, lon:-121.2880, provnum:"555408", last_survey:"2026-01-15" },
-  { id:"s9",  type:"SNF", name:"Bruceville Terrace Healthcare",             city:"Elk Grove",       county:"Sacramento", address:"8445 Bruceville Rd",       zip:"95758", phone:"(916) 683-6000", beds:196, stars:4, health:4, staffing:4, quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Molina","Health Net"],                lat:38.4088, lon:-121.3716, provnum:"555409", last_survey:"2025-10-05" },
-  { id:"s10", type:"SNF", name:"Country Club Villa Senior Care",            city:"Sacramento",      county:"Sacramento", address:"1100 Fulton Ave",          zip:"95825", phone:"(916) 972-6228", beds:99,  stars:3, health:3, staffing:3, quality:3, medicare:true, medi_cal:true, managed_care:["Molina","Health Net"],                          lat:38.6077, lon:-121.4399, provnum:"555410", last_survey:"2025-09-12" },
-  { id:"s11", type:"SNF", name:"Fair Oaks Manor",                          city:"Fair Oaks",       county:"Sacramento", address:"4980 Hazel Ave",           zip:"95628", phone:"(916) 966-6681", beds:56,  stars:4, health:4, staffing:4, quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net"],                          lat:38.6488, lon:-121.2716, provnum:"555411", last_survey:"2025-12-18" },
-  { id:"s12", type:"SNF", name:"Mercy Oaks Healthcare Center",             city:"Sacramento",      county:"Sacramento", address:"9800 Stockton Blvd",       zip:"95827", phone:"(916) 361-5225", beds:142, stars:3, health:3, staffing:3, quality:3, medicare:true, medi_cal:true, managed_care:["Anthem","Molina"],                             lat:38.5305, lon:-121.3788, provnum:"555412", last_survey:"2025-08-05" },
-  { id:"h1",  type:"HHA", name:"Sutter Care at Home — Sacramento",         city:"Sacramento",      county:"Sacramento", address:"2800 L St Ste 200",        zip:"95816", phone:"(916) 887-5002", beds:null,stars:4, health:null,staffing:null,quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina","Blue Shield"], lat:38.5736, lon:-121.4874, provnum:"557001", last_survey:"2025-11-01" },
-  { id:"h2",  type:"HHA", name:"Dignity Health Home Care — Sacramento",    city:"Sacramento",      county:"Sacramento", address:"1 Dignity Health Dr",      zip:"95817", phone:"(916) 733-3200", beds:null,stars:4, health:null,staffing:null,quality:5, medicare:true, medi_cal:true, managed_care:["Anthem","Molina","Blue Shield"],              lat:38.5523, lon:-121.5005, provnum:"557002", last_survey:"2025-10-14" },
-  { id:"h3",  type:"HHA", name:"Elara Caring — Sacramento",               city:"Sacramento",      county:"Sacramento", address:"3501 Del Paso Rd Ste 185", zip:"95835", phone:"(916) 576-8380", beds:null,stars:3, health:null,staffing:null,quality:3, medicare:true, medi_cal:true, managed_care:["Health Net","Molina"],                        lat:38.6618, lon:-121.4502, provnum:"557003", last_survey:"2025-09-20" },
-  { id:"h4",  type:"HHA", name:"Kindred at Home — Sacramento",             city:"Sacramento",      county:"Sacramento", address:"555 University Ave Ste 200",zip:"95825", phone:"(916) 927-0400", beds:null,stars:4, health:null,staffing:null,quality:4, medicare:true, medi_cal:false,managed_care:["Anthem","Health Net"],                         lat:38.5760, lon:-121.4422, provnum:"557004", last_survey:"2025-12-08" },
-  { id:"h5",  type:"HHA", name:"Sutter Care at Home — Foothill",           city:"El Dorado Hills", county:"El Dorado",  address:"1870 Gold Hill Rd Ste 200",zip:"95762", phone:"(916) 941-0501", beds:null,stars:5, health:null,staffing:null,quality:5, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina"],               lat:38.6770, lon:-121.0714, provnum:"557005", last_survey:"2025-11-22" },
-  { id:"h6",  type:"HHA", name:"Marshall Home Health & Hospice",           city:"Placerville",     county:"El Dorado",  address:"1100 Marshall Way",        zip:"95667", phone:"(530) 622-1441", beds:null,stars:4, health:null,staffing:null,quality:4, medicare:true, medi_cal:true, managed_care:["Health Net","Molina"],                        lat:38.7296, lon:-120.7981, provnum:"557006", last_survey:"2025-10-03" },
-  { id:"h7",  type:"HHA", name:"BrightSpring Home Services — Sacramento",  city:"Rancho Cordova",  county:"Sacramento", address:"10315 Folsom Blvd Ste 200",zip:"95827", phone:"(916) 366-2900", beds:null,stars:3, health:null,staffing:null,quality:3, medicare:true, medi_cal:true, managed_care:["Molina"],                                     lat:38.5891, lon:-121.3027, provnum:"557007", last_survey:"2025-08-28" },
-  { id:"h8",  type:"HHA", name:"VITAS Healthcare — Sacramento",            city:"Sacramento",      county:"Sacramento", address:"1610 Arden Way Ste 126",   zip:"95815", phone:"(916) 646-2890", beds:null,stars:4, health:null,staffing:null,quality:4, medicare:true, medi_cal:true, managed_care:["Anthem","Health Net","Molina","Blue Shield"], lat:38.5736, lon:-121.4512, provnum:"557008", last_survey:"2025-12-15" },
-];
-
-SEED_FACILITIES.forEach(f => {
-  f.distance = parseFloat(miles(REF.lat, REF.lon, f.lat, f.lon).toFixed(1));
+  // Load sync status and check if we need to poll
+  await checkSyncStatus();
 });
 
-/* ─── Star rating display ─────────────────────────────────────────────────── */
-function Stars({ n, size = 13 }) {
-  if (!n) return <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>N/A</span>;
-  return (
-    <span style={{ display: "inline-flex", gap: 1 }} aria-label={`${n} out of 5 stars`}>
-      {[1,2,3,4,5].map(i => (
-        <svg key={i} width={size} height={size} viewBox="0 0 20 20" aria-hidden="true">
-          <polygon points="10,1 12.9,7 20,7.6 14.5,12.5 16.6,19.5 10,16 3.4,19.5 5.5,12.5 0,7.6 7.1,7"
-            fill={i <= n ? "#C8920A" : "var(--color-border-secondary)"} />
-        </svg>
-      ))}
-    </span>
-  );
-}
+async function checkSyncStatus() {
+  try {
+    const r = await fetch('/api/directory/sync-status');
+    if (!r.ok) return;
+    const data = await r.json();
 
-/* ─── Payer badge ─────────────────────────────────────────────────────────── */
-function PayerBadge({ label, color, bg }) {
-  return (
-    <span style={{ fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 3,
-      background: bg, color, letterSpacing: "0.04em" }}>{label}</span>
-  );
-}
+    const total = data.total_active_facilities || 0;
+    const freshness = data.data_freshness_hours;
 
-/* ─── Facility card ───────────────────────────────────────────────────────── */
-function FacilityCard({ f, onSelect, selected }) {
-  const tier = f.stars >= 4 ? { c: "#0F6E56", bg: "#E1F5EE" }
-             : f.stars >= 3 ? { c: "#854F0B", bg: "#FAEEDA" }
-             : { c: "#A32D2D", bg: "#FCEBEB" };
-  return (
-    <div style={{
-      background: "var(--color-background-primary)",
-      border: selected ? "2px solid #1D9E75" : "0.5px solid var(--color-border-tertiary)",
-      borderRadius: "var(--border-radius-lg)",
-      padding: "14px 16px", marginBottom: 10, transition: "border .15s",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 3,
-              background: f.type === "SNF" ? "#E6F1FB" : "#EEEDFE",
-              color: f.type === "SNF" ? "#0C447C" : "#3C3489" }}>{f.type === "SNF" ? "Skilled Nursing" : "Home Health"}</span>
-            <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 3, background: tier.bg, color: tier.c, fontWeight: 500 }}>
-              {f.stars >= 4 ? "High quality" : f.stars >= 3 ? "Average" : "Below average"}
-            </span>
-            {f.source === "CMS" && (
-              <span style={{ fontSize: 10, color: "var(--color-text-secondary)", fontStyle: "italic" }}>Live CMS data</span>
-            )}
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 3 }}>{f.name}</div>
-          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 8 }}>
-            <i className="ti ti-map-pin" aria-hidden="true" style={{ fontSize: 13, marginRight: 4, verticalAlign: -2 }}></i>
-            {f.address}, {f.city}, CA {f.zip}
-            <span style={{ marginLeft: 8, fontWeight: 500, color: f.distance <= 10 ? "#0F6E56" : f.distance <= 20 ? "#854F0B" : "var(--color-text-secondary)" }}>
-              {f.distance} mi from {REF.label}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontSize: 9, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Overall</div>
-              <Stars n={f.stars} />
-            </div>
-            {f.type === "SNF" && (
-              <>
-                <div>
-                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Health insp.</div>
-                  <Stars n={f.health} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Staffing</div>
-                  <Stars n={f.staffing} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Quality</div>
-                  <Stars n={f.quality} />
-                </div>
-              </>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-            {f.medicare && <PayerBadge label="Medicare ✓" color="#0C447C" bg="#E6F1FB" />}
-            {f.medi_cal  && <PayerBadge label="Medi-Cal ✓" color="#0F6E56" bg="#E1F5EE" />}
-            {(f.managed_care || []).map(p => (
-              <PayerBadge key={p} label={p} color="#3C3489" bg="#EEEDFE" />
-            ))}
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-          {f.beds && (
-            <div style={{ textAlign: "center", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "6px 10px" }}>
-              <div style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>{f.beds}</div>
-              <div style={{ fontSize: 9, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em" }}>beds</div>
-            </div>
-          )}
-          <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
-            <i className="ti ti-phone" aria-hidden="true" style={{ fontSize: 13, marginRight: 4, verticalAlign: -2 }}></i>
-            {f.phone}
-          </div>
-          {f.last_survey && (
-            <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Survey: {f.last_survey}</div>
-          )}
-          <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-            <button onClick={() => onSelect(f)} style={{
-              fontSize: 11, padding: "5px 12px", borderRadius: "var(--border-radius-md)",
-              background: selected ? "#1D9E75" : "var(--color-background-primary)",
-              color: selected ? "#fff" : "var(--color-text-secondary)",
-              border: `0.5px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`,
-              cursor: "pointer",
-            }}>
-              {selected ? "✓ Selected" : "+ Select"}
-            </button>
-            <a href={`https://www.medicare.gov/care-compare/details/nursing-home/${f.provnum}`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 11, padding: "5px 10px", borderRadius: "var(--border-radius-md)",
-                background: "var(--color-background-secondary)", color: "var(--color-text-secondary)",
-                border: "0.5px solid var(--color-border-secondary)", textDecoration: "none",
-                display: "inline-flex", alignItems: "center", gap: 3 }}>
-              <i className="ti ti-external-link" aria-hidden="true" style={{ fontSize: 12 }}></i> CMS
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   MAIN COMPONENT
-════════════════════════════════════════════════════════════════════════════ */
-function PostAcuteDirectory() {
-  const [facilities, setFacilities] = useState(SEED_FACILITIES);
-  const [loading,    setLoading]    = useState(false);
-  const [cmsStatus,  setCmsStatus]  = useState("seed");
-  const [selected,   setSelected]   = useState([]);
-  const [search,     setSearch]     = useState("");
-  const [filters,    setFilters]    = useState({
-    type: "all", county: "all", minStars: 0, medicare: false,
-    medi_cal: false, maxDist: 50, sortBy: "distance",
-  });
-
-  const setF = (k, v) => setFilters(p => ({ ...p, [k]: v }));
-
-  /* ── Live CMS fetch ─────────────────────────────────────────────────────── */
-  const fetchCMS = useCallback(async () => {
-    setLoading(true); setCmsStatus("loading");
-    try {
-      const snfParams = new URLSearchParams({ "filter[PROVSTATE]": "CA", limit: "1000", offset: "0" });
-      const snfRes = await fetch(`${CMS_SNF}?${snfParams}`, { signal: AbortSignal.timeout(12000) });
-      if (!snfRes.ok) throw new Error(`HTTP ${snfRes.status}`);
-      const snfData = await snfRes.json();
-
-      const mapped = (Array.isArray(snfData) ? snfData : snfData.data || [])
-        .filter(r => {
-          const c = (r.CITY || r.city || "").toUpperCase().trim();
-          return SAC_CITIES.has(c) || ELD_CITIES.has(c);
-        })
-        .map((r, i) => {
-          const city   = (r.CITY || r.city || "").toUpperCase().trim();
-          const coords = getCoords(city);
-          const lat    = parseFloat(r.LAT  || r.lat  || coords?.[0] || 38.5816);
-          const lon    = parseFloat(r.LON  || r.lon  || coords?.[1] || -121.4944);
-          const dist   = parseFloat(miles(REF.lat, REF.lon, lat, lon).toFixed(1));
-          return {
-            id: "cms_" + (r.PROVNUM || r.provnum || i),
-            type: "SNF", source: "CMS",
-            name:     r.PROVNAME || r.provname || "Unknown",
-            city:     r.CITY    || r.city    || "",
-            county:   SAC_CITIES.has(city) ? "Sacramento" : "El Dorado",
-            address:  r.ADDRESS || r.address || "",
-            zip:      r.ZIP     || r.zip     || "",
-            phone:    r.PHONE   || r.phone   || "",
-            beds:     parseInt(r.BEDCNT || r.bedcnt || 0) || null,
-            stars:    parseInt(r.OVERALL_RATING           || r.overall_rating           || 0) || null,
-            health:   parseInt(r.HEALTH_INSPECTION_RATING || r.health_inspection_rating || 0) || null,
-            staffing: parseInt(r.STAFFING_RATING          || r.staffing_rating          || 0) || null,
-            quality:  parseInt(r.QUALITY_MEASURE_RATING   || r.quality_measure_rating   || 0) || null,
-            medicare: true, medi_cal: true,
-            managed_care: ["Anthem","Health Net","Molina"],
-            lat, lon, distance: dist,
-            provnum:     r.PROVNUM || r.provnum || "",
-            last_survey: r.CYCLE_1_SURVEY_DATE || r.cycle_1_survey_date || "",
-          };
-        });
-
-      if (mapped.length > 0) {
-        setFacilities([...SEED_FACILITIES, ...mapped.filter(m => !SEED_FACILITIES.some(s => s.name === m.name))]);
-        setCmsStatus("live");
-      } else {
-        setCmsStatus("error");
-      }
-    } catch (e) {
-      setCmsStatus("error");
-    } finally {
-      setLoading(false);
+    // Update freshness label
+    const label = document.getElementById('freshnessLabel');
+    if (data.last_sync && freshness !== null && freshness !== undefined) {
+      label.textContent = `Data: ${freshness < 1 ? '<1h' : Math.round(freshness) + 'h'} ago`;
+    } else {
+      label.textContent = total > 0 ? `${total.toLocaleString()} facilities` : 'Not yet synced';
     }
-  }, []);
 
-  /* ── Filtered + sorted list ─────────────────────────────────────────────── */
-  const results = useMemo(() => {
-    return facilities
-      .filter(f => {
-        if (filters.type !== "all" && f.type !== filters.type) return false;
-        if (filters.county !== "all" && f.county !== filters.county) return false;
-        if (f.stars && f.stars < filters.minStars) return false;
-        if (filters.medicare && !f.medicare) return false;
-        if (filters.medi_cal && !f.medi_cal) return false;
-        if (f.distance > filters.maxDist) return false;
-        if (search && !f.name.toLowerCase().includes(search.toLowerCase()) &&
-            !f.city.toLowerCase().includes(search.toLowerCase())) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        if (filters.sortBy === "distance") return a.distance - b.distance;
-        if (filters.sortBy === "stars")    return (b.stars || 0) - (a.stars || 0);
-        if (filters.sortBy === "name")     return a.name.localeCompare(b.name);
-        if (filters.sortBy === "beds")     return (b.beds || 0) - (a.beds || 0);
-        return 0;
-      });
-  }, [facilities, filters, search]);
-
-  const snfCount = results.filter(f => f.type === "SNF").length;
-  const hhaCount = results.filter(f => f.type === "HHA").length;
-  const avgStars = results.length ? (results.reduce((s, f) => s + (f.stars || 0), 0) / results.length).toFixed(1) : "—";
-  const highQual = results.filter(f => (f.stars || 0) >= 4).length;
-
-  const toggleSelect = (f) => {
-    setSelected(p => p.some(s => s.id === f.id) ? p.filter(s => s.id !== f.id) : [...p, f]);
-  };
-
-  return (
-    <div style={{ fontFamily: "var(--font-sans)", color: "var(--color-text-primary)" }}>
-
-      {/* ── Header card ── */}
-      <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px 16px", marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 3 }}>
-              <i className="ti ti-building-hospital" aria-hidden="true" style={{ fontSize: 18, marginRight: 8, verticalAlign: -3, color: "#185FA5" }}></i>
-              California Post-Acute Facility Directory
-            </div>
-            <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
-              Sacramento &amp; El Dorado County · SNFs + Home Health · CMS Care Compare data · Distance from {REF.label}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 3,
-              background: cmsStatus==="live" ? "var(--color-background-success)" : cmsStatus==="loading" ? "var(--color-background-warning)" : cmsStatus==="error" ? "var(--color-background-danger)" : "var(--color-background-secondary)",
-              color:      cmsStatus==="live" ? "var(--color-text-success)"       : cmsStatus==="loading" ? "var(--color-text-warning)"       : cmsStatus==="error" ? "var(--color-text-danger)"       : "var(--color-text-secondary)" }}>
-              {cmsStatus==="live" ? "Live CMS data" : cmsStatus==="loading" ? "Syncing CMS…" : cmsStatus==="error" ? "CMS unavailable" : "Sample data"}
-            </span>
-            <button onClick={fetchCMS} disabled={loading} style={{
-              fontSize: 12, padding: "6px 14px", borderRadius: "var(--border-radius-md)",
-              background: "var(--color-background-info)", color: "var(--color-text-info)",
-              border: "0.5px solid var(--color-border-info)", cursor: loading ? "not-allowed" : "pointer",
-              display: "flex", alignItems: "center", gap: 5, fontFamily: "var(--font-sans)",
-            }}>
-              <i className={`ti ti-${loading ? "loader" : "refresh"}`} aria-hidden="true"
-                 style={{ fontSize: 13, animation: loading ? "spin 1s linear infinite" : "none" }}></i>
-              {loading ? "Syncing…" : "Sync from CMS"}
-            </button>
-          </div>
-        </div>
-
-        {/* Stats row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(100px,1fr))", gap: 10, marginTop: 12 }}>
-          {[
-            ["SNFs",       snfCount,        "#0C447C"],
-            ["Home health",hhaCount,        "#3C3489"],
-            ["Avg stars",  avgStars,        "#854F0B"],
-            ["4–5 star",   highQual,        "#0F6E56"],
-            ["Selected",   selected.length, "#1D9E75"],
-          ].map(([l, v, c]) => (
-            <div key={l} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "8px 10px" }}>
-              <div style={{ fontSize: 20, fontWeight: 500, color: c, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-              <div style={{ fontSize: 10, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 1 }}>{l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Selected bar ── */}
-      {selected.length > 0 && (
-        <div style={{ background: "var(--color-background-success)", border: "0.5px solid var(--color-border-success)", borderRadius: "var(--border-radius-lg)", padding: "10px 14px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 12, color: "var(--color-text-success)", fontWeight: 500 }}>
-            {selected.length} {selected.length === 1 ? "facility" : "facilities"} selected for discharge referral: {selected.map(s => s.name).join(", ")}
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => alert(`Referral packet initiated for:\n${selected.map(s => `• ${s.name} — ${s.phone}`).join("\n")}`)} style={{
-              fontSize: 11, padding: "5px 12px", background: "#1D9E75", color: "#fff",
-              border: "none", borderRadius: "var(--border-radius-md)", cursor: "pointer", fontFamily: "var(--font-sans)",
-            }}>Send referral packet</button>
-            <button onClick={() => setSelected([])} style={{
-              fontSize: 11, padding: "5px 10px", background: "transparent", color: "var(--color-text-success)",
-              border: "0.5px solid var(--color-border-success)", borderRadius: "var(--border-radius-md)", cursor: "pointer", fontFamily: "var(--font-sans)",
-            }}>Clear</button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 14 }}>
-
-        {/* ── Filter panel ── */}
-        <div>
-          <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px" }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              Filters
-              <button onClick={() => setFilters({ type:"all", county:"all", minStars:0, medicare:false, medi_cal:false, maxDist:50, sortBy:"distance" })}
-                style={{ fontSize: 10, color: "var(--color-text-secondary)", background: "transparent", border: "none", cursor: "pointer", padding: 0, fontFamily: "var(--font-sans)" }}>Reset</button>
-            </div>
-
-            {/* Search */}
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 4 }}>Search</label>
-              <div style={{ position: "relative" }}>
-                <i className="ti ti-search" aria-hidden="true" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--color-text-secondary)", pointerEvents: "none" }}></i>
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or city…"
-                  style={{ paddingLeft: 28 }} />
-              </div>
-            </div>
-
-            {[
-              { label: "Facility type", key: "type",   options: [["all","All types"],["SNF","Skilled Nursing (SNF)"],["HHA","Home Health (HHA)"]] },
-              { label: "County",        key: "county", options: [["all","Both counties"],["Sacramento","Sacramento"],["El Dorado","El Dorado"]] },
-              { label: "Sort by",       key: "sortBy", options: [["distance","Distance"],["stars","CMS stars"],["name","Name (A–Z)"],["beds","Bed count"]] },
-            ].map(({ label, key, options }) => (
-              <div key={key} style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 4 }}>{label}</label>
-                <select value={filters[key]} onChange={e => setF(key, e.target.value)}>
-                  {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </div>
-            ))}
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 4 }}>
-                Min CMS stars — <span style={{ color: "#C8920A", fontWeight: 500 }}>{filters.minStars === 0 ? "Any" : "★".repeat(filters.minStars)}</span>
-              </label>
-              <input type="range" min="0" max="5" step="1" value={filters.minStars} onChange={e => setF("minStars", parseInt(e.target.value))} />
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 4 }}>
-                Max distance — <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>{filters.maxDist} mi</span>
-              </label>
-              <input type="range" min="5" max="60" step="5" value={filters.maxDist} onChange={e => setF("maxDist", parseInt(e.target.value))} />
-            </div>
-
-            <div style={{ marginBottom: 4 }}>
-              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 8 }}>Payer requirements</label>
-              {[["medicare","Medicare only","#E6F1FB","#0C447C"],["medi_cal","Medi-Cal accepted","#E1F5EE","#0F6E56"]].map(([k, l, bg, c]) => (
-                <label key={k} style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 7, fontSize: 12, color: filters[k] ? c : "var(--color-text-secondary)" }}>
-                  <input type="checkbox" checked={filters[k]} onChange={e => setF(k, e.target.checked)} style={{ accentColor: c }} />
-                  <span style={{ padding: "1px 7px", borderRadius: 3, background: filters[k] ? bg : "transparent", border: `0.5px solid ${filters[k] ? c : "var(--color-border-secondary)"}`, transition: "all .15s" }}>{l}</span>
-                </label>
-              ))}
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 8 }}>Managed Medi-Cal plan</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {["Anthem","Health Net","Molina","Blue Shield"].map(plan => (
-                  <span key={plan} onClick={() => setSearch(p => p === plan ? "" : plan)} style={{
-                    fontSize: 10, padding: "2px 7px", borderRadius: 3, cursor: "pointer",
-                    background: search === plan ? "#EEEDFE" : "var(--color-background-secondary)",
-                    color:      search === plan ? "#3C3489" : "var(--color-text-secondary)",
-                    border: `0.5px solid ${search === plan ? "#534AB7" : "var(--color-border-secondary)"}`,
-                  }}>{plan}</span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Legend */}
-          <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "10px 12px", marginTop: 10, fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.8 }}>
-            <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>CMS star ratings</div>
-            <div><Stars n={5} size={10} /> Excellent (5★)</div>
-            <div><Stars n={4} size={10} /> Good (4★)</div>
-            <div><Stars n={3} size={10} /> Average (3★)</div>
-            <div><Stars n={2} size={10} /> Below avg (2★)</div>
-            <div><Stars n={1} size={10} /> Much below (1★)</div>
-            <div style={{ marginTop: 6, fontSize: 10 }}>Source: CMS Care Compare<br />Data refreshed monthly via CMS Provider Data Catalog</div>
-          </div>
-        </div>
-
-        {/* ── Results ── */}
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>
-              {results.length} facilities
-              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--color-text-secondary)", marginLeft: 6 }}>
-                ({snfCount} SNF · {hhaCount} home health) within {filters.maxDist} mi
-              </span>
-            </div>
-            <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Sorted by {filters.sortBy}</span>
-          </div>
-
-          {results.length === 0 && (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--color-text-secondary)" }}>
-              <i className="ti ti-search" aria-hidden="true" style={{ fontSize: 28, display: "block", marginBottom: 10 }}></i>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>No facilities match current filters</div>
-              <div style={{ fontSize: 11, marginTop: 4 }}>Try expanding the distance or reducing the star rating filter</div>
-            </div>
-          )}
-
-          {results.map(f => (
-            <FacilityCard key={f.id} f={f} selected={selected.some(s => s.id === f.id)} onSelect={toggleSelect} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+    // If no facilities, start polling
+    if (total === 0) {
+      startSyncPolling();
+    } else {
+      stopSyncPolling();
+      // If we have a zip pre-populated, auto-search
+      const zip = document.getElementById('zipInput').value.trim();
+      if (zip && zip.length === 5) {
+        doSearch();
+      }
+    }
+  } catch(e) {
+    document.getElementById('freshnessLabel').textContent = 'Status unknown';
+  }
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<PostAcuteDirectory />);
+function startSyncPolling() {
+  document.getElementById('syncBanner').style.display = 'flex';
+  if (syncPollInterval) return;
+  syncPollInterval = setInterval(async () => {
+    const r = await fetch('/api/directory/sync-status');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.total_active_facilities > 0) {
+      stopSyncPolling();
+      document.getElementById('freshnessLabel').textContent = `${data.total_active_facilities.toLocaleString()} facilities`;
+      const zip = document.getElementById('zipInput').value.trim();
+      if (zip && zip.length === 5) doSearch();
+    }
+  }, 5000);
+}
+
+function stopSyncPolling() {
+  document.getElementById('syncBanner').style.display = 'none';
+  if (syncPollInterval) { clearInterval(syncPollInterval); syncPollInterval = null; }
+}
+
+async function doSearch() {
+  const zip = document.getElementById('zipInput').value.trim();
+  const radius = document.getElementById('radiusSelect').value;
+  const types = document.getElementById('typesSelect').value;
+  const minRating = document.getElementById('minRatingSelect').value;
+  const mediCal = document.getElementById('mediCalSelect').value;
+  const medicare = document.getElementById('medicareSelect').value;
+  const excludeSff = document.getElementById('excludeSffCheck').checked ? 'true' : 'false';
+  const sort = document.getElementById('sortSelect').value;
+
+  if (!zip || zip.length !== 5 || !/^\d{5}$/.test(zip)) {
+    showError('Please enter a valid 5-digit ZIP code.');
+    return;
+  }
+
+  // Save zip to sessionStorage
+  sessionStorage.setItem('patient_zip', zip);
+
+  document.getElementById('searchBtn').disabled = true;
+  document.getElementById('searchBtn').textContent = 'Searching...';
+  document.getElementById('resultsArea').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Searching facilities near ' + zip + '...</p></div>';
+  document.getElementById('resultsHeader').style.display = 'none';
+
+  const params = new URLSearchParams({ zip, radius, types, sort, exclude_sff: excludeSff });
+  if (minRating) params.set('min_rating', minRating);
+  if (mediCal) params.set('medi_cal', mediCal);
+  if (medicare) params.set('medicare', medicare);
+
+  try {
+    const r = await fetch('/api/directory/search?' + params);
+    const data = await r.json();
+
+    document.getElementById('searchBtn').disabled = false;
+    document.getElementById('searchBtn').textContent = 'Search';
+
+    if (data.error && !data.results?.length) {
+      if (data.error === 'Directory database not available') {
+        renderNoDB();
+      } else {
+        showError(data.error);
+        document.getElementById('resultsArea').innerHTML = '';
+      }
+      return;
+    }
+
+    // Update freshness
+    if (data.data_freshness) {
+      document.getElementById('freshnessLabel').textContent = data.data_freshness;
+    }
+
+    currentResults = data.results || [];
+    renderResults(currentResults, data);
+
+    // Load county summary in background
+    loadCountySummary();
+
+  } catch(e) {
+    document.getElementById('searchBtn').disabled = false;
+    document.getElementById('searchBtn').textContent = 'Search';
+    showError('Search failed: ' + e.message);
+  }
+}
+
+function renderNoDB() {
+  document.getElementById('resultsArea').innerHTML = `
+    <div class="empty-state">
+      <div class="icon">🗄️</div>
+      <h3>Database Not Connected</h3>
+      <p>The directory requires a PostgreSQL database (POSTGRES_URL env var).<br>
+         Set up the database and restart to enable live CMS data.</p>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById('resultsArea').innerHTML = `<div class="error-state">⚠️ ${escHtml(msg)}</div>`;
+}
+
+function renderResults(results, meta) {
+  const count = document.getElementById('resultsCount');
+  const header = document.getElementById('resultsHeader');
+  header.style.display = 'flex';
+
+  if (!results.length) {
+    count.textContent = `No facilities found within ${meta.radius_miles} miles of ${meta.zip}`;
+    document.getElementById('resultsArea').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <h3>No facilities found</h3>
+        <p>Try expanding the search radius or adjusting your filters.</p>
+      </div>`;
+    return;
+  }
+
+  count.textContent = `${results.length} facilit${results.length === 1 ? 'y' : 'ies'} within ${meta.radius_miles} miles of ZIP ${meta.zip}`;
+
+  const html = results.map((f, i) => renderFacilityCard(f, i)).join('');
+  document.getElementById('resultsArea').innerHTML = html;
+}
+
+function renderFacilityCard(f, idx) {
+  const typeClass = ['SNF','IRF','LTACH'].includes(f.facility_type) ? `type-${f.facility_type}` : 'type-default';
+  const cardClass = f.is_special_focus ? 'sff-warning' : (f.abuse_icon ? 'abuse-warning' : '');
+  const stars = renderStars(f.overall_rating);
+  const phone = f.phone ? `<a href="tel:${escHtml(f.phone)}" class="phone-link">📞 ${escHtml(f.phone)}</a>` : '';
+  const address = [f.address, f.city, f.state, f.zip].filter(Boolean).join(', ');
+  const beds = f.licensed_total_beds || f.certified_beds || null;
+
+  const flags = [];
+  if (f.is_special_focus) flags.push('<span class="flag-sff">⚠️ SFF</span>');
+  if (f.abuse_icon) flags.push('<span class="flag-abuse">⛔ Abuse Icon</span>');
+
+  const pills = [];
+  if (f.medicare_certified) pills.push('<span class="pill pill-blue">Medicare</span>');
+  if (f.accepts_medi_cal) pills.push('<span class="pill pill-green">Medi-Cal</span>');
+  if (beds) pills.push(`<span class="pill pill-gray">${beds} beds</span>`);
+  if (!f.medicare_certified) pills.push('<span class="pill pill-red">No Medicare</span>');
+
+  return `
+    <div class="facility-card ${escHtml(cardClass)}" id="card-${idx}">
+      <div class="card-header">
+        <div class="card-main">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+            <span class="card-name">${escHtml(f.name)}</span>
+            <span class="type-badge ${escHtml(typeClass)}">${escHtml(f.facility_type || 'SNF')}</span>
+            ${flags.join('')}
+          </div>
+          <div class="card-meta">
+            <span>${escHtml(address)}</span>
+            ${f.county ? `<span>📍 ${escHtml(f.county)} County</span>` : ''}
+            <span class="distance-chip">${f.distance_miles} mi away</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:5px;flex-wrap:wrap">
+            <span class="stars">${stars.html} <span class="star-num">${stars.label}</span></span>
+            ${phone}
+          </div>
+          <div class="cert-pills">${pills.join('')}</div>
+        </div>
+        <div class="card-actions">
+          <button class="btn-sm btn-detail" id="detailBtn-${idx}" onclick="toggleDetail(${idx})">Details ▼</button>
+          <button class="btn-sm btn-add-plan" onclick="addToPlan(${idx})">+ Add to Plan</button>
+        </div>
+      </div>
+      <div id="detail-${idx}" style="display:none">
+        ${renderDetailPanel(f)}
+      </div>
+    </div>`;
+}
+
+function renderStars(rating) {
+  if (!rating || rating < 1 || rating > 5) return { html: '☆☆☆☆☆', label: 'Not rated' };
+  const filled = '★'.repeat(rating);
+  const empty = '☆'.repeat(5 - rating);
+  return { html: filled + empty, label: `${rating}/5` };
+}
+
+function renderDetailPanel(f) {
+  const ratingItems = [
+    { label: 'Health Inspection', value: f.health_inspection_rating },
+    { label: 'Staffing', value: f.staffing_rating },
+    { label: 'Quality Measures', value: f.quality_measures_rating },
+  ];
+  const bars = ratingItems.map(ri => {
+    if (!ri.value) return '';
+    const pct = (ri.value / 5 * 100).toFixed(0);
+    return `<div class="rating-row">
+      <span class="rating-row-label">${escHtml(ri.label)}</span>
+      <div class="rating-bar-bg"><div class="rating-bar-fill rb-${ri.value}" style="width:${pct}%"></div></div>
+      <span style="font-size:.72rem;color:#64748b;width:16px">${ri.value}</span>
+    </div>`;
+  }).join('');
+
+  const items = [
+    ['CCN', f.ccn],
+    ['Ownership', f.ownership_type],
+    ['Avg Daily Census', f.average_daily_census ? f.average_daily_census.toFixed(0) : null],
+    ['Total Fines', f.total_fines_dollars ? '$' + f.total_fines_dollars.toLocaleString() : '$0'],
+    ['# Fines', f.number_of_fines],
+    ['# Penalties', f.total_penalties],
+    ['SNF Beds', f.licensed_snf_beds || null],
+    ['ICF Beds', f.licensed_icf_beds || null],
+    ['ALF Beds', f.licensed_alf_beds || null],
+    ['Data Source', f.data_source],
+    ['Last Updated', f.last_synced_at ? new Date(f.last_synced_at).toLocaleDateString() : null],
+  ].filter(([,v]) => v !== null && v !== undefined && v !== '').map(([k, v]) =>
+    `<div class="detail-item"><div class="detail-label">${escHtml(String(k))}</div><div class="detail-value">${escHtml(String(v))}</div></div>`
+  ).join('');
+
+  return `<div class="detail-panel">
+    ${bars ? `<div class="rating-bars" style="margin-bottom:12px">${bars}</div>` : ''}
+    <div class="detail-grid">${items}</div>
+  </div>`;
+}
+
+function toggleDetail(idx) {
+  const detail = document.getElementById(`detail-${idx}`);
+  const btn = document.getElementById(`detailBtn-${idx}`);
+  const visible = detail.style.display !== 'none';
+  detail.style.display = visible ? 'none' : 'block';
+  btn.textContent = visible ? 'Details ▼' : 'Details ▲';
+  btn.classList.toggle('expanded', !visible);
+}
+
+function addToPlan(idx) {
+  const f = currentResults[idx];
+  if (!f) return;
+  const text = `${f.name} | ${[f.address, f.city, f.state, f.zip].filter(Boolean).join(', ')} | ${f.phone || 'No phone'} | ${f.overall_rating ? f.overall_rating + '/5 stars' : 'Unrated'}`;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Copied to clipboard!');
+  }).catch(() => {
+    // Fallback
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    showToast('Copied to clipboard!');
+  });
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+async function loadCountySummary() {
+  try {
+    const r = await fetch('/api/directory/county-summary');
+    if (!r.ok) return;
+    const data = await r.json();
+    const counties = data.counties || [];
+    if (!counties.length) return;
+    const tbody = document.getElementById('countyTableBody');
+    tbody.innerHTML = counties.map(c => `
+      <tr>
+        <td>${escHtml(c.county || '')}</td>
+        <td>${c.total_facilities || 0}</td>
+        <td>${c.avg_rating !== null ? c.avg_rating : '—'}</td>
+        <td>${(c.total_beds || 0).toLocaleString()}</td>
+        <td>${c.medi_cal_count || 0}</td>
+      </tr>`).join('');
+  } catch(e) { /* silently ignore */ }
+}
+
+function toggleCounty() {
+  countyVisible = !countyVisible;
+  document.getElementById('countyTable').style.display = countyVisible ? 'block' : 'none';
+}
+
+async function triggerSync() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = 'Refreshing...';
+  try {
+    const r = await fetch('/api/directory/sync', { method: 'POST' });
+    const data = await r.json();
+    if (data.message) {
+      showToast(data.message);
+    }
+    if (data.sync_id) {
+      startSyncPolling();
+    }
+  } catch(e) {
+    showToast('Refresh failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ Refresh Data';
+  }
+}
+
+function escHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Allow Enter key to trigger search
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('zipInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+});
 </script>
 </body>
 </html>
