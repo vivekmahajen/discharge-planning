@@ -702,13 +702,21 @@ async def sso_callback(
     org_id = DEFAULT_ORG_ID
     role = "clinician"
     if DATABASE_URL:  # pragma: no cover
-        from db import get_user_by_email_global, provision_sso_user
-        existing = get_user_by_email_global(email)
-        if existing:
-            org_id = str(existing["organization_id"])
-            role = existing.get("role", "clinician")
-        else:
-            provision_sso_user(email, org_id)
+        try:
+            from db import get_user_by_email_global, provision_sso_user
+            existing = get_user_by_email_global(email)
+            if existing:
+                org_id = str(existing["organization_id"])
+                role = existing.get("role", "clinician")
+            else:
+                provision_sso_user(email, org_id)
+        except Exception as exc:
+            _audit_logger.error("SSO user lookup/provision failed for %s: %s", email, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="SSO login succeeded but account provisioning failed — "
+                       "run migrations/004_sso_users.sql and try again.",
+            )
 
     response = RedirectResponse(url="/", status_code=302)
     _set_session(response, email, org_id, role)
