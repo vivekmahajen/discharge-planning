@@ -1,0 +1,323 @@
+zip,city,state_id,county_name,lat,lng
+90001,Los Angeles,CA,Los Angeles,33.9731,-118.2479
+90011,Los Angeles,CA,Los Angeles,34.0075,-118.2595
+90025,Los Angeles,CA,Los Angeles,34.0405,-118.4561
+90048,Los Angeles,CA,Los Angeles,34.0806,-118.3738
+90064,Los Angeles,CA,Los Angeles,34.0309,-118.4244
+90210,Beverly Hills,CA,Los Angeles,34.0901,-118.4065
+90230,Culver City,CA,Los Angeles,33.9832,-118.4005
+90247,Gardena,CA,Los Angeles,33.8875,-118.3079
+90277,Redondo Beach,CA,Los Angeles,33.8545,-118.3884
+90292,Marina Del Rey,CA,Los Angeles,33.9797,-118.4511
+90401,Santa Monica,CA,Los Angeles,34.0195,-118.4912
+90505,Torrance,CA,Los Angeles,33.8019,-118.3468
+90631,La Habra,CA,Los Angeles,33.9319,-117.9462
+90706,Bellflower,CA,Los Angeles,33.8875,-118.1207
+90745,Carson,CA,Los Angeles,33.8310,-118.2614
+91010,Duarte,CA,Los Angeles,34.1394,-117.9776
+91101,Pasadena,CA,Los Angeles,34.1478,-118.1445
+91331,Pacoima,CA,Los Angeles,34.2589,-118.4050
+91423,Sherman Oaks,CA,Los Angeles,34.1517,-118.4498
+91605,North Hollywood,CA,Los Angeles,34.2016,-118.3985
+91702,Azusa,CA,Los Angeles,34.1336,-117.9076
+91801,Alhambra,CA,Los Angeles,34.0953,-118.1270
+92020,El Cajon,CA,San Diego,32.7948,-116.9625
+92037,La Jolla,CA,San Diego,32.8328,-117.2713
+92101,San Diego,CA,San Diego,32.7242,-117.1641
+92103,San Diego,CA,San Diego,32.7486,-117.1626
+92108,Mission Valley,CA,San Diego,32.7670,-117.1508
+92115,San Diego,CA,San Diego,32.7442,-117.0706
+92123,San Diego,CA,San Diego,32.8041,-117.1303
+92131,San Diego,CA,San Diego,32.9125,-117.0795
+92154,San Diego,CA,San Diego,32.5634,-117.0484
+92173,San Ysidro,CA,San Diego,32.5535,-117.0442
+92203,Indio,CA,Riverside,33.7282,-116.2164
+92211,Palm Desert,CA,Riverside,33.7439,-116.3631
+92225,Blythe,CA,Riverside,33.6103,-114.5961
+92236,Coachella,CA,Riverside,33.6803,-116.1736
+92260,Palm Desert,CA,Riverside,33.7228,-116.3743
+92276,Thousand Palms,CA,Riverside,33.8069,-116.3919
+92324,Colton,CA,San Bernardino,34.0739,-117.3136
+92345,Hesperia,CA,San Bernardino,34.4264,-117.3009
+92354,Loma Linda,CA,San Bernardino,34.0481,-117.2617
+92374,Redlands,CA,San Bernardino,34.0556,-117.1825
+92401,San Bernardino,CA,San Bernardino,34.1083,-117.2898
+92408,San Bernardino,CA,San Bernardino,34.0625,-117.2578
+92553,Moreno Valley,CA,Riverside,33.9250,-117.2311
+92563,Murrieta,CA,Riverside,33.5539,-117.2139
+92584,Menifee,CA,Riverside,33.6913,-117.1836
+92660,Newport Beach,CA,Orange,33.6189,-117.8793
+92705,Santa Ana,CA,Orange,33.7557,-117.8311
+92780,Tustin,CA,Orange,33.7459,-117.8265
+92832,Fullerton,CA,Orange,33.8794,-117.9101
+92866,Orange,CA,Orange,33.7879,-117.8531
+92868,Orange,CA,Orange,33.7879,-117.8531
+93001,Ventura,CA,Ventura,34.2805,-119.2945
+93003,Ventura,CA,Ventura,34.2744,-119.2287
+93010,Camarillo,CA,Ventura,34.2164,-119.0376
+93063,Simi Valley,CA,Ventura,34.2694,-118.7814
+93065,Simi Valley,CA,Ventura,34.2750,-118.7214
+93105,Santa Barbara,CA,Santa Barbara,34.4381,-119.7369
+93109,Santa Barbara,CA,Santa Barbara,34.4208,-119.7060
+93110,Santa Barbara,CA,Santa Barbara,34.4319,-119.7522
+93117,Goleta,CA,Santa Barbara,34.4358,-119.8277
+93301,Bakersfield,CA,Kern,35.3733,-119.0187
+93305,Bakersfield,CA,Kern,35.3888,-118.9987
+93307,Bakersfield,CA,Kern,35.3366,-118.9780
+93309,Bakersfield,CA,Kern,35.3494,-119.0637
+93311,Bakersfield,CA,Kern,35.2750,-119.0806
+93401,San Luis Obispo,CA,San Luis Obispo,35.2828,-120.6596
+93405,San Luis Obispo,CA,San Luis Obispo,35.2625,-120.6797
+93420,Arroyo Grande,CA,San Luis Obispo,35.1191,-120.5910
+93442,Morro Bay,CA,San Luis Obispo,35.3658,-120.8500
+93454,Santa Maria,CA,Santa Barbara,34.9530,-120.4357
+93534,Lancaster,CA,Los Angeles,34.6868,-118.1542
+93550,Palmdale,CA,Los Angeles,34.5794,-118.1165
+93637,Madera,CA,Madera,36.9613,-120.0607
+93638,Madera,CA,Madera,36.9783,-120.0858
+93650,Fresno,CA,Fresno,36.8297,-119.7871
+93701,Fresno,CA,Fresno,36.7378,-119.7871
+93710,Fresno,CA,Fresno,36.8075,-119.7726
+93720,Fresno,CA,Fresno,36.8597,-119.7422
+93722,Fresno,CA,Fresno,36.7775,-119.8986
+93726,Fresno,CA,Fresno,36.7972,-119.7619
+93901,Salinas,CA,Monterey,36.6777,-121.6555
+93906,Salinas,CA,Monterey,36.7188,-121.6404
+93940,Monterey,CA,Monterey,36.6002,-121.8947
+93950,Pacific Grove,CA,Monterey,36.6177,-121.9228
+93955,Seaside,CA,Monterey,36.6263,-121.8508
+94002,Belmont,CA,San Mateo,37.5202,-122.2752
+94010,Burlingame,CA,San Mateo,37.5785,-122.3477
+94014,Daly City,CA,San Mateo,37.6879,-122.4702
+94025,Menlo Park,CA,San Mateo,37.4530,-122.1817
+94066,San Bruno,CA,San Mateo,37.6305,-122.4111
+94080,South San Francisco,CA,San Mateo,37.6546,-122.4077
+94103,San Francisco,CA,San Francisco,37.7726,-122.4099
+94110,San Francisco,CA,San Francisco,37.7490,-122.4183
+94122,San Francisco,CA,San Francisco,37.7599,-122.4825
+94127,San Francisco,CA,San Francisco,37.7352,-122.4578
+94131,San Francisco,CA,San Francisco,37.7407,-122.4385
+94134,San Francisco,CA,San Francisco,37.7198,-122.4039
+94401,San Mateo,CA,San Mateo,37.5630,-122.3255
+94403,San Mateo,CA,San Mateo,37.5341,-122.2997
+94501,Alameda,CA,Alameda,37.7651,-122.2416
+94536,Fremont,CA,Alameda,37.5485,-122.0597
+94541,Hayward,CA,Alameda,37.6688,-122.0808
+94545,Hayward,CA,Alameda,37.6274,-122.0713
+94577,San Leandro,CA,Alameda,37.7249,-122.1560
+94601,Oakland,CA,Alameda,37.7738,-122.2208
+94610,Oakland,CA,Alameda,37.8162,-122.2344
+94611,Oakland,CA,Alameda,37.8283,-122.2153
+94618,Oakland,CA,Alameda,37.8382,-122.2539
+94702,Berkeley,CA,Alameda,37.8716,-122.2727
+94710,Berkeley,CA,Alameda,37.8627,-122.3006
+94801,Richmond,CA,Contra Costa,37.9358,-122.3477
+94804,Richmond,CA,Contra Costa,37.9302,-122.3756
+94850,Richmond,CA,Contra Costa,37.9216,-122.3477
+94901,San Rafael,CA,Marin,37.9735,-122.5311
+94903,San Rafael,CA,Marin,37.9924,-122.5219
+94925,Corte Madera,CA,Marin,37.9255,-122.5269
+94930,Fairfax,CA,Marin,37.9874,-122.5889
+94939,Larkspur,CA,Marin,37.9347,-122.5347
+94941,Mill Valley,CA,Marin,37.9060,-122.5450
+94945,Novato,CA,Marin,38.1074,-122.5697
+94947,Petaluma,CA,Sonoma,38.2324,-122.6194
+94952,Petaluma,CA,Sonoma,38.2241,-122.6497
+94954,Petaluma,CA,Sonoma,38.2521,-122.5947
+95003,Aptos,CA,Santa Cruz,36.9768,-121.8919
+95008,Campbell,CA,Santa Clara,37.2872,-121.9500
+95014,Cupertino,CA,Santa Clara,37.3229,-122.0322
+95032,Los Gatos,CA,Santa Clara,37.2358,-121.9625
+95035,Milpitas,CA,Santa Clara,37.4323,-121.8996
+95050,Santa Clara,CA,Santa Clara,37.3541,-121.9552
+95054,Santa Clara,CA,Santa Clara,37.3956,-121.9625
+95060,Santa Cruz,CA,Santa Cruz,36.9741,-122.0308
+95062,Santa Cruz,CA,Santa Cruz,36.9819,-121.9775
+95064,Santa Cruz,CA,Santa Cruz,36.9951,-122.0586
+95070,Saratoga,CA,Santa Clara,37.2638,-122.0233
+95076,Watsonville,CA,Santa Cruz,36.9102,-121.7569
+95101,San Jose,CA,Santa Clara,37.3361,-121.8905
+95112,San Jose,CA,Santa Clara,37.3539,-121.8819
+95116,San Jose,CA,Santa Clara,37.3509,-121.8555
+95124,San Jose,CA,Santa Clara,37.2558,-121.9220
+95125,San Jose,CA,Santa Clara,37.2969,-121.8827
+95128,San Jose,CA,Santa Clara,37.3193,-121.9258
+95148,San Jose,CA,Santa Clara,37.3253,-121.7827
+95201,Stockton,CA,San Joaquin,37.9577,-121.2908
+95205,Stockton,CA,San Joaquin,37.9635,-121.2627
+95206,Stockton,CA,San Joaquin,37.9236,-121.3110
+95207,Stockton,CA,San Joaquin,38.0069,-121.3153
+95209,Stockton,CA,San Joaquin,38.0444,-121.3644
+95215,Stockton,CA,San Joaquin,37.9696,-121.1935
+95240,Lodi,CA,San Joaquin,38.1302,-121.2724
+95330,Lathrop,CA,San Joaquin,37.8227,-121.2780
+95355,Modesto,CA,Stanislaus,37.6394,-120.9963
+95356,Modesto,CA,Stanislaus,37.6622,-121.0224
+95376,Tracy,CA,San Joaquin,37.7397,-121.4413
+95382,Turlock,CA,Stanislaus,37.4946,-120.8463
+95391,Mountain House,CA,San Joaquin,37.7744,-121.5380
+95401,Santa Rosa,CA,Sonoma,38.4404,-122.7141
+95405,Santa Rosa,CA,Sonoma,38.4444,-122.6922
+95407,Santa Rosa,CA,Sonoma,38.4196,-122.7280
+95448,Healdsburg,CA,Sonoma,38.6102,-122.8694
+95472,Sebastopol,CA,Sonoma,38.4024,-122.8236
+95476,Sonoma,CA,Sonoma,38.2919,-122.4580
+95482,Ukiah,CA,Mendocino,39.1502,-123.2083
+95490,Willits,CA,Mendocino,39.4091,-123.3514
+95501,Eureka,CA,Humboldt,40.8021,-124.1637
+95503,Eureka,CA,Humboldt,40.7635,-124.1330
+95521,Arcata,CA,Humboldt,40.8785,-124.0827
+95540,Fortuna,CA,Humboldt,40.5982,-124.1560
+95561,Redway,CA,Humboldt,40.1022,-123.8213
+95603,Auburn,CA,Placer,38.8963,-121.0769
+95630,Folsom,CA,El Dorado,38.6785,-121.1760
+95648,Lincoln,CA,Placer,38.8913,-121.2927
+95661,Roseville,CA,Placer,38.7521,-121.2877
+95667,Placerville,CA,El Dorado,38.7296,-120.7981
+95672,Rescue,CA,El Dorado,38.7315,-121.0091
+95678,Roseville,CA,Placer,38.7463,-121.2849
+95682,El Dorado Hills,CA,El Dorado,38.6770,-121.0714
+95691,West Sacramento,CA,Yolo,38.5816,-121.5322
+95695,Woodland,CA,Yolo,38.6785,-121.7733
+95762,El Dorado Hills,CA,El Dorado,38.6720,-121.0467
+95811,Sacramento,CA,Sacramento,38.5752,-121.4950
+95816,Sacramento,CA,Sacramento,38.5736,-121.4874
+95817,Sacramento,CA,Sacramento,38.5523,-121.5005
+95818,Sacramento,CA,Sacramento,38.5616,-121.5185
+95819,Sacramento,CA,Sacramento,38.5660,-121.4633
+95820,Sacramento,CA,Sacramento,38.5372,-121.4633
+95821,Sacramento,CA,Sacramento,38.6050,-121.3933
+95823,Sacramento,CA,Sacramento,38.4988,-121.4373
+95825,Sacramento,CA,Sacramento,38.5760,-121.4422
+95827,Sacramento,CA,Sacramento,38.5891,-121.3027
+95831,Sacramento,CA,Sacramento,38.5038,-121.5210
+95833,Sacramento,CA,Sacramento,38.6183,-121.5058
+95835,Sacramento,CA,Sacramento,38.6618,-121.4502
+95841,Sacramento,CA,Sacramento,38.6394,-121.3539
+95842,Sacramento,CA,Sacramento,38.6619,-121.3539
+95843,Antelope,CA,Sacramento,38.7094,-121.3730
+95901,Marysville,CA,Yuba,39.1452,-121.5911
+95926,Chico,CA,Butte,39.7285,-121.8375
+95928,Chico,CA,Butte,39.7094,-121.8169
+95959,Nevada City,CA,Nevada,39.2613,-121.0086
+95993,Yuba City,CA,Sutter,39.1341,-121.6169
+96001,Redding,CA,Shasta,40.5865,-122.3917
+96002,Redding,CA,Shasta,40.5490,-122.3489
+96003,Redding,CA,Shasta,40.6180,-122.3489
+96049,Redding,CA,Shasta,40.5885,-122.3620
+96080,Red Bluff,CA,Tehama,40.1788,-122.2358
+96101,Alturas,CA,Modoc,41.4874,-120.5433
+96150,South Lake Tahoe,CA,El Dorado,38.9399,-119.9772
+96161,Truckee,CA,Nevada,39.3280,-120.1833
+92543,Hemet,CA,Riverside,33.7475,-116.9719
+92545,Hemet,CA,Riverside,33.7097,-116.9891
+92570,Perris,CA,Riverside,33.7825,-117.2286
+92591,Temecula,CA,Riverside,33.4936,-117.1484
+92592,Temecula,CA,Riverside,33.4803,-117.0914
+92614,Irvine,CA,Orange,33.6846,-117.8265
+92618,Irvine,CA,Orange,33.6597,-117.7463
+92627,Costa Mesa,CA,Orange,33.6405,-117.9289
+92647,Huntington Beach,CA,Orange,33.7269,-118.0089
+92648,Huntington Beach,CA,Orange,33.6603,-118.0089
+92683,Westminster,CA,Orange,33.7514,-118.0003
+92697,Irvine,CA,Orange,33.6458,-117.8358
+92834,Fullerton,CA,Orange,33.8703,-117.9255
+92840,Garden Grove,CA,Orange,33.7783,-117.9405
+93230,Hanford,CA,Kings,36.3274,-119.6456
+93235,Lemoore,CA,Kings,36.3007,-119.7824
+93274,Tulare,CA,Tulare,36.2077,-119.3472
+93277,Visalia,CA,Tulare,36.3302,-119.2921
+93291,Visalia,CA,Tulare,36.3169,-119.2619
+93292,Visalia,CA,Tulare,36.3502,-119.2464
+93702,Fresno,CA,Fresno,36.7194,-119.7611
+93703,Fresno,CA,Fresno,36.7444,-119.7447
+93711,Fresno,CA,Fresno,36.8283,-119.8086
+93730,Fresno,CA,Fresno,36.9047,-119.7625
+94303,Palo Alto,CA,Santa Clara,37.4419,-122.1430
+94305,Stanford,CA,Santa Clara,37.4265,-122.1700
+94306,Palo Alto,CA,Santa Clara,37.4141,-122.1280
+94309,Palo Alto,CA,Santa Clara,37.4419,-122.1430
+94521,Concord,CA,Contra Costa,37.9716,-122.0311
+94523,Pleasant Hill,CA,Contra Costa,37.9477,-122.0608
+94553,Martinez,CA,Contra Costa,38.0194,-122.1341
+94596,Walnut Creek,CA,Contra Costa,37.8858,-122.0600
+94597,Walnut Creek,CA,Contra Costa,37.9099,-122.0672
+94598,Walnut Creek,CA,Contra Costa,37.9124,-122.0227
+94720,Berkeley,CA,Alameda,37.8716,-122.2727
+94804,Richmond,CA,Contra Costa,37.9302,-122.3756
+95020,Gilroy,CA,Santa Clara,37.0058,-121.5683
+95023,Hollister,CA,San Benito,36.8524,-121.4019
+95037,Morgan Hill,CA,Santa Clara,37.1305,-121.6542
+95120,San Jose,CA,Santa Clara,37.2025,-121.8780
+95136,San Jose,CA,Santa Clara,37.2630,-121.8547
+94563,Orinda,CA,Contra Costa,37.8802,-122.1797
+94565,Pittsburg,CA,Contra Costa,38.0280,-121.8855
+94572,Rodeo,CA,Contra Costa,38.0327,-122.2619
+94806,San Pablo,CA,Contra Costa,37.9619,-122.3453
+94559,Napa,CA,Napa,38.2975,-122.2869
+94558,Napa,CA,Napa,38.3294,-122.2869
+94574,St Helena,CA,Napa,38.5063,-122.4703
+94599,Yountville,CA,Napa,38.4024,-122.3614
+95203,Stockton,CA,San Joaquin,37.9408,-121.3050
+95336,Manteca,CA,San Joaquin,37.7980,-121.2180
+95337,Manteca,CA,San Joaquin,37.7886,-121.1981
+96021,Corning,CA,Tehama,39.9274,-122.1797
+96101,Alturas,CA,Modoc,41.4874,-120.5433
+92220,Banning,CA,Riverside,33.9256,-116.8761
+92280,Twentynine Palms,CA,San Bernardino,34.1356,-116.0542
+92308,Apple Valley,CA,San Bernardino,34.5008,-117.1858
+92335,Fontana,CA,San Bernardino,34.0922,-117.4350
+92336,Fontana,CA,San Bernardino,34.1258,-117.4663
+92337,Fontana,CA,San Bernardino,34.0475,-117.4072
+93552,Palmdale,CA,Los Angeles,34.5891,-118.1022
+94612,Oakland,CA,Alameda,37.8219,-122.2625
+91910,Chula Vista,CA,San Diego,32.6400,-117.0842
+91914,Chula Vista,CA,San Diego,32.6297,-116.9695
+91942,La Mesa,CA,San Diego,32.7731,-117.0231
+91950,National City,CA,San Diego,32.6778,-117.0992
+92011,Carlsbad,CA,San Diego,33.1192,-117.2894
+92024,Encinitas,CA,San Diego,33.0369,-117.2919
+92054,Oceanside,CA,San Diego,33.1959,-117.3795
+92057,Oceanside,CA,San Diego,33.2386,-117.3375
+92064,Poway,CA,San Diego,32.9628,-117.0353
+92083,Vista,CA,San Diego,33.2000,-117.2425
+92084,Vista,CA,San Diego,33.2178,-117.2425
+92126,San Diego,CA,San Diego,32.9178,-117.1103
+92127,San Diego,CA,San Diego,33.0077,-117.1025
+92128,San Diego,CA,San Diego,33.0328,-117.0811
+92139,San Diego,CA,San Diego,32.6978,-117.0422
+92562,Murrieta,CA,Riverside,33.5744,-117.1878
+94030,Millbrae,CA,San Mateo,37.5997,-122.3869
+94044,Pacifica,CA,San Mateo,37.6138,-122.4869
+94061,Redwood City,CA,San Mateo,37.4850,-122.2364
+94063,Redwood City,CA,San Mateo,37.5022,-122.2156
+94070,San Carlos,CA,San Mateo,37.5069,-122.2608
+94401,San Mateo,CA,San Mateo,37.5630,-122.3255
+95630,Folsom,CA,Sacramento,38.6785,-121.1760
+95621,Citrus Heights,CA,Sacramento,38.7073,-121.2785
+95628,Fair Oaks,CA,Sacramento,38.6488,-121.2716
+95662,Orangevale,CA,Sacramento,38.6789,-121.2274
+95758,Elk Grove,CA,Sacramento,38.4088,-121.3716
+95624,Elk Grove,CA,Sacramento,38.4313,-121.3375
+95758,Elk Grove,CA,Sacramento,38.4125,-121.3716
+94928,Rohnert Park,CA,Sonoma,38.3396,-122.7011
+94952,Petaluma,CA,Sonoma,38.2241,-122.6497
+93010,Camarillo,CA,Ventura,34.2164,-119.0376
+93012,Camarillo,CA,Ventura,34.1978,-119.0011
+93021,Moorpark,CA,Ventura,34.2850,-118.8814
+93030,Oxnard,CA,Ventura,34.1975,-119.1771
+93033,Oxnard,CA,Ventura,34.1725,-119.1350
+93040,Piru,CA,Ventura,34.4197,-118.7881
+93060,Santa Paula,CA,Ventura,34.3547,-119.0589
+93066,Somis,CA,Ventura,34.2642,-119.0036
+93101,Santa Barbara,CA,Santa Barbara,34.4208,-119.6982
+93111,Santa Barbara,CA,Santa Barbara,34.4319,-119.7900
+93120,Santa Barbara,CA,Santa Barbara,34.4400,-119.8000
+95953,Live Oak,CA,Sutter,39.2774,-121.6583
+95961,Olivehurst,CA,Yuba,39.0886,-121.5586
+96501,Bridgeport,CA,Mono,38.2569,-119.2317
+96130,Susanville,CA,Lassen,40.4174,-120.6528
+95452,Kenwood,CA,Sonoma,38.4202,-122.5519
+93446,Paso Robles,CA,San Luis Obispo,35.6269,-120.6908
+93461,Shandon,CA,San Luis Obispo,35.6502,-120.3789
+93463,Solvang,CA,Santa Barbara,34.5958,-120.1378
