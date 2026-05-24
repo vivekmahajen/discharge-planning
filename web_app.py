@@ -64,6 +64,15 @@ except Exception as _e:  # pragma: no cover
 
 import auth0_oidc
 
+# Patient persistence (imported lazily to handle missing DB gracefully)
+_PATIENT_DB_AVAILABLE = False
+try:
+    from db.patients import run_migrations, get_org_domain as _get_org_domain
+    _PATIENT_DB_AVAILABLE = True
+except Exception:
+    def _get_org_domain(email: str) -> str:
+        return email.split("@")[-1].lower() if "@" in email else "unknown"
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent
@@ -491,6 +500,11 @@ def authenticate_user(email: str, password: str) -> str | None:
 async def startup():
     if DATABASE_URL:  # pragma: no cover
         await asyncio.to_thread(_ensure_table)
+    if DATABASE_URL and _PATIENT_DB_AVAILABLE:
+        try:
+            run_migrations()
+        except Exception as _e:
+            logging.getLogger(__name__).warning("Patient migrations failed: %s", _e)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────
@@ -1436,15 +1450,65 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
     request.state.audit_mrn = patient_data.get("mrn") or None
     async def _stream_with_tcm():
         coordinator_output: str | None = None
+        mrn = patient_data.get("mrn", "").strip()
+        admission_date_val = patient_data.get("admission_date", "").strip()
+        user_email = ctx.email
+
+        patient_id: int | None = None
+        run_id: int | None = None
+        agent_start_times: dict = {}
+
+        if mrn and admission_date_val and DATABASE_URL and _PATIENT_DB_AVAILABLE:
+            try:
+                from db.patients import (get_or_create_patient, save_snapshot,
+                                         start_plan_run, get_org_domain)
+                org_d = get_org_domain(user_email)
+                pat = await asyncio.to_thread(get_or_create_patient, mrn, admission_date_val, user_email, patient_data)
+                patient_id = pat["id"]
+                snap_id = await asyncio.to_thread(save_snapshot, patient_id, patient_data, user_email)
+                run_id = await asyncio.to_thread(start_plan_run, patient_id, snap_id, user_email)
+                yield f"data: {json.dumps({'type': 'patient_record', 'data': {'patient_id': patient_id, 'run_id': run_id, 'mrn': mrn}})}\n\n"
+            except Exception as _pe:
+                logging.getLogger(__name__).warning("Patient record setup failed: %s", _pe)
+        elif not mrn or not admission_date_val:
+            yield f"data: {json.dumps({'type': 'warning', 'message': 'No MRN or admission date provided — this plan will not be saved to patient record.'})}\n\n"
+
         async for chunk in stream_plan(patient_data):
             yield chunk
             try:
                 event_str = chunk.removeprefix("data: ").strip()
                 event_data = json.loads(event_str)
-                if event_data.get("type") == "coordinator_complete":
+                etype = event_data.get("type")
+                if etype == "agent_start":
+                    agent_start_times[event_data.get("agent", "")] = time.time()
+                elif etype == "agent_complete":
+                    if run_id and _PATIENT_DB_AVAILABLE:
+                        try:
+                            from db.patients import save_agent_output
+                            aname = event_data.get("agent", "")
+                            dur = int((time.time() - agent_start_times.get(aname, time.time())) * 1000)
+                            await asyncio.to_thread(save_agent_output, run_id, aname, event_data.get("output", ""), dur)
+                        except Exception:
+                            pass
+                elif etype == "coordinator_complete":
                     coordinator_output = event_data.get("output", "")
             except Exception:
                 pass
+
+        if run_id and _PATIENT_DB_AVAILABLE and coordinator_output is not None:
+            try:
+                from db.patients import complete_plan_run
+                import dataclasses
+                los_pred = None
+                try:
+                    from agents.predictive_los import predict_los
+                    los_pred = dataclasses.asdict(predict_los(patient_data))
+                except Exception:
+                    pass
+                await asyncio.to_thread(complete_plan_run, run_id, coordinator_output, los_pred)
+            except Exception:
+                pass
+
         if DATABASE_URL and coordinator_output is not None:
             tcm_result = await _maybe_create_tcm_episode(
                 coordinator_output, patient_data, ctx.org_id, ctx.email)
@@ -1458,6 +1522,277 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+# ── Patient persistence endpoints ─────────────────────────────────────────────
+
+@app.get("/api/patients")
+@limiter.limit("120/hour")
+async def list_patients(request: Request, search: str = "",
+                        ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        return JSONResponse({"patients": [], "total": 0})
+    try:
+        from db.patients import get_patients_for_org, search_patients, get_org_domain
+        org_domain = get_org_domain(ctx.email)
+        if search.strip():
+            patients = await asyncio.to_thread(search_patients, org_domain, search.strip())
+        else:
+            patients = await asyncio.to_thread(get_patients_for_org, org_domain)
+        # Serialize datetime/date fields
+        import datetime as _dt
+        def _ser(v):
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                return v.isoformat()
+            return v
+        result = [{k: _ser(v) for k, v in p.items()} for p in patients]
+        return JSONResponse({"patients": result, "total": len(result)})
+    except Exception as e:
+        return JSONResponse({"patients": [], "total": 0, "error": str(e)})
+
+
+@app.get("/api/patients/{patient_id}")
+@limiter.limit("120/hour")
+async def get_patient(request: Request, patient_id: int,
+                      ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        from db.patients import get_patient_detail, get_org_domain
+        import datetime as _dt
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        def _ser(obj):
+            if isinstance(obj, dict):
+                return {k: _ser(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_ser(i) for i in obj]
+            if isinstance(obj, (_dt.datetime, _dt.date)):
+                return obj.isoformat()
+            return obj
+        return JSONResponse({"patient": _ser(patient)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patients/{patient_id}/prefill")
+@limiter.limit("120/hour")
+async def prefill_patient(request: Request, patient_id: int,
+                           ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        from db.patients import get_latest_snapshot, get_patient_detail, get_org_domain
+        import datetime as _dt
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        snapshot = await asyncio.to_thread(get_latest_snapshot, patient_id)
+        runs = patient.get("runs", [])
+        last_run_at = None
+        if runs:
+            lr = runs[-1].get("completed_at") or runs[-1].get("started_at")
+            if isinstance(lr, (_dt.datetime, _dt.date)):
+                last_run_at = lr.isoformat()
+            else:
+                last_run_at = str(lr) if lr else None
+        return JSONResponse({
+            "patient_data": snapshot or {},
+            "run_count": len(runs),
+            "last_run_at": last_run_at,
+            "patient_name": patient.get("patient_name"),
+            "mrn": patient.get("mrn"),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/patients/{patient_id}/status")
+@limiter.limit("60/hour")
+async def update_patient_status_endpoint(request: Request, patient_id: int,
+                                          ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        body = await request.json()
+        new_status = body.get("status", "").strip()
+        note = body.get("note")
+        from db.patients import update_patient_status, get_patient_detail, get_org_domain, VALID_STATUSES
+        if new_status not in VALID_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}")
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        await asyncio.to_thread(update_patient_status, patient_id, new_status, ctx.email, note)
+        return JSONResponse({"ok": True, "status": new_status})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/patients/{patient_id}/notes")
+@limiter.limit("60/hour")
+async def add_patient_note_endpoint(request: Request, patient_id: int,
+                                     ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        body = await request.json()
+        note_text = body.get("note_text", "").strip()
+        if not note_text:
+            raise HTTPException(status_code=400, detail="note_text is required")
+        from db.patients import add_patient_note, get_patient_detail, get_org_domain
+        import datetime as _dt
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        note = await asyncio.to_thread(add_patient_note, patient_id, note_text, ctx.email)
+        def _ser(v):
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                return v.isoformat()
+            return v
+        return JSONResponse({k: _ser(v) for k, v in note.items()})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/patients/{patient_id}/notes/{note_id}")
+@limiter.limit("60/hour")
+async def delete_patient_note_endpoint(request: Request, patient_id: int, note_id: int,
+                                        ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        from db.patients import delete_patient_note
+        deleted = await asyncio.to_thread(delete_patient_note, note_id, ctx.email)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Note not found or you are not the author")
+        return JSONResponse({"ok": True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patients/{patient_id}/runs/{run_id}/export")
+@limiter.limit("30/hour")
+async def export_run_endpoint(request: Request, patient_id: int, run_id: int,
+                               ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        from db.patients import get_patient_detail, get_org_domain
+        import datetime as _dt
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        run = next((r for r in patient.get("runs", []) if r["id"] == run_id), None)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        AGENT_LABELS = {
+            "predictive_los": "Predictive Discharge Date",
+            "clinical": "Clinical Assessment",
+            "care_needs": "Care Needs Assessment",
+            "insurance": "Insurance Authorization",
+            "medications": "Medication Reconciliation",
+            "social": "Social Determinants",
+            "coordinator": "Final Discharge Plan",
+        }
+
+        def fmt_dt(v):
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                return v.strftime("%B %d, %Y")
+            return str(v) if v else "—"
+
+        agents_html = ""
+        agent_order = ["predictive_los","clinical","care_needs","insurance","medications","social","coordinator"]
+        agents_by_name = {a["agent_name"]: a for a in run.get("agents", [])}
+
+        for aname in agent_order:
+            if aname in agents_by_name:
+                label = AGENT_LABELS.get(aname, aname)
+                text = agents_by_name[aname]["output_text"].replace("<","&lt;").replace(">","&gt;")
+                agents_html += f'<section class="section"><h2>{label}</h2><pre>{text}</pre></section>\n'
+
+        if run.get("final_plan") and "coordinator" not in agents_by_name:
+            text = run["final_plan"].replace("<","&lt;").replace(">","&gt;")
+            agents_html += f'<section class="section"><h2>Final Discharge Plan</h2><pre>{text}</pre></section>\n'
+
+        started = fmt_dt(run.get("started_at"))
+        html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>Discharge Plan — {patient.get("patient_name","Unknown")} — {patient.get("mrn","")}</title>
+<style>
+  body{{font-family:Georgia,serif;font-size:12pt;color:#111;margin:40px;line-height:1.6}}
+  .header{{border-bottom:2px solid #1a56db;padding-bottom:16px;margin-bottom:24px}}
+  .header h1{{font-size:18pt;color:#1a56db;margin:0 0 8px}}
+  .meta{{font-size:10pt;color:#555}}
+  .draft-banner{{background:#fef3cd;border:1px solid #f59e0b;padding:10px 16px;border-radius:6px;margin:16px 0;font-size:10pt}}
+  .section{{margin:24px 0;page-break-inside:avoid}}
+  .section h2{{font-size:13pt;color:#1e3a8a;border-bottom:1px solid #e2e8f0;padding-bottom:6px}}
+  pre{{white-space:pre-wrap;font-family:inherit;font-size:11pt;margin:8px 0}}
+  .footer{{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:9pt;color:#888;text-align:center}}
+  @media print{{body{{margin:20px}}.draft-banner{{-webkit-print-color-adjust:exact}}}}
+</style>
+</head><body>
+<div class="header">
+  <h1>🏥 DISCHARGE PLAN — CONFIDENTIAL</h1>
+  <div class="meta">
+    <strong>Patient:</strong> {patient.get("patient_name","Unknown")} &nbsp;|&nbsp;
+    <strong>MRN:</strong> {patient.get("mrn","—")} &nbsp;|&nbsp;
+    <strong>Admission:</strong> {fmt_dt(patient.get("admission_date"))}<br>
+    <strong>Plan generated:</strong> {started} &nbsp;|&nbsp;
+    <strong>Run #:</strong> {run.get("run_number","—")} &nbsp;|&nbsp;
+    <strong>By:</strong> {run.get("run_by","—")}
+  </div>
+</div>
+<div class="draft-banner">⚠ DRAFT — Clinical decision support only. Not a substitute for clinical judgment.</div>
+{agents_html}
+<div class="footer">
+  Generated by Discharge Planning AI · {_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}<br>
+  This document is confidential and intended for authorized clinical personnel only.
+</div>
+<script>window.onload = function(){{ window.print(); }};</script>
+</body></html>"""
+
+        from fastapi.responses import HTMLResponse as _HR
+        return _HR(content=html, headers={"Content-Disposition": "inline"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/my-patients", response_class=HTMLResponse)
+async def my_patients_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "my-patients.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/patients/{patient_id}", response_class=HTMLResponse)
+async def patient_detail_page(request: Request, patient_id: int):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "patient-detail.html", encoding="utf-8") as f:
+        return f.read()
+
 
 APP_URL = os.environ.get("NEXT_PUBLIC_APP_URL", "https://discharge-planning.vercel.app")
 FHIR_REDIRECT_URI = os.getenv("FHIR_REDIRECT_URI", f"{APP_URL}/api/fhir/callback")

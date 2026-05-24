@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Patients — Discharge Planning AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f4f8; color: #1e293b; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #1a56db, #1e3a8a);
+    color: #fff;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .logo { font-size: 1.4rem; }
+  header h1 { font-size: 1rem; font-weight: 700; letter-spacing: -0.2px; }
+  header p { font-size: 0.72rem; opacity: 0.75; }
+  .spacer { flex: 1; }
+  header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.82rem; padding: 6px 10px; border-radius: 6px; transition: background 0.15s; }
+  header a:hover { background: rgba(255,255,255,0.15); }
+
+  .container { max-width: 1000px; margin: 0 auto; padding: 32px 20px; }
+
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .page-header h2 { font-size: 1.5rem; font-weight: 700; color: #1e293b; }
+  .btn-new {
+    background: #1a56db;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-new:hover { background: #1646b8; }
+
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .search-wrap {
+    flex: 1;
+    min-width: 220px;
+    position: relative;
+  }
+  .search-wrap input {
+    width: 100%;
+    padding: 9px 12px 9px 36px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: #fff;
+  }
+  .search-wrap input:focus { outline: none; border-color: #1a56db; box-shadow: 0 0 0 3px rgba(26,86,219,0.1); }
+  .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 1rem; }
+
+  select.filter-select {
+    padding: 9px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    background: #fff;
+    cursor: pointer;
+  }
+
+  .status-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 0;
+  }
+  .status-tab {
+    padding: 8px 16px;
+    border: none;
+    background: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    border-radius: 0;
+    transition: all 0.15s;
+  }
+  .status-tab.active { color: #1a56db; border-bottom-color: #1a56db; font-weight: 600; }
+  .status-tab:hover:not(.active) { color: #334155; }
+
+  .patient-card {
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .patient-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #cbd5e1; }
+
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-active { background: #16a34a; }
+  .dot-pending_discharge { background: #f59e0b; }
+  .dot-discharged { background: #94a3b8; }
+  .dot-readmitted { background: #ef4444; }
+
+  .patient-info { flex: 1; min-width: 0; }
+  .patient-name { font-weight: 600; font-size: 0.95rem; color: #1e293b; }
+  .patient-meta { font-size: 0.8rem; color: #64748b; margin-top: 3px; }
+  .patient-activity { font-size: 0.78rem; color: #94a3b8; margin-top: 2px; }
+
+  .status-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .badge-active { background: #dcfce7; color: #16a34a; }
+  .badge-pending_discharge { background: #fef3c7; color: #d97706; }
+  .badge-discharged { background: #f1f5f9; color: #64748b; }
+  .badge-readmitted { background: #fee2e2; color: #dc2626; }
+
+  .card-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .btn-sm {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    border: 1px solid;
+    transition: all 0.15s;
+  }
+  .btn-continue { background: #1a56db; color: #fff; border-color: #1a56db; }
+  .btn-continue:hover { background: #1646b8; }
+  .btn-view { background: #fff; color: #475569; border-color: #cbd5e1; }
+  .btn-view:hover { background: #f8fafc; border-color: #94a3b8; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #94a3b8;
+  }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 16px; }
+  .empty-state p { font-size: 0.95rem; margin-bottom: 20px; }
+
+  .skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.2s infinite;
+    border-radius: 6px;
+  }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+  .skel-card { height: 72px; margin-bottom: 12px; border-radius: 10px; }
+
+  .count-badge { display: inline-block; background: #e2e8f0; color: #475569; font-size: 0.72rem; font-weight: 600; border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>My Patients</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/my-patients">My Patients</a>
+  <a href="/">← Planner</a>
+  <a href="/discharge-summary-generator">Summary</a>
+  <a href="/teachback-checklist">Teach-back</a>
+  <a href="/hrrp-flagging">HRRP</a>
+  <a href="/roi-tracker">ROI</a>
+  <a href="/readmission-tracker">Tracker</a>
+  <a href="/predictive-discharge">Predict LOS</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div class="container">
+  <div class="page-header">
+    <h2>My Patients</h2>
+    <a href="/" class="btn-new">+ New Patient</a>
+  </div>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Search by name, MRN, or diagnosis..." />
+    </div>
+    <select class="filter-select" id="sort-select">
+      <option value="updated_at">Last activity</option>
+      <option value="admission_date">Admission date</option>
+      <option value="patient_name">Patient name</option>
+    </select>
+  </div>
+
+  <div class="status-tabs">
+    <button class="status-tab active" data-status="all">All <span class="count-badge" id="cnt-all">—</span></button>
+    <button class="status-tab" data-status="active">Active <span class="count-badge" id="cnt-active">—</span></button>
+    <button class="status-tab" data-status="pending_discharge">Pending <span class="count-badge" id="cnt-pending_discharge">—</span></button>
+    <button class="status-tab" data-status="discharged">Discharged <span class="count-badge" id="cnt-discharged">—</span></button>
+    <button class="status-tab" data-status="readmitted">Readmitted <span class="count-badge" id="cnt-readmitted">—</span></button>
+  </div>
+
+  <div id="skeleton" style="display:none">
+    <div class="skel-card skeleton"></div>
+    <div class="skel-card skeleton"></div>
+    <div class="skel-card skeleton"></div>
+  </div>
+
+  <div id="patient-list"></div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    <div class="icon">📋</div>
+    <p>No patients found</p>
+    <a href="/" class="btn-new">+ Start new discharge plan</a>
+  </div>
+</div>
+
+<script>
+let allPatients = [];
+let activeStatus = 'all';
+let sortKey = 'updated_at';
+let searchTimer = null;
+
+const STATUS_LABELS = {
+  active: 'Active',
+  pending_discharge: 'Pending Discharge',
+  discharged: 'Discharged',
+  readmitted: 'Readmitted',
+};
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '—';
+  const diff = (Date.now() - new Date(dateStr)) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  if (diff < 172800) return 'yesterday';
+  if (diff < 604800) return Math.floor(diff/86400) + 'd ago';
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function statusBadge(status) {
+  const label = STATUS_LABELS[status] || status;
+  return `<span class="status-badge badge-${status}">${label}</span>`;
+}
+
+function renderCard(p) {
+  const name = p.patient_name || `Patient MRN: ${p.mrn}`;
+  const diag = p.primary_diagnosis ? `${p.primary_diagnosis.substring(0,60)}${p.primary_diagnosis.length>60?'…':''}` : '';
+  const runs = p.total_runs || 0;
+  const lastBy = p.last_run_by ? ` by ${p.last_run_by.split('@')[0]}` : '';
+  const lastAt = p.last_run_at ? timeAgo(p.last_run_at) : 'no runs yet';
+  const admDate = p.admission_date ? new Date(p.admission_date).toLocaleDateString() : '—';
+
+  return `<div class="patient-card" data-status="${p.status}" data-id="${p.id}">
+    <div class="status-dot dot-${p.status}"></div>
+    <div class="patient-info">
+      <div class="patient-name">${name} &nbsp; ${statusBadge(p.status)}</div>
+      <div class="patient-meta">MRN: ${p.mrn} · Admitted: ${admDate}${diag ? ' · ' + diag : ''}</div>
+      <div class="patient-activity">${runs} plan run${runs !== 1 ? 's' : ''} · Last: ${lastAt}${lastBy}</div>
+    </div>
+    <div class="card-actions">
+      <button class="btn-sm btn-continue" onclick="continuePatient(${p.id}, event)">Continue</button>
+      <a href="/patients/${p.id}" class="btn-sm btn-view">View</a>
+    </div>
+  </div>`;
+}
+
+function renderList(patients) {
+  const list = document.getElementById('patient-list');
+  const empty = document.getElementById('empty-state');
+  if (!patients.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = patients.map(renderCard).join('');
+}
+
+function applyFiltersAndSort() {
+  let filtered = allPatients.filter(p => activeStatus === 'all' || p.status === activeStatus);
+  filtered.sort((a, b) => {
+    const av = a[sortKey] || '', bv = b[sortKey] || '';
+    if (sortKey === 'patient_name') return (av||'').localeCompare(bv||'');
+    return av < bv ? 1 : -1;
+  });
+  renderList(filtered);
+  updateCounts();
+}
+
+function updateCounts() {
+  const counts = {all: allPatients.length};
+  allPatients.forEach(p => { counts[p.status] = (counts[p.status]||0) + 1; });
+  ['all','active','pending_discharge','discharged','readmitted'].forEach(s => {
+    const el = document.getElementById('cnt-' + s);
+    if (el) el.textContent = counts[s] || 0;
+  });
+}
+
+async function loadPatients(search) {
+  document.getElementById('skeleton').style.display = 'block';
+  document.getElementById('patient-list').innerHTML = '';
+  document.getElementById('empty-state').style.display = 'none';
+  try {
+    const url = '/api/patients' + (search ? '?search=' + encodeURIComponent(search) : '');
+    const r = await fetch(url);
+    if (r.status === 401) { location.href = '/login'; return; }
+    const data = await r.json();
+    allPatients = data.patients || [];
+    applyFiltersAndSort();
+  } catch(e) {
+    document.getElementById('patient-list').innerHTML = '<p style="color:#ef4444;padding:20px">Failed to load patients. Please refresh.</p>';
+  } finally {
+    document.getElementById('skeleton').style.display = 'none';
+  }
+}
+
+async function continuePatient(patientId, e) {
+  const btn = e.target;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch(`/api/patients/${patientId}/prefill`);
+    if (!r.ok) throw new Error('Failed');
+    const data = await r.json();
+    sessionStorage.setItem('prefill_patient', JSON.stringify(data));
+    location.href = '/';
+  } catch(ex) {
+    btn.disabled = false;
+    btn.textContent = 'Continue';
+    alert('Could not load patient data. Please try again.');
+  }
+}
+
+// Status tabs
+document.querySelectorAll('.status-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.status-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeStatus = btn.dataset.status;
+    applyFiltersAndSort();
+  });
+});
+
+// Sort
+document.getElementById('sort-select').addEventListener('change', e => {
+  sortKey = e.target.value;
+  applyFiltersAndSort();
+});
+
+// Search with debounce
+document.getElementById('search-input').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(() => loadPatients(q), 400);
+});
+
+loadPatients();
+</script>
+</body>
+</html>

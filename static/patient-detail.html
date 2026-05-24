@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Patient Detail — Discharge Planning AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f4f8; color: #1e293b; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #1a56db, #1e3a8a);
+    color: #fff; padding: 0 24px; height: 56px;
+    display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .logo { font-size: 1.4rem; }
+  header h1 { font-size: 1rem; font-weight: 700; }
+  header p { font-size: 0.72rem; opacity: 0.75; }
+  .spacer { flex: 1; }
+  header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.82rem; padding: 6px 10px; border-radius: 6px; }
+  header a:hover { background: rgba(255,255,255,0.15); }
+
+  .patient-header {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 16px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .back-link { color: #64748b; text-decoration: none; font-size: 0.85rem; }
+  .back-link:hover { color: #1a56db; }
+  .patient-title { flex: 1; }
+  .patient-title h2 { font-size: 1.2rem; font-weight: 700; }
+  .patient-title .sub { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+
+  .status-select {
+    padding: 6px 12px; border: 1.5px solid #cbd5e1; border-radius: 8px;
+    font-size: 0.85rem; font-weight: 600; cursor: pointer; background: #fff;
+  }
+  .status-active { border-color: #16a34a; color: #16a34a; }
+  .status-pending_discharge { border-color: #f59e0b; color: #d97706; }
+  .status-discharged { border-color: #94a3b8; color: #64748b; }
+  .status-readmitted { border-color: #ef4444; color: #dc2626; }
+
+  .layout { display: flex; height: calc(100vh - 110px); overflow: hidden; }
+
+  .sidebar {
+    width: 280px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0;
+    overflow-y: auto; display: flex; flex-direction: column;
+  }
+  .sidebar-section { padding: 16px; border-bottom: 1px solid #e2e8f0; }
+  .sidebar-section h3 { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 12px; }
+
+  .run-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 6px;
+    border: 1px solid transparent; transition: all 0.15s;
+  }
+  .run-item:hover { background: #f8fafc; border-color: #e2e8f0; }
+  .run-item.active { background: #eff6ff; border-color: #bfdbfe; }
+  .run-item .run-title { font-weight: 600; font-size: 0.88rem; color: #1e293b; }
+  .run-item .run-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+  .run-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+  .s-complete { background: #16a34a; } .s-running { background: #f59e0b; } .s-failed { background: #ef4444; }
+
+  .note-form { display: flex; flex-direction: column; gap: 8px; }
+  .note-form textarea {
+    border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px;
+    font-family: inherit; font-size: 0.85rem; resize: vertical; min-height: 70px;
+  }
+  .note-form textarea:focus { outline: none; border-color: #1a56db; }
+  .btn-note { background: #1a56db; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+  .btn-note:hover { background: #1646b8; }
+
+  .note-item { padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+  .note-item:last-child { border-bottom: none; }
+  .note-text { font-size: 0.85rem; color: #334155; line-height: 1.5; }
+  .note-meta { font-size: 0.72rem; color: #94a3b8; margin-top: 4px; display: flex; justify-content: space-between; }
+  .btn-del-note { background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.8rem; padding: 0; }
+  .btn-del-note:hover { color: #ef4444; }
+
+  .status-hist-item { font-size: 0.78rem; color: #64748b; padding: 4px 0; }
+  .status-hist-item strong { color: #334155; }
+
+  .main-panel { flex: 1; overflow-y: auto; padding: 24px; background: #f8fafc; }
+
+  .run-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+  .run-header h3 { font-size: 1.1rem; font-weight: 700; }
+  .run-header .run-info { font-size: 0.82rem; color: #64748b; }
+  .btn-export { background: #fff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 14px; font-size: 0.82rem; cursor: pointer; text-decoration: none; color: #475569; }
+  .btn-export:hover { border-color: #94a3b8; }
+
+  .agent-tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+  .agent-tab {
+    padding: 7px 14px; border: 1px solid #e2e8f0; border-radius: 6px;
+    font-size: 0.8rem; font-weight: 500; cursor: pointer; background: #fff;
+    transition: all 0.15s; color: #475569;
+  }
+  .agent-tab.active { background: #1a56db; color: #fff; border-color: #1a56db; }
+  .agent-tab:hover:not(.active) { background: #f8fafc; border-color: #94a3b8; }
+
+  .agent-output {
+    background: #fff; border-radius: 10px; border: 1px solid #e2e8f0;
+    padding: 20px; white-space: pre-wrap; font-size: 0.88rem; line-height: 1.7;
+    font-family: inherit; min-height: 200px;
+  }
+
+  .los-card {
+    background: linear-gradient(135deg, #1a56db, #1e3a8a);
+    color: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
+    display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .los-metric { flex: 1; min-width: 120px; }
+  .los-metric .label { font-size: 0.72rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.4px; }
+  .los-metric .value { font-size: 1.1rem; font-weight: 700; margin-top: 2px; }
+
+  .empty-run { text-align: center; color: #94a3b8; padding: 60px 20px; font-size: 0.95rem; }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #16a34a; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 0.88rem; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div><h1>Discharge Planning AI</h1><p>Patient Detail</p></div>
+  <div class="spacer"></div>
+  <a href="/my-patients">My Patients</a>
+  <a href="/">← Planner</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div class="patient-header">
+  <a href="/my-patients" class="back-link">← My Patients</a>
+  <div class="patient-title">
+    <h2 id="pt-name">Loading...</h2>
+    <div class="sub" id="pt-sub"></div>
+  </div>
+  <select id="status-select" class="status-select" onchange="changeStatus(this.value)">
+    <option value="active">● Active</option>
+    <option value="pending_discharge">● Pending Discharge</option>
+    <option value="discharged">● Discharged</option>
+    <option value="readmitted">● Readmitted</option>
+  </select>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>Plan History</h3>
+      <div id="run-list"></div>
+    </div>
+    <div class="sidebar-section">
+      <h3>Clinical Notes</h3>
+      <div class="note-form">
+        <textarea id="note-input" placeholder="Add a clinical note..."></textarea>
+        <button class="btn-note" onclick="addNote()">Add Note</button>
+      </div>
+      <div id="notes-list" style="margin-top:12px"></div>
+    </div>
+    <div class="sidebar-section" id="status-hist-section" style="display:none">
+      <h3>Status History</h3>
+      <div id="status-hist-list"></div>
+    </div>
+  </div>
+
+  <div class="main-panel" id="main-panel">
+    <div class="empty-run">Select a plan run from the left to view details.</div>
+  </div>
+</div>
+
+<script>
+const patientId = parseInt(location.pathname.split('/').pop());
+let patient = null;
+let selectedRun = null;
+let myEmail = null;
+
+const AGENT_LABELS = {
+  predictive_los: 'Predict LOS',
+  clinical: 'Clinical',
+  care_needs: 'Care Needs',
+  insurance: 'Insurance',
+  medications: 'Medications',
+  social: 'Social',
+  coordinator: 'Final Plan',
+};
+const AGENT_ORDER = ['predictive_los','clinical','care_needs','insurance','medications','social','coordinator'];
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '—';
+  const diff = (Date.now() - new Date(dateStr)) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  if (diff < 172800) return 'yesterday';
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function fmtDt(s) {
+  if (!s) return '—';
+  return new Date(s).toLocaleString();
+}
+
+async function load() {
+  try {
+    const [pr, mr] = await Promise.all([
+      fetch(`/api/patients/${patientId}`),
+      fetch('/api/me'),
+    ]);
+    if (pr.status === 401 || mr.status === 401) { location.href = '/login'; return; }
+    if (!pr.ok) { document.querySelector('.layout').innerHTML = '<div style="padding:40px;color:#ef4444">Patient not found.</div>'; return; }
+    const data = await pr.json();
+    patient = data.patient;
+    const meData = await mr.json();
+    myEmail = meData.email;
+    render();
+  } catch(e) {
+    document.querySelector('.layout').innerHTML = '<div style="padding:40px;color:#ef4444">Failed to load patient data.</div>';
+  }
+}
+
+function render() {
+  // Header
+  const name = patient.patient_name || `MRN: ${patient.mrn}`;
+  document.title = `${name} — Discharge Planning AI`;
+  document.getElementById('pt-name').textContent = name;
+  document.getElementById('pt-sub').textContent =
+    `MRN: ${patient.mrn} · Admitted: ${patient.admission_date || '—'}${patient.primary_diagnosis ? ' · ' + patient.primary_diagnosis.substring(0,60) : ''}`;
+
+  // Status select
+  const sel = document.getElementById('status-select');
+  sel.value = patient.status || 'active';
+  sel.className = 'status-select status-' + (patient.status || 'active');
+
+  // Runs
+  const runList = document.getElementById('run-list');
+  const runs = [...(patient.runs || [])].reverse();
+  if (!runs.length) {
+    runList.innerHTML = '<p style="color:#94a3b8;font-size:0.82rem">No plan runs yet.</p>';
+  } else {
+    runList.innerHTML = runs.map(r => `
+      <div class="run-item" data-run-id="${r.id}" onclick="selectRun(${r.id})">
+        <div class="run-title"><span class="run-status s-${r.status}"></span>Run #${r.run_number}</div>
+        <div class="run-meta">${fmtDt(r.started_at)}<br>${r.run_by ? r.run_by.split('@')[0] : ''}</div>
+      </div>`).join('');
+  }
+
+  // Select latest run
+  if (runs.length) selectRun(runs[0].id);
+
+  // Notes
+  renderNotes();
+
+  // Status history
+  renderStatusHistory();
+}
+
+function selectRun(runId) {
+  selectedRun = (patient.runs || []).find(r => r.id === runId);
+  document.querySelectorAll('.run-item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.runId) === runId);
+  });
+  renderRun();
+}
+
+function renderRun() {
+  const panel = document.getElementById('main-panel');
+  if (!selectedRun) { panel.innerHTML = '<div class="empty-run">Select a plan run.</div>'; return; }
+  const r = selectedRun;
+  const agents = r.agents || [];
+  const agentMap = {};
+  agents.forEach(a => { agentMap[a.agent_name] = a; });
+
+  const hasAgents = agents.length > 0;
+  const availTabs = AGENT_ORDER.filter(n => agentMap[n]);
+  if (!availTabs.length && r.final_plan) availTabs.push('_final');
+
+  let losPart = '';
+  if (r.los_prediction) {
+    const p = r.los_prediction;
+    losPart = `<div class="los-card">
+      <div class="los-metric"><div class="label">Predicted Discharge</div><div class="value">${p.predicted_discharge_date||'—'}</div></div>
+      <div class="los-metric"><div class="label">Predicted LOS</div><div class="value">${p.predicted_los_days||'—'} days</div></div>
+      <div class="los-metric"><div class="label">80% CI</div><div class="value">${p.los_p10||'—'}–${p.los_p90||'—'} days</div></div>
+      <div class="los-metric"><div class="label">Risk Tier</div><div class="value">${p.risk_tier||'—'}</div></div>
+    </div>`;
+  }
+
+  const tabsHtml = availTabs.map(n => {
+    const label = n === '_final' ? 'Final Plan' : (AGENT_LABELS[n] || n);
+    return `<button class="agent-tab" data-agent="${n}" onclick="showAgent('${n}')">${label}</button>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="run-header">
+      <div>
+        <h3>Run #${r.run_number}</h3>
+        <div class="run-info">${fmtDt(r.started_at)} · ${r.run_by||'—'}</div>
+      </div>
+      <a href="/api/patients/${patientId}/runs/${r.id}/export" target="_blank" class="btn-export">🖨 Print / Export PDF</a>
+    </div>
+    ${losPart}
+    <div class="agent-tabs">${tabsHtml}</div>
+    <div id="agent-output" class="agent-output">${hasAgents || r.final_plan ? 'Select a section above.' : 'No output saved for this run.'}</div>
+  `;
+
+  if (availTabs.length) showAgent(availTabs[0]);
+}
+
+function showAgent(name) {
+  document.querySelectorAll('.agent-tab').forEach(t => t.classList.toggle('active', t.dataset.agent === name));
+  const r = selectedRun;
+  const agentMap = {};
+  (r.agents || []).forEach(a => { agentMap[a.agent_name] = a; });
+  let text = '';
+  if (name === '_final') {
+    text = r.final_plan || '(no output)';
+  } else {
+    text = agentMap[name] ? agentMap[name].output_text : '(no output for this section)';
+  }
+  document.getElementById('agent-output').textContent = text;
+}
+
+function renderNotes() {
+  const notes = (patient.notes || []);
+  const el = document.getElementById('notes-list');
+  if (!notes.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:0.78rem">No notes yet.</p>'; return; }
+  el.innerHTML = notes.map(n => `
+    <div class="note-item" id="note-${n.id}">
+      <div class="note-text">${n.note_text.replace(/</g,'&lt;')}</div>
+      <div class="note-meta">
+        <span>${n.author_email.split('@')[0]} · ${timeAgo(n.created_at)}</span>
+        ${n.author_email === myEmail ? `<button class="btn-del-note" onclick="deleteNote(${n.id})">🗑</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function renderStatusHistory() {
+  const hist = patient.status_history || [];
+  const sec = document.getElementById('status-hist-section');
+  const list = document.getElementById('status-hist-list');
+  if (!hist.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  list.innerHTML = hist.map(h => `
+    <div class="status-hist-item">
+      <strong>${h.old_status||'—'} → ${h.new_status}</strong><br>
+      ${h.changed_by.split('@')[0]} · ${timeAgo(h.changed_at)}${h.note ? '<br><em>' + h.note.replace(/</g,'&lt;') + '</em>' : ''}
+    </div>`).join('');
+}
+
+async function changeStatus(newStatus) {
+  const sel = document.getElementById('status-select');
+  const note = prompt('Optional: add a note about this status change?');
+  try {
+    const r = await fetch(`/api/patients/${patientId}/status`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({status: newStatus, note: note||null})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    patient.status = newStatus;
+    sel.className = 'status-select status-' + newStatus;
+    showToast('Status updated');
+    // Reload to get updated history
+    await load();
+  } catch(e) {
+    alert('Failed to update status: ' + e.message);
+    sel.value = patient.status;
+  }
+}
+
+async function addNote() {
+  const ta = document.getElementById('note-input');
+  const text = ta.value.trim();
+  if (!text) return;
+  try {
+    const r = await fetch(`/api/patients/${patientId}/notes`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({note_text: text})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const note = await r.json();
+    patient.notes = [note, ...(patient.notes||[])];
+    ta.value = '';
+    renderNotes();
+    showToast('Note saved');
+  } catch(e) {
+    alert('Failed to add note: ' + e.message);
+  }
+}
+
+async function deleteNote(noteId) {
+  if (!confirm('Delete this note?')) return;
+  try {
+    const r = await fetch(`/api/patients/${patientId}/notes/${noteId}`, {method:'DELETE'});
+    if (!r.ok) throw new Error(await r.text());
+    patient.notes = (patient.notes||[]).filter(n => n.id !== noteId);
+    renderNotes();
+    showToast('Note deleted');
+  } catch(e) {
+    alert('Failed to delete note: ' + e.message);
+  }
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = '✓ ' + msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+load();
+</script>
+</body>
+</html>
