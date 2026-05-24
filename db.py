@@ -290,7 +290,7 @@ def get_user_by_email_global(email: str) -> dict | None:  # pragma: no cover
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, organization_id, email, role FROM users "
+                    "SELECT organization_id, email, role FROM users "
                     "WHERE email = %s AND deleted_at IS NULL LIMIT 1",
                     (email,),
                 )
