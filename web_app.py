@@ -904,6 +904,7 @@ async def predict_los_endpoint(request: Request, ctx: OrgContext = Depends(get_c
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+
 @app.post("/api/roi/generate")
 @limiter.limit("30/hour")
 async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(default={}),
