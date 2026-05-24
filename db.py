@@ -281,6 +281,41 @@ def mark_invitation_accepted(token: str) -> None:  # pragma: no cover
         conn.close()
 
 
+# ── SSO user functions ────────────────────────────────────────────────────────
+
+def get_user_by_email_global(email: str) -> dict | None:  # pragma: no cover
+    """Look up a user by email across all orgs — used for SSO login."""
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, organization_id, email, role FROM users "
+                    "WHERE email = %s AND deleted_at IS NULL LIMIT 1",
+                    (email,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def provision_sso_user(email: str, org_id: str, role: str = "clinician") -> None:  # pragma: no cover
+    """Insert a password-less user for first-time SSO login. No-op if already exists."""
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO users (organization_id, email, salt, hash, role, sso_provider) "
+                    "VALUES (%s, %s, NULL, NULL, %s, 'auth0') "
+                    "ON CONFLICT (organization_id, email) DO NOTHING",
+                    (org_id, email, role),
+                )
+    finally:
+        conn.close()
+
+
 # ── Audit log ─────────────────────────────────────────────────────────────────
 
 def write_audit_log(org_id: str | None, user_email: str | None, endpoint: str,

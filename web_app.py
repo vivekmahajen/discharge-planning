@@ -10,7 +10,7 @@ import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import anthropic
 import httpx
@@ -61,6 +61,8 @@ except Exception as _e:  # pragma: no cover
     discover_smart_endpoints = encode_fhir_cookie = None  # type: ignore[assignment]
     exchange_code_for_token = generate_pkce_pair = None  # type: ignore[assignment]
     generate_secure_state = needs_refresh = refresh_access_token = None  # type: ignore[assignment]
+
+import auth0_oidc
 
 load_dotenv()
 
@@ -279,6 +281,8 @@ ALLOWED_EMAILS = {e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.
 _serializer = URLSafeTimedSerializer(SECRET_KEY)
 COOKIE_NAME = "dp_session"
 COOKIE_MAX_AGE = 60 * 60 * 8  # 8 hours
+SSO_STATE_COOKIE = "sso_auth_state"
+SSO_STATE_TTL = 300  # 5 minutes
 
 # Postgres URL — Vercel injects POSTGRES_URL automatically; DATABASE_URL is the fallback
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
@@ -626,6 +630,89 @@ async def do_login(request: Request, body: dict[str, Any] = Body(default={})):
 async def logout(request: Request):
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+@app.get("/api/auth/sso/config")
+async def sso_config():
+    """Returns whether Auth0 SSO is configured — login page uses this to show the SSO button."""
+    return JSONResponse({"enabled": auth0_oidc.is_configured()})
+
+
+@app.get("/auth/sso/login")
+async def sso_login(request: Request):
+    """Initiate Auth0 OIDC Authorization Code + PKCE flow."""
+    if not auth0_oidc.is_configured():
+        raise HTTPException(status_code=503, detail="SSO is not configured on this instance")
+    code_verifier, code_challenge = auth0_oidc.generate_pkce_pair()
+    state = auth0_oidc.generate_state()
+    redirect_uri = os.getenv("AUTH0_CALLBACK_URL") or f"{APP_URL}/auth/sso/callback"
+    authorize_url = auth0_oidc.build_authorize_url(state, code_challenge, redirect_uri)
+    response = RedirectResponse(url=authorize_url, status_code=302)
+    response.set_cookie(
+        key=SSO_STATE_COOKIE,
+        value=_serializer.dumps({"state": state, "code_verifier": code_verifier}),
+        max_age=SSO_STATE_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+    )
+    return response
+
+
+@app.get("/auth/sso/callback")
+async def sso_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """Receive Auth0 callback, exchange code for tokens, set session cookie."""
+    if error:
+        return RedirectResponse(url=f"/login?error={quote(str(error))}", status_code=302)
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state parameter")
+
+    raw = request.cookies.get(SSO_STATE_COOKIE)
+    if not raw:
+        raise HTTPException(status_code=400, detail="SSO session expired — please try again")
+    try:
+        sso_state = _serializer.loads(raw, max_age=SSO_STATE_TTL)
+    except (BadSignature, SignatureExpired):
+        raise HTTPException(status_code=400, detail="Invalid SSO state — please try again")
+
+    if sso_state.get("state") != state:
+        raise HTTPException(status_code=400, detail="State mismatch — possible CSRF attempt")
+
+    redirect_uri = os.getenv("AUTH0_CALLBACK_URL") or f"{APP_URL}/auth/sso/callback"
+    try:
+        tokens = await auth0_oidc.exchange_code(code, sso_state["code_verifier"], redirect_uri)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}")
+
+    try:
+        userinfo = await auth0_oidc.get_userinfo(tokens["access_token"])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch user info: {exc}")
+
+    email = userinfo.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="SSO provider did not return an email address")
+
+    org_id = DEFAULT_ORG_ID
+    role = "clinician"
+    if DATABASE_URL:  # pragma: no cover
+        from db import get_user_by_email_global, provision_sso_user
+        existing = get_user_by_email_global(email)
+        if existing:
+            org_id = str(existing["organization_id"])
+            role = existing.get("role", "clinician")
+        else:
+            provision_sso_user(email, org_id)
+
+    response = RedirectResponse(url="/", status_code=302)
+    _set_session(response, email, org_id, role)
+    response.delete_cookie(SSO_STATE_COOKIE)
     return response
 
 
