@@ -309,7 +309,7 @@ def provision_sso_user(email: str, org_id: str, role: str = "clinician") -> None
                 cur.execute(
                     "INSERT INTO users (organization_id, email, salt, hash, role, sso_provider) "
                     "VALUES (%s, %s, NULL, NULL, %s, 'auth0') "
-                    "ON CONFLICT (organization_id, email) DO NOTHING",
+                    "ON CONFLICT (email) DO NOTHING",
                     (org_id, email, role),
                 )
     finally:
