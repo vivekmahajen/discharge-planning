@@ -54,3 +54,6 @@ data/users.json
 .ipynb_checkpoints
 .coverage
 htmlcov/
+
+# ML models — committed to repo for Vercel bundling
+!models/*.joblib

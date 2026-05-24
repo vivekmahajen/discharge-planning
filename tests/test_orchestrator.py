@@ -18,7 +18,10 @@ _AGENT_PATCHES = [
     "orchestrator.InsuranceAuthorizationAgent",
     "orchestrator.MedicationReconciliationAgent",
     "orchestrator.SocialDeterminantsAgent",
+    "orchestrator.PredictiveLOSAgent",
 ]
+
+_N_AGENTS = len(_AGENT_PATCHES)  # 6
 
 
 def _mock_all_agents_good(mocks):
@@ -31,15 +34,15 @@ class TestOrchestratorHappyPath:
         coordinator_output = "## Final discharge plan — all agents succeeded"
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
-            _mock_all_agents_good([C1, C2, C3, C4, C5])
+            _mock_all_agents_good([C1, C2, C3, C4, C5, C6])
             CC.return_value.run = AsyncMock(return_value=coordinator_output)
             orc = DischargeOrchestrator(api_key="test")
             result = await orc.run(SAMPLE_PATIENT)
         assert result == coordinator_output
 
-    async def test_coordinator_receives_all_five_outputs(self):
+    async def test_coordinator_receives_all_agent_outputs(self):
         captured = {}
 
         async def fake_coordinator_run(agent_outputs):
@@ -48,15 +51,15 @@ class TestOrchestratorHappyPath:
 
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
-            _mock_all_agents_good([C1, C2, C3, C4, C5])
+            _mock_all_agents_good([C1, C2, C3, C4, C5, C6])
             CC.return_value.run = AsyncMock(side_effect=fake_coordinator_run)
             orc = DischargeOrchestrator(api_key="test")
             await orc.run(SAMPLE_PATIENT)
-        assert len(captured) == 5
+        assert len(captured) == _N_AGENTS
 
-    async def test_all_five_agents_start_in_parallel(self):
+    async def test_all_agents_start_in_parallel(self):
         start_times = []
 
         async def timed_agent(patient_data):
@@ -66,15 +69,15 @@ class TestOrchestratorHappyPath:
 
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
-            for Cls in [C1, C2, C3, C4, C5]:
+            for Cls in [C1, C2, C3, C4, C5, C6]:
                 Cls.return_value.run = timed_agent
             CC.return_value.run = AsyncMock(return_value="done")
             orc = DischargeOrchestrator(api_key="test")
             await orc.run(SAMPLE_PATIENT)
-        assert len(start_times) == 5
-        # All 5 agents should start within 50ms — they run in parallel
+        assert len(start_times) == _N_AGENTS
+        # All agents should start within 50ms — they run in parallel
         assert max(start_times) - min(start_times) < 0.05
 
 
@@ -82,10 +85,10 @@ class TestOrchestratorErrorIsolation:
     async def test_one_agent_failure_does_not_crash_job(self):
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
             C1.return_value.run = AsyncMock(side_effect=RuntimeError("API timeout"))
-            for Cls in [C2, C3, C4, C5]:
+            for Cls in [C2, C3, C4, C5, C6]:
                 Cls.return_value.run = AsyncMock(return_value=GOOD_OUTPUT)
             CC.return_value.run = AsyncMock(return_value="partial plan")
             orc = DischargeOrchestrator(api_key="test")
@@ -101,10 +104,10 @@ class TestOrchestratorErrorIsolation:
 
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
             C1.return_value.run = AsyncMock(side_effect=ValueError("Bad input data"))
-            for Cls in [C2, C3, C4, C5]:
+            for Cls in [C2, C3, C4, C5, C6]:
                 Cls.return_value.run = AsyncMock(return_value=GOOD_OUTPUT)
             CC.return_value.run = AsyncMock(side_effect=fake_coordinator)
             orc = DischargeOrchestrator(api_key="test")
@@ -116,9 +119,9 @@ class TestOrchestratorErrorIsolation:
     async def test_all_agents_fail_coordinator_still_runs(self):
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
-            for Cls in [C1, C2, C3, C4, C5]:
+            for Cls in [C1, C2, C3, C4, C5, C6]:
                 Cls.return_value.run = AsyncMock(side_effect=Exception("All systems down"))
             CC.return_value.run = AsyncMock(return_value="degraded plan")
             orc = DischargeOrchestrator(api_key="test")
@@ -126,7 +129,7 @@ class TestOrchestratorErrorIsolation:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    async def test_three_agent_failures_four_succeed_coordinator_gets_all(self):
+    async def test_three_agent_failures_rest_succeed_coordinator_gets_all(self):
         captured = {}
 
         async def fake_coordinator(agent_outputs):
@@ -135,14 +138,15 @@ class TestOrchestratorErrorIsolation:
 
         with patch(_AGENT_PATCHES[0]) as C1, patch(_AGENT_PATCHES[1]) as C2, \
              patch(_AGENT_PATCHES[2]) as C3, patch(_AGENT_PATCHES[3]) as C4, \
-             patch(_AGENT_PATCHES[4]) as C5, \
+             patch(_AGENT_PATCHES[4]) as C5, patch(_AGENT_PATCHES[5]) as C6, \
              patch("orchestrator.CoordinatorAgent") as CC:
             C1.return_value.run = AsyncMock(side_effect=Exception("fail"))
             C2.return_value.run = AsyncMock(side_effect=Exception("fail"))
             C3.return_value.run = AsyncMock(side_effect=Exception("fail"))
             C4.return_value.run = AsyncMock(return_value=GOOD_OUTPUT)
             C5.return_value.run = AsyncMock(return_value=GOOD_OUTPUT)
+            C6.return_value.run = AsyncMock(return_value=GOOD_OUTPUT)
             CC.return_value.run = AsyncMock(side_effect=fake_coordinator)
             orc = DischargeOrchestrator(api_key="test")
             await orc.run(SAMPLE_PATIENT)
-        assert len(captured) == 5
+        assert len(captured) == _N_AGENTS

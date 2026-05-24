@@ -735,7 +735,9 @@ async def stream_plan(patient_data: dict):
 
     agent_data = build_agent_data(patient_data)
 
+    from agents.predictive_los import PredictiveLOSAgent
     agents = {
+        "predictive_los": PredictiveLOSAgent(None),
         "clinical": ClinicalAssessmentAgent(client),
         "care_needs": CareNeedsAgent(client),
         "insurance": InsuranceAuthorizationAgent(client),
@@ -750,6 +752,14 @@ async def stream_plan(patient_data: dict):
         try:
             result = await agent.run(agent_data)
             await queue.put({"type": "agent_complete", "agent": name, "output": result})
+            if name == "predictive_los":
+                try:
+                    import dataclasses
+                    from agents.predictive_los import predict_los
+                    pred = predict_los(agent_data)
+                    await queue.put({"type": "los_prediction", "data": dataclasses.asdict(pred)})
+                except Exception:  # pragma: no cover
+                    pass
             return name, result
         except Exception as e:  # pragma: no cover
             await queue.put({"type": "agent_error", "agent": name, "error": str(e)})
@@ -766,6 +776,7 @@ async def stream_plan(patient_data: dict):
         if event["type"] in ("agent_complete", "agent_error"):
             completed += 1
             agent_outputs[event["agent"]] = event.get("output", event.get("error", ""))
+        # los_prediction is an extra informational event — does not count toward completion
 
     await asyncio.gather(*tasks)
 
@@ -866,6 +877,33 @@ async def readmission_tracker_page(request: Request):
         return redirect
     with open(STATIC_DIR / "readmission-tracker.html", encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/predictive-discharge", response_class=HTMLResponse)
+async def predictive_discharge_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "predictive-discharge.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/predict/los")
+@limiter.limit("60/hour")
+async def predict_los_endpoint(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    """Return structured LOS prediction JSON for a given patient_data payload."""
+    import dataclasses
+    from agents.predictive_los import predict_los
+
+    body = await request.json()
+    patient_data = body.get("patient_data", body)
+    try:
+        prediction = predict_los(patient_data)
+        return JSONResponse({"success": True, "prediction": dataclasses.asdict(prediction)})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 
 @app.post("/api/roi/generate")
 @limiter.limit("30/hour")

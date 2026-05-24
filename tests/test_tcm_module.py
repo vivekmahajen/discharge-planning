@@ -487,3 +487,74 @@ class TestTcmDbMode:
         })
         assert r.status_code == 200
         assert r.json()["ok"] is True
+
+
+# ── Predictive LOS endpoint tests ─────────────────────────────────────────────
+
+class TestPredictiveLosEndpoint:
+    """Tests for /api/predict/los and /predictive-discharge page."""
+
+    async def test_predict_los_unauthenticated_returns_401(self, client):
+        r = await client.post("/api/predict/los", json={})
+        assert r.status_code == 401
+
+    async def test_predict_los_returns_prediction(self, authed_client):
+        """Authenticated request returns a valid LOS prediction."""
+        r = await authed_client.post("/api/predict/los", json={
+            "patient_data": {
+                "age": "72",
+                "admission_date": "2026-05-01",
+                "primary_diagnosis": "I50.9 Congestive Heart Failure",
+                "primary_insurance": "Medicare",
+                "secondary_diagnoses": "E11.9 Type 2 Diabetes\nN18.3 CKD stage 3\nI10 Hypertension",
+                "living_situation": "Lives alone",
+                "caregiver": "None",
+                "snf_days_used": "0",
+                "patient_family_preference": "Home with PT",
+                "therapy_evaluations": {"PT": "Ordered", "OT": "Not evaluated", "ST": "Not evaluated"},
+            }
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["success"] is True
+        pred = body["prediction"]
+        assert pred["predicted_los_days"] >= 1
+        assert pred["predicted_discharge_date"] >= "2026-05-01"
+        assert pred["risk_tier"] in ("Short", "Moderate", "Extended", "Complex")
+        assert pred["los_p10"] <= pred["predicted_los_days"] <= pred["los_p90"]
+        assert len(pred["top_factors"]) > 0
+
+    async def test_predict_los_72yo_chf_is_moderate_or_extended(self, authed_client):
+        """Sample 72yo Medicare CHF patient with 3 comorbidities should predict 6–10 days."""
+        r = await authed_client.post("/api/predict/los", json={
+            "patient_data": {
+                "age": "72",
+                "primary_diagnosis": "I50.9",
+                "primary_insurance": "Medicare",
+                "secondary_diagnoses": "E11.9\nN18.3\nI10",
+                "admission_date": "2026-05-01",
+                "caregiver": "None",
+                "living_situation": "Lives alone",
+            }
+        })
+        assert r.status_code == 200
+        pred = r.json()["prediction"]
+        # Should predict between 4 and 14 days (Moderate or Extended tier)
+        assert 4 <= pred["predicted_los_days"] <= 14
+        assert pred["risk_tier"] in ("Moderate", "Extended")
+
+    async def test_predict_los_flat_payload_accepted(self, authed_client):
+        """Endpoint accepts flat patient_data (no nesting) for convenience."""
+        r = await authed_client.post("/api/predict/los", json={
+            "age": "65",
+            "primary_diagnosis": "J18.9",
+            "primary_insurance": "PPO",
+        })
+        assert r.status_code == 200
+        assert r.json()["success"] is True
+
+    async def test_predictive_discharge_page_loads(self, authed_client):
+        r = await authed_client.get("/predictive-discharge")
+        assert r.status_code == 200
+        assert "Predictive Discharge Date" in r.text
+        assert "Gradient Boosting" in r.text
