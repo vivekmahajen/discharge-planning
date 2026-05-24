@@ -300,51 +300,45 @@ logging.basicConfig(level=logging.INFO)
 
 _AUDITED_PREFIXES = ("/api/plan", "/api/fhir", "/api/summary", "/api/discharge",
                      "/api/teachback", "/api/cdph", "/api/hrrp", "/api/medications",
-                     "/api/multilingual", "/api/immunisation")
+                     "/api/multilingual", "/api/immunisation", "/api/predict")
+
+
+def _get_audit_context(request: Request) -> tuple[str | None, str | None]:
+    """Return (email, org_id) from session cookie without raising."""
+    try:
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            return None, None
+        data = _serializer.loads(token, max_age=COOKIE_MAX_AGE)
+        return data.get("email"), data.get("org_id", DEFAULT_ORG_ID)
+    except Exception:
+        return None, None
+
 
 async def _audit_log_middleware(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
     if any(path.startswith(p) for p in _AUDITED_PREFIXES):
-        user = get_current_user(request)
-        if user:
-            await asyncio.to_thread(_write_audit_entry, {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_hash": hashlib.sha256(user.encode()).hexdigest()[:16],
-                "endpoint": path,
-                "method": request.method,
-                "status": response.status_code,
-                "ip": request.client.host if request.client else "unknown",
-            })
+        email, org_id = _get_audit_context(request)
+        if email:
+            mrn = getattr(request.state, "audit_mrn", None) or None
+            ip = request.client.host if request.client else "unknown"
+            if DATABASE_URL:  # pragma: no cover
+                try:
+                    from db import write_audit_log
+                    await asyncio.to_thread(
+                        write_audit_log, org_id, email, path,
+                        request.method, response.status_code, ip, mrn,
+                    )
+                except Exception:
+                    _audit_logger.exception("Audit log write failed")
+            else:
+                _audit_logger.info(
+                    "AUDIT email=%s org=%s endpoint=%s mrn=%s status=%s ip=%s",
+                    email, org_id, path, mrn, response.status_code, ip,
+                )
     return response
 
-def _write_audit_entry(entry: dict) -> None:
-    if DATABASE_URL:  # pragma: no cover
-        try:
-            with _get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS audit_log (
-                            id BIGSERIAL PRIMARY KEY,
-                            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                            user_hash TEXT,
-                            endpoint TEXT,
-                            method TEXT,
-                            status INT,
-                            ip TEXT
-                        )
-                    """)
-                    cur.execute(
-                        "INSERT INTO audit_log (ts, user_hash, endpoint, method, status, ip) "
-                        "VALUES (%s, %s, %s, %s, %s, %s)",
-                        (entry["timestamp"], entry["user_hash"], entry["endpoint"],
-                         entry["method"], entry["status"], entry["ip"]),
-                    )
-                conn.commit()
-        except Exception:
-            _audit_logger.exception("Audit log write failed")
-    else:
-        _audit_logger.info("AUDIT %s", entry)
 
 app.middleware("http")(_audit_log_middleware)
 
@@ -897,6 +891,7 @@ async def predict_los_endpoint(request: Request, ctx: OrgContext = Depends(get_c
 
     body = await request.json()
     patient_data = body.get("patient_data", body)
+    request.state.audit_mrn = patient_data.get("mrn") or None
     try:
         prediction = predict_los(patient_data)
         return JSONResponse({"success": True, "prediction": dataclasses.asdict(prediction)})
@@ -1344,6 +1339,7 @@ Rules:
 @limiter.limit("10/hour")
 async def create_plan(request: Request, patient_data: dict[str, Any] = Body(default={}),
                       ctx: OrgContext = Depends(get_current_org)):
+    request.state.audit_mrn = patient_data.get("mrn") or None
     async def _stream_with_tcm():
         coordinator_output: str | None = None
         async for chunk in stream_plan(patient_data):

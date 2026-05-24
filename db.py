@@ -283,9 +283,10 @@ def mark_invitation_accepted(token: str) -> None:  # pragma: no cover
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
 
-def write_audit_log(org_id: str | None, user_hash: str, endpoint: str,
-                    method: str, status: int, ip: str) -> None:  # pragma: no cover
-    """Write an audit entry scoped to an organization."""
+def write_audit_log(org_id: str | None, user_email: str | None, endpoint: str,
+                    method: str, status: int, ip: str,
+                    mrn: str | None = None) -> None:  # pragma: no cover
+    """Write a HIPAA audit entry: who (user_email), what (endpoint+mrn), when (ts), where (ip)."""
     conn = _get_conn()
     try:
         with conn:
@@ -293,10 +294,10 @@ def write_audit_log(org_id: str | None, user_hash: str, endpoint: str,
                 cur.execute(
                     """
                     INSERT INTO audit_log
-                        (organization_id, user_hash, endpoint, method, status, ip)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                        (organization_id, user_email, endpoint, method, status, ip, mrn)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (org_id, user_hash, endpoint, method, status, ip),
+                    (org_id, user_email, endpoint, method, status, ip, mrn),
                 )
     finally:
         conn.close()

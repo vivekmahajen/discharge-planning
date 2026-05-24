@@ -31,14 +31,14 @@ class TestAuditLogMiddleware:
         assert "/api/summary" in log_text
         assert "PATIENT_SECRET_DATA" not in log_text
 
-    async def test_audit_entry_uses_hashed_user_id(
+    async def test_audit_entry_contains_user_email(
             self, authed_client, mock_claude, caplog):
-        """Audit log must use a hashed user ID, never the raw email address."""
+        """Audit log must record the actual user email for HIPAA user identification."""
         with caplog.at_level(logging.INFO, logger="hipaa.audit"):
             await authed_client.post("/api/summary/generate", json={
                 "clinicalNotes": "Test notes", "patientContext": {}})
         log_text = caplog.text
-        assert "test@example.com" not in log_text
+        assert "test@example.com" in log_text
 
     async def test_no_audit_for_public_endpoints(self, client, caplog):
         """Public endpoints (healthz, login page) must not produce audit entries."""
@@ -49,29 +49,31 @@ class TestAuditLogMiddleware:
 
     async def test_audit_entry_written_to_postgres_when_db_url_set(
             self, authed_client, mock_claude, monkeypatch):
-        """When DATABASE_URL is set, audit entries go to the audit_log table."""
+        """When DATABASE_URL is set, audit entries go to db.write_audit_log."""
         import web_app
-        written_entries = []
+        import db
+        calls = []
 
-        def fake_write_audit(entry):
-            written_entries.append(entry)
+        def fake_write_audit(org_id, user_email, endpoint, method, status, ip, mrn=None):
+            calls.append({
+                "org_id": org_id, "user_email": user_email, "endpoint": endpoint,
+                "method": method, "status": status, "ip": ip, "mrn": mrn,
+            })
 
         monkeypatch.setattr(web_app, "DATABASE_URL", "postgresql://fake")
-        monkeypatch.setattr(web_app, "_write_audit_entry", fake_write_audit)
+        monkeypatch.setattr(db, "write_audit_log", fake_write_audit)
 
         await authed_client.post("/api/summary/generate", json={
             "clinicalNotes": "Test notes", "patientContext": {}})
 
-        # Give asyncio.to_thread a moment to run the audit write
         import asyncio
         await asyncio.sleep(0.05)
 
-        assert len(written_entries) >= 1
-        entry = written_entries[0]
-        assert "endpoint" in entry
-        assert "user_hash" in entry
-        assert "status" in entry
-        assert "test@example.com" not in str(entry), "Raw email must not appear in audit entry"
+        assert len(calls) >= 1
+        entry = calls[0]
+        assert entry["user_email"] == "test@example.com"
+        assert entry["endpoint"] == "/api/summary/generate"
+        assert entry["status"] == 200
 
 
 class TestAuditLogValidation:
