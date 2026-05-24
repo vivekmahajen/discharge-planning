@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ward Barriers — Discharge Planning AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f4f8; color: #1e293b; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #1a56db, #1e3a8a);
+    color: #fff; padding: 0 24px; height: 56px;
+    display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .logo { font-size: 1.4rem; }
+  header h1 { font-size: 1rem; font-weight: 700; }
+  header p { font-size: 0.72rem; opacity: 0.75; }
+  .spacer { flex: 1; }
+  header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.82rem; padding: 6px 10px; border-radius: 6px; transition: background 0.15s; }
+  header a:hover { background: rgba(255,255,255,0.15); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+
+  .page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .page-header h2 { font-size: 1.5rem; font-weight: 700; flex: 1; }
+
+  .summary-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; }
+  .stat-card .label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px; }
+  .stat-card .value { font-size: 1.6rem; font-weight: 800; }
+  .stat-card.red .value { color: #dc2626; }
+  .stat-card.amber .value { color: #d97706; }
+  .stat-card.blue .value { color: #1a56db; }
+
+  .filters { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .filter-select { padding: 7px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #fff; }
+  .filter-select:focus { outline: none; border-color: #1a56db; }
+
+  .barrier-row {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px;
+    margin-bottom: 8px; display: flex; align-items: flex-start; gap: 14px;
+  }
+  .barrier-row.overdue { border-left: 3px solid #ef4444; }
+  .priority-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .p-high { background: #ef4444; } .p-medium { background: #f59e0b; } .p-low { background: #94a3b8; }
+  .barrier-info { flex: 1; }
+  .barrier-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .barrier-title { font-weight: 600; font-size: 0.9rem; }
+  .patient-link { font-size: 0.8rem; color: #1a56db; text-decoration: none; }
+  .patient-link:hover { text-decoration: underline; }
+  .barrier-desc { font-size: 0.8rem; color: #64748b; margin-top: 3px; }
+  .barrier-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .overdue-tag { color: #dc2626; font-weight: 600; }
+  .cat-tag { background: #f1f5f9; color: #475569; padding: 1px 7px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+  .empty { text-align: center; color: #94a3b8; padding: 60px 20px; font-size: 0.95rem; }
+  .loading { text-align: center; color: #94a3b8; padding: 40px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>Discharge Planning AI</h1>
+    <p>Ward Barriers</p>
+  </div>
+  <div class="spacer"></div>
+  <a href="/my-patients">My Patients</a>
+  <a href="/">← Planner</a>
+  <a href="/ward-barriers" style="background:rgba(255,255,255,0.15)">Barriers</a>
+  <a href="/post-acute-directory">Directory</a>
+  <a href="/settings">Settings</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<div class="container">
+  <div class="page-header">
+    <h2>Ward-Level Discharge Barriers</h2>
+    <button onclick="load()" style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:8px 14px;font-size:.85rem;cursor:pointer">↺ Refresh</button>
+  </div>
+
+  <div class="summary-row" id="summary-row">
+    <div class="stat-card red"><div class="label">Overdue</div><div class="value" id="stat-overdue">—</div></div>
+    <div class="stat-card amber"><div class="label">Open</div><div class="value" id="stat-open">—</div></div>
+    <div class="stat-card blue"><div class="label">Resolved Today</div><div class="value" id="stat-resolved">—</div></div>
+    <div class="stat-card"><div class="label">Total Patients</div><div class="value" id="stat-patients">—</div></div>
+  </div>
+
+  <div class="filters">
+    <select class="filter-select" id="filter-status" onchange="applyFilters()">
+      <option value="">All Statuses</option>
+      <option value="open" selected>Open</option>
+      <option value="in_progress">In Progress</option>
+      <option value="resolved">Resolved</option>
+    </select>
+    <select class="filter-select" id="filter-category" onchange="applyFilters()">
+      <option value="">All Categories</option>
+      <option value="clinical">Clinical</option>
+      <option value="authorization">Authorization</option>
+      <option value="placement">Placement</option>
+      <option value="social">Social</option>
+      <option value="documentation">Documentation</option>
+      <option value="other">Other</option>
+    </select>
+    <select class="filter-select" id="filter-priority" onchange="applyFilters()">
+      <option value="">All Priorities</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <label style="font-size:.82rem;display:flex;align-items:center;gap:6px;color:#475569">
+      <input type="checkbox" id="filter-overdue" onchange="applyFilters()" /> Overdue only
+    </label>
+  </div>
+
+  <div id="barrier-list"><div class="loading">Loading barriers…</div></div>
+</div>
+
+<script>
+let allBarriers = [];
+let allPatients = [];
+
+async function load() {
+  try {
+    const [pr, sr] = await Promise.all([
+      fetch('/api/patients'),
+      fetch('/api/milestones/ward-summary'),
+    ]);
+    if (pr.status === 401) { location.href = '/login'; return; }
+    const patData = pr.ok ? await pr.json() : {patients: []};
+    allPatients = patData.patients || [];
+
+    if (sr.ok) {
+      const sumData = await sr.json();
+      const s = sumData.summary || {};
+      document.getElementById('stat-overdue').textContent = s.overdue_count ?? '—';
+      document.getElementById('stat-open').textContent = s.open_count ?? '—';
+      document.getElementById('stat-resolved').textContent = s.resolved_today ?? '—';
+      document.getElementById('stat-patients').textContent = s.patients_with_barriers ?? '—';
+    }
+
+    // Load milestones for all patients
+    const milestonePromises = allPatients.map(p =>
+      fetch(`/api/patients/${p.id}/milestones`).then(r => r.ok ? r.json() : {milestones: []}).then(d => {
+        return (d.milestones || []).map(m => ({...m, _patient: p}));
+      }).catch(() => [])
+    );
+    const results = await Promise.all(milestonePromises);
+    allBarriers = results.flat();
+    applyFilters();
+  } catch(e) {
+    document.getElementById('barrier-list').innerHTML = `<div class="empty">Failed to load barriers: ${e.message}</div>`;
+  }
+}
+
+function applyFilters() {
+  const status = document.getElementById('filter-status').value;
+  const category = document.getElementById('filter-category').value;
+  const priority = document.getElementById('filter-priority').value;
+  const overdueOnly = document.getElementById('filter-overdue').checked;
+
+  let filtered = allBarriers;
+  if (status) filtered = filtered.filter(b => b.status === status);
+  if (category) filtered = filtered.filter(b => b.category === category);
+  if (priority) filtered = filtered.filter(b => b.priority === priority);
+  if (overdueOnly) filtered = filtered.filter(b => b.is_overdue);
+
+  // Sort: overdue first, then by priority
+  const pOrd = {high: 0, medium: 1, low: 2};
+  filtered.sort((a, b) => {
+    if (a.is_overdue !== b.is_overdue) return a.is_overdue ? -1 : 1;
+    return (pOrd[a.priority] ?? 1) - (pOrd[b.priority] ?? 1);
+  });
+
+  render(filtered);
+}
+
+function render(barriers) {
+  const el = document.getElementById('barrier-list');
+  if (!barriers.length) {
+    el.innerHTML = '<div class="empty">No barriers match the current filters.</div>';
+    return;
+  }
+  el.innerHTML = barriers.map(b => {
+    const p = b._patient || {};
+    const patName = p.patient_name || `MRN: ${p.mrn || '?'}`;
+    const dueStr = b.due_date ? new Date(b.due_date).toLocaleDateString() : null;
+    return `<div class="barrier-row ${b.is_overdue ? 'overdue' : ''}">
+      <div class="priority-dot p-${b.priority || 'medium'}"></div>
+      <div class="barrier-info">
+        <div class="barrier-title-row">
+          <span class="barrier-title">${(b.title || b.barrier_type).replace(/</g,'&lt;')}</span>
+          <a class="patient-link" href="/patients/${p.id}">${patName}</a>
+          <span class="cat-tag">${b.category || '—'}</span>
+          ${b.is_overdue ? '<span class="overdue-tag">⚠ Overdue</span>' : ''}
+        </div>
+        ${b.description ? `<div class="barrier-desc">${b.description.replace(/</g,'&lt;')}</div>` : ''}
+        <div class="barrier-meta">
+          <span>Status: ${b.status}</span>
+          ${b.assigned_to ? `<span>👤 ${b.assigned_to.split('@')[0]}</span>` : '<span>Unassigned</span>'}
+          ${dueStr ? `<span>Due: ${dueStr}</span>` : ''}
+          <span>${b.source === 'auto' ? '🤖 AI-detected' : '✏️ Manual'}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>

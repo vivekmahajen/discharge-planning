@@ -115,6 +115,48 @@
   .empty-run { text-align: center; color: #94a3b8; padding: 60px 20px; font-size: 0.95rem; }
 
   .toast { position: fixed; bottom: 24px; right: 24px; background: #16a34a; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 0.88rem; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+
+  .view-tabs { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; background: #fff; padding: 0 24px; }
+  .view-tab { padding: 12px 20px; font-size: 0.88rem; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; }
+  .view-tab.active { color: #1a56db; border-bottom-color: #1a56db; }
+  .view-tab:hover:not(.active) { color: #334155; }
+  .view-tab .tab-badge { display: inline-block; font-size: 0.7rem; font-weight: 700; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 6px; margin-left: 5px; }
+
+  .barrier-panel { flex: 1; overflow-y: auto; padding: 24px; background: #f8fafc; }
+  .barrier-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .barrier-toolbar h3 { font-size: 1.1rem; font-weight: 700; flex: 1; }
+  .btn-add-barrier { background: #1a56db; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+  .btn-add-barrier:hover { background: #1646b8; }
+
+  .barrier-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 12px; }
+  .barrier-item.resolved { opacity: 0.55; }
+  .barrier-check { flex-shrink: 0; margin-top: 2px; width: 18px; height: 18px; cursor: pointer; accent-color: #1a56db; }
+  .barrier-body { flex: 1; }
+  .barrier-title { font-weight: 600; font-size: 0.9rem; }
+  .barrier-title .priority-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .p-high { background: #ef4444; } .p-medium { background: #f59e0b; } .p-low { background: #94a3b8; }
+  .barrier-desc { font-size: 0.8rem; color: #64748b; margin-top: 3px; }
+  .barrier-meta { font-size: 0.75rem; color: #94a3b8; margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .barrier-meta .overdue { color: #ef4444; font-weight: 600; }
+  .barrier-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+  .btn-barrier { font-size: 0.75rem; padding: 4px 10px; border-radius: 5px; border: 1px solid #e2e8f0; background: #f8fafc; cursor: pointer; color: #475569; }
+  .btn-barrier:hover { border-color: #94a3b8; background: #fff; }
+  .btn-barrier.resolve { border-color: #16a34a; color: #16a34a; }
+  .btn-barrier.resolve:hover { background: #dcfce7; }
+  .btn-barrier.delete { border-color: #fca5a5; color: #dc2626; }
+  .btn-barrier.delete:hover { background: #fee2e2; }
+  .barriers-empty { text-align: center; color: #94a3b8; padding: 60px 20px; font-size: 0.95rem; }
+
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: #fff; border-radius: 12px; padding: 24px; width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+  .modal h4 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
+  .modal label { font-size: 0.78rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; display: block; margin-bottom: 4px; margin-top: 12px; }
+  .modal input, .modal select, .modal textarea { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.88rem; font-family: inherit; }
+  .modal input:focus, .modal select:focus, .modal textarea:focus { outline: none; border-color: #1a56db; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .btn-cancel { background: #f1f5f9; color: #475569; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.85rem; cursor: pointer; }
+  .btn-save { background: #1a56db; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -125,6 +167,7 @@
   <div class="spacer"></div>
   <a href="/my-patients">My Patients</a>
   <a href="/">← Planner</a>
+  <a href="/ward-barriers">Barriers <span id="nav-overdue-badge" style="display:none;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;border-radius:999px;padding:1px 5px;margin-left:2px"></span></a>
   <a href="/post-acute-directory">Directory</a>
   <a href="/api/auth/logout">Sign Out</a>
 </header>
@@ -143,8 +186,13 @@
   </select>
 </div>
 
+<div class="view-tabs">
+  <button class="view-tab active" id="tab-barriers" onclick="switchView('barriers')">Discharge Barriers <span class="tab-badge" id="barriers-overdue-badge" style="display:none"></span></button>
+  <button class="view-tab" id="tab-plan" onclick="switchView('plan')">Plan Runs</button>
+</div>
+
 <div class="layout">
-  <div class="sidebar">
+  <div class="sidebar" id="plan-sidebar" style="display:none">
     <div class="sidebar-section">
       <h3>Plan History</h3>
       <div id="run-list"></div>
@@ -163,8 +211,41 @@
     </div>
   </div>
 
-  <div class="main-panel" id="main-panel">
+  <div class="main-panel" id="main-panel" style="display:none">
     <div class="empty-run">Select a plan run from the left to view details.</div>
+  </div>
+
+  <div class="barrier-panel" id="barrier-panel">
+    <div class="barrier-toolbar">
+      <h3>Discharge Barriers</h3>
+      <button class="btn-add-barrier" onclick="openAddBarrier()">+ Add Barrier</button>
+    </div>
+    <div id="barrier-list"><div class="barriers-empty">Loading barriers…</div></div>
+  </div>
+</div>
+
+<!-- Add Barrier Modal -->
+<div class="modal-overlay" id="barrier-modal">
+  <div class="modal">
+    <h4>Add Discharge Barrier</h4>
+    <label>Type</label>
+    <select id="b-type"></select>
+    <label>Description</label>
+    <textarea id="b-desc" rows="2" placeholder="Details (optional)"></textarea>
+    <label>Priority</label>
+    <select id="b-priority">
+      <option value="high">High</option>
+      <option value="medium" selected>Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <label>Assigned To (email)</label>
+    <input type="text" id="b-assigned" placeholder="clinician@hospital.org" />
+    <label>Due Date</label>
+    <input type="datetime-local" id="b-due" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeBarrierModal()">Cancel</button>
+      <button class="btn-save" onclick="saveBarrier()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -410,7 +491,149 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 3000);
 }
 
-load();
+// ── View switching ────────────────────────────────────────────────────────────
+let currentView = 'barriers';
+function switchView(view) {
+  currentView = view;
+  document.getElementById('tab-barriers').classList.toggle('active', view === 'barriers');
+  document.getElementById('tab-plan').classList.toggle('active', view === 'plan');
+  document.getElementById('plan-sidebar').style.display = view === 'plan' ? '' : 'none';
+  document.getElementById('main-panel').style.display = view === 'plan' ? '' : 'none';
+  document.getElementById('barrier-panel').style.display = view === 'barriers' ? '' : 'none';
+  if (view === 'barriers') loadBarriers();
+}
+
+// ── Barriers ─────────────────────────────────────────────────────────────────
+let barriers = [];
+let barrierCatalog = [];
+
+async function loadCatalog() {
+  try {
+    const r = await fetch('/api/milestones/catalog');
+    if (r.ok) { const d = await r.json(); barrierCatalog = d.catalog || []; }
+  } catch(e) {}
+  const sel = document.getElementById('b-type');
+  sel.innerHTML = barrierCatalog.map(c => `<option value="${c.barrier_type}">${c.label}</option>`).join('');
+}
+
+async function loadBarriers() {
+  try {
+    const r = await fetch(`/api/patients/${patientId}/milestones`);
+    if (!r.ok) { document.getElementById('barrier-list').innerHTML = '<div class="barriers-empty">Could not load barriers.</div>'; return; }
+    const d = await r.json();
+    barriers = d.milestones || [];
+    renderBarriers();
+    updateBarrierBadge();
+  } catch(e) {
+    document.getElementById('barrier-list').innerHTML = '<div class="barriers-empty">Error loading barriers.</div>';
+  }
+}
+
+function renderBarriers() {
+  const el = document.getElementById('barrier-list');
+  if (!barriers.length) { el.innerHTML = '<div class="barriers-empty">No discharge barriers tracked for this patient yet.</div>'; return; }
+  const open = barriers.filter(b => b.status === 'open');
+  const resolved = barriers.filter(b => b.status !== 'open');
+  const renderItem = (b) => {
+    const isOverdue = b.is_overdue;
+    const dueStr = b.due_date ? new Date(b.due_date).toLocaleDateString() : null;
+    return `<div class="barrier-item ${b.status !== 'open' ? 'resolved' : ''}" id="barrier-${b.id}">
+      <input type="checkbox" class="barrier-check" ${b.status !== 'open' ? 'checked' : ''}
+        onchange="toggleBarrier(${b.id}, this.checked)" title="Mark resolved">
+      <div class="barrier-body">
+        <div class="barrier-title">
+          <span class="priority-dot p-${b.priority||'medium'}"></span>${b.label || b.barrier_type}
+        </div>
+        ${b.description ? `<div class="barrier-desc">${b.description.replace(/</g,'&lt;')}</div>` : ''}
+        <div class="barrier-meta">
+          <span>${b.category || '—'}</span>
+          ${b.assigned_to ? `<span>👤 ${b.assigned_to.split('@')[0]}</span>` : ''}
+          ${dueStr ? `<span ${isOverdue ? 'class="overdue"' : ''}>Due: ${dueStr}${isOverdue ? ' ⚠ Overdue' : ''}</span>` : ''}
+          <span style="color:#94a3b8">${b.source === 'auto' || b.source === 'ai_extracted' ? '🤖 AI' : '✏️ Manual'}</span>
+        </div>
+      </div>
+      <div class="barrier-actions">
+        ${b.status === 'open' ? `<button class="btn-barrier resolve" onclick="toggleBarrier(${b.id}, true)">Resolve</button>` : `<button class="btn-barrier" onclick="toggleBarrier(${b.id}, false)">Reopen</button>`}
+        <button class="btn-barrier delete" onclick="deleteBarrier(${b.id})">Delete</button>
+      </div>
+    </div>`;
+  };
+  el.innerHTML = (open.map(renderItem).join('')) + (resolved.length ? `<details style="margin-top:8px"><summary style="font-size:.82rem;color:#94a3b8;cursor:pointer;margin-bottom:8px">${resolved.length} resolved</summary>${resolved.map(renderItem).join('')}</details>` : '');
+}
+
+function updateBarrierBadge() {
+  const overdue = barriers.filter(b => b.status === 'open' && b.is_overdue).length;
+  const badge = document.getElementById('barriers-overdue-badge');
+  if (overdue > 0) { badge.textContent = overdue + ' overdue'; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
+async function toggleBarrier(id, resolve) {
+  const newStatus = resolve ? 'resolved' : 'open';
+  try {
+    const r = await fetch(`/api/patients/${patientId}/milestones/${id}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({status: newStatus})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await loadBarriers();
+    showToast(resolve ? 'Barrier resolved' : 'Barrier reopened');
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function deleteBarrier(id) {
+  if (!confirm('Delete this barrier?')) return;
+  try {
+    const r = await fetch(`/api/patients/${patientId}/milestones/${id}`, {method:'DELETE'});
+    if (!r.ok) throw new Error(await r.text());
+    await loadBarriers();
+    showToast('Barrier deleted');
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+function openAddBarrier() {
+  document.getElementById('b-desc').value = '';
+  document.getElementById('b-assigned').value = '';
+  document.getElementById('b-due').value = '';
+  document.getElementById('barrier-modal').classList.add('open');
+}
+
+function closeBarrierModal() {
+  document.getElementById('barrier-modal').classList.remove('open');
+}
+
+async function saveBarrier() {
+  const btype = document.getElementById('b-type').value;
+  const desc = document.getElementById('b-desc').value.trim();
+  const priority = document.getElementById('b-priority').value;
+  const assigned = document.getElementById('b-assigned').value.trim();
+  const due = document.getElementById('b-due').value;
+  const cat = barrierCatalog.find(c => c.barrier_type === btype);
+  try {
+    const r = await fetch(`/api/patients/${patientId}/milestones`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        barrier_type: btype,
+        description: desc,
+        category: cat ? cat.category : 'other',
+        priority,
+        assigned_to: assigned || null,
+        due_date: due || null,
+      })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    closeBarrierModal();
+    await loadBarriers();
+    showToast('Barrier added');
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function init() {
+  await load();
+  await Promise.all([loadCatalog(), loadBarriers()]);
+}
+
+init();
 </script>
 </body>
 </html>
