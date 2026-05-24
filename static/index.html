@@ -342,6 +342,7 @@
     <p>Multi-Agent Clinical Decision Support &nbsp;·&nbsp; All outputs require clinician review before action</p>
   </div>
   <div class="spacer"></div>
+  <a href="/my-patients" class="signout-btn">My Patients</a>
   <a href="/predictive-discharge" class="signout-btn">Predict LOS</a>
   <a href="/discharge-summary-generator" class="signout-btn">Summary Tool</a>
   <a href="/teachback-checklist" class="signout-btn">Teach-back</a>
@@ -890,6 +891,12 @@ function handleEvent(event) {
       showReport(event.output);
       break;
 
+    case 'patient_record':
+      showSaveConfirmation(event.data);
+      break;
+    case 'warning':
+      showWarningBanner(event.data && event.data.message ? event.data.message : String(event.data));
+      break;
     case 'error':
       document.getElementById('errorMsg').textContent = 'Error: ' + event.message;
       document.getElementById('generateBtn').disabled = false;
@@ -976,6 +983,67 @@ async function loadFhirPatient(patientId) {
     errEl.textContent = 'FHIR load error: ' + e.message;
   }
 }
+
+function showSaveConfirmation(data) {
+  try {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#16a34a;color:#fff;padding:12px 20px;border-radius:8px;font-size:0.88rem;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+    const pid = data.patient_id || '';
+    const run = data.run_number || data.run_id || '';
+    toast.innerHTML = `✓ Plan saved · Run #${run} · <a href="/patients/${pid}" style="color:#bbf7d0;text-decoration:underline;">View patient history →</a>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 8000);
+  } catch(e) {}
+}
+
+function showWarningBanner(message) {
+  try {
+    const el = document.getElementById('warning-banner') || document.createElement('div');
+    el.id = 'warning-banner';
+    el.style.cssText = 'background:#fef3cd;border:1px solid #f59e0b;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:0.85rem;color:#92400e;';
+    el.textContent = '⚠ ' + message;
+    if (!document.getElementById('warning-banner')) {
+      const container = document.querySelector('.progress-panel') || document.body;
+      container.insertBefore(el, container.firstChild);
+    }
+  } catch(e) {}
+}
+
+function populateForm(data) {
+  const fields = ['patient_name','mrn','age','gender','admission_date','expected_discharge_date',
+    'attending_physician','primary_diagnosis','secondary_diagnoses','additional_clinical_notes',
+    'primary_insurance','secondary_insurance','medicare_part_a','snf_days_used',
+    'admission_medications','inpatient_medications','discharge_medications',
+    'pt_evaluation','ot_evaluation','st_evaluation','living_situation','housing_type',
+    'bedroom_location','caregiver','primary_language','transportation',
+    'patient_family_preference','physician_goals','additional_notes'];
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && data[id] !== undefined && data[id] !== null) {
+      el.value = data[id];
+    }
+  });
+}
+
+// Pre-fill from My Patients sessionStorage
+(function() {
+  try {
+    const raw = sessionStorage.getItem('prefill_patient');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    sessionStorage.removeItem('prefill_patient');
+    if (data.patient_data) populateForm(data.patient_data);
+    // Show prefill banner
+    const banner = document.createElement('div');
+    banner.id = 'prefill-banner';
+    banner.style.cssText = 'background:#dbeafe;border:1px solid #93c5fd;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;font-size:0.88rem;';
+    const name = data.patient_name || data.mrn || 'patient';
+    const runN = (data.run_count || 0) + 1;
+    banner.innerHTML = `<span>📋 Continuing plan for <strong>${name}</strong> · Run #${runN}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#64748b;">×</button>`;
+    const card = document.querySelector('.form-card') || document.querySelector('form');
+    if (card) card.insertBefore(banner, card.firstChild);
+  } catch(e) {}
+})();
 
 // On page load — check if returning from FHIR OAuth
 (async () => {
