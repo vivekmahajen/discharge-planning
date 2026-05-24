@@ -354,6 +354,7 @@
   <a href="/imm-prompt-system" class="signout-btn">IMM</a>
   <a href="/multilingual-prompt-system" class="signout-btn">Multilingual</a>
   <a href="/post-acute-directory" class="signout-btn">Facilities</a>
+  <a href="/ward-barriers" class="signout-btn">Barriers <span id="nav-overdue-badge" style="display:none;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;border-radius:999px;padding:1px 5px;margin-left:2px"></span></a>
   <a href="/settings" class="signout-btn">Settings</a>
   <a href="/api/auth/logout" class="signout-btn">Sign Out</a>
 </header>
@@ -658,6 +659,19 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:.82rem" id="elig-details"></div>
   </div>
 
+  <!-- Barriers card (shown when barriers_detected SSE event arrives) -->
+  <div id="barriersBanner" style="display:none;border-radius:10px;padding:16px 20px;margin-top:16px;border:1px solid #fde68a;background:#fffbeb;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:1.3rem">⚠️</span>
+      <div style="flex:1">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#92400e">Discharge Barriers Detected</div>
+        <div style="font-size:.95rem;font-weight:700;color:#78350f" id="barriers-summary">—</div>
+      </div>
+      <a id="barriers-view-link" href="#" style="font-size:.8rem;color:#1a56db;text-decoration:none;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;background:#eff6ff">View All →</a>
+    </div>
+    <div id="barriers-list" style="display:flex;flex-direction:column;gap:6px;font-size:.82rem"></div>
+  </div>
+
   <!-- Progress panel -->
   <div class="progress-panel" id="progressPanel">
     <h2>🔄 Running Specialist Agents in Parallel…</h2>
@@ -938,6 +952,10 @@ function handleEvent(event) {
       renderEligibilityCard(event.data);
       break;
 
+    case 'barriers_detected':
+      renderBarriersCard(event);
+      break;
+
     case 'patient_record':
       showSaveConfirmation(event.data);
       break;
@@ -1125,12 +1143,39 @@ async function loadFhirPatient(patientId) {
   }
 }
 
+function renderBarriersCard(event) {
+  const count = event.count || 0;
+  const barriers = event.barriers || [];
+  const banner = document.getElementById('barriersBanner');
+  const summaryEl = document.getElementById('barriers-summary');
+  const listEl = document.getElementById('barriers-list');
+  const link = document.getElementById('barriers-view-link');
+  if (count === 0) { banner.style.display = 'none'; return; }
+  summaryEl.textContent = `${count} barrier${count > 1 ? 's' : ''} identified and tracked`;
+  const top = barriers.slice(0, 3);
+  listEl.innerHTML = top.map(b => {
+    const priorityColor = b.priority === 'high' ? '#dc2626' : b.priority === 'medium' ? '#d97706' : '#64748b';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border-radius:6px;border:1px solid #fde68a">
+      <span style="width:8px;height:8px;border-radius:50%;background:${priorityColor};flex-shrink:0;display:inline-block"></span>
+      <span style="font-weight:600">${(b.title || b.barrier_type).replace(/</g,'&lt;')}</span>
+      <span style="color:#92400e;font-size:.75rem;margin-left:auto">${b.category || ''}</span>
+    </div>`;
+  }).join('');
+  if (count > 3) {
+    listEl.innerHTML += `<div style="font-size:.78rem;color:#92400e;padding:4px 10px">+ ${count - 3} more…</div>`;
+  }
+  const patientId = window._lastSavedPatientId;
+  if (patientId) link.href = `/patients/${patientId}`;
+  banner.style.display = '';
+}
+
 function showSaveConfirmation(data) {
   try {
+    const pid = data.patient_id || '';
+    window._lastSavedPatientId = pid;
+    const run = data.run_number || data.run_id || '';
     const toast = document.createElement('div');
     toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#16a34a;color:#fff;padding:12px 20px;border-radius:8px;font-size:0.88rem;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
-    const pid = data.patient_id || '';
-    const run = data.run_number || data.run_id || '';
     toast.innerHTML = `✓ Plan saved · Run #${run} · <a href="/patients/${pid}" style="color:#bbf7d0;text-decoration:underline;">View patient history →</a>`;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 8000);

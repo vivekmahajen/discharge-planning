@@ -99,6 +99,26 @@ try:
 except Exception:
     pass
 
+# Milestones / barrier tracking (imported lazily)
+_MILESTONES_AVAILABLE = False
+try:
+    from db.milestones import (
+        run_milestone_migrations as _run_milestone_migrations,
+        create_milestone as _create_milestone,
+        get_milestones_for_patient as _get_milestones_for_patient,
+        get_open_milestone_count as _get_open_milestone_count,
+        get_org_milestone_summary as _get_org_milestone_summary,
+        update_milestone as _update_milestone,
+        bulk_create_milestones as _bulk_create_milestones,
+        get_milestone_by_id as _get_milestone_by_id,
+        delete_milestone as _delete_milestone,
+    )
+    from db.milestones_catalog import BARRIER_CATALOG as _BARRIER_CATALOG
+    from agents.barrier_extraction import BarrierExtractionAgent as _BarrierExtractionAgent
+    _MILESTONES_AVAILABLE = True
+except Exception:
+    pass
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent
@@ -531,6 +551,11 @@ async def startup():
             run_migrations()
         except Exception as _e:
             logging.getLogger(__name__).warning("Patient migrations failed: %s", _e)
+    if DATABASE_URL and _MILESTONES_AVAILABLE:
+        try:
+            _run_milestone_migrations()
+        except Exception as _e:
+            logging.getLogger(__name__).warning("Milestone migrations failed: %s", _e)
     if DATABASE_URL and _DIRECTORY_DB_AVAILABLE:
         try:
             run_directory_migrations()
@@ -1532,6 +1557,7 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
     request.state.audit_mrn = patient_data.get("mrn") or None
     async def _stream_with_tcm():
         coordinator_output: str | None = None
+        _agent_outputs: dict = {}
         # Make a mutable copy so we can enrich with nearby facilities
         _patient_data = dict(patient_data)
         mrn = _patient_data.get("mrn", "").strip()
@@ -1583,10 +1609,11 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
                 if etype == "agent_start":
                     agent_start_times[event_data.get("agent", "")] = time.time()
                 elif etype == "agent_complete":
+                    aname = event_data.get("agent", "")
+                    _agent_outputs[aname] = event_data.get("output", "")
                     if run_id and _PATIENT_DB_AVAILABLE:
                         try:
                             from db.patients import save_agent_output
-                            aname = event_data.get("agent", "")
                             dur = int((time.time() - agent_start_times.get(aname, time.time())) * 1000)
                             await asyncio.to_thread(save_agent_output, run_id, aname, event_data.get("output", ""), dur)
                         except Exception:
@@ -1617,6 +1644,27 @@ async def create_plan(request: Request, patient_data: dict[str, Any] = Body(defa
                 yield f"data: {json.dumps({'type': 'tcm_episode_created', **tcm_result})}\n\n"
             else:
                 yield f"data: {json.dumps({'type': 'tcm_not_applicable'})}\n\n"
+
+        if patient_id and _MILESTONES_AVAILABLE and coordinator_output is not None:
+            try:
+                import anthropic as _anthropic
+                _api_key = os.getenv("ANTHROPIC_API_KEY")
+                _anthro_client = _anthropic.Anthropic(api_key=_api_key) if _api_key else None
+                if _anthro_client is None:
+                    raise RuntimeError("ANTHROPIC_API_KEY not set")
+                agent = _BarrierExtractionAgent(_anthro_client)
+                barriers = await agent.run(coordinator_output, _agent_outputs, _patient_data)
+                if barriers:
+                    _org_domain = ctx.email.split("@")[-1] if "@" in ctx.email else ""
+                    created_rows = await asyncio.to_thread(
+                        _bulk_create_milestones,
+                        patient_id, _org_domain, barriers, ctx.email, run_id
+                    )
+                    yield f"data: {json.dumps({'type': 'barriers_detected', 'count': len(created_rows), 'barriers': barriers})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'barriers_detected', 'count': 0, 'barriers': []})}\n\n"
+            except Exception as _be:
+                logging.getLogger(__name__).warning("Barrier extraction failed: %s", _be)
 
     return StreamingResponse(
         _stream_with_tcm(),
@@ -2109,6 +2157,195 @@ async def get_settings(request: Request, ctx: OrgContext = Depends(get_current_o
         "directory_available": _DIRECTORY_DB_AVAILABLE,
         "eligibility_service_available": _ELIGIBILITY_AVAILABLE,
     })
+
+
+# ── Discharge Milestone / Barrier Tracking API ───────────────────────────────
+
+@app.get("/ward-barriers", response_class=HTMLResponse)
+async def ward_barriers_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "ward-barriers.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/milestones/catalog")
+@limiter.limit("120/hour")
+async def get_milestone_catalog(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not _MILESTONES_AVAILABLE:
+        return JSONResponse({"catalog": [], "categories": {}})
+    from db.milestones_catalog import BARRIER_CATALOG, BARRIER_CATEGORIES
+    catalog = [
+        {"barrier_type": k, **{f: v for f, v in info.items() if f != "auto_detect_keywords"}}
+        for k, info in BARRIER_CATALOG.items()
+    ]
+    return JSONResponse({"catalog": catalog, "categories": BARRIER_CATEGORIES})
+
+
+@app.get("/api/milestones/ward-summary")
+@limiter.limit("60/hour")
+async def ward_milestone_summary(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        return JSONResponse({"summary": {}})
+    try:
+        from db.patients import get_org_domain
+        org_domain = get_org_domain(ctx.email)
+        raw = await asyncio.to_thread(_get_org_milestone_summary, org_domain)
+        summary = {
+            "open_count": raw.get("total_open", 0),
+            "overdue_count": raw.get("overdue", 0),
+            "resolved_today": raw.get("resolved_today", 0),
+            "patients_with_barriers": len(raw.get("by_patient", [])),
+            "by_category": raw.get("by_category", {}),
+            "by_patient": raw.get("by_patient", []),
+        }
+        return JSONResponse({"summary": summary})
+    except Exception as e:
+        return JSONResponse({"summary": {}, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/patients/{patient_id}/milestones/summary")
+@limiter.limit("120/hour")
+async def patient_milestone_summary(
+    request: Request, patient_id: int,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        return JSONResponse({"open": 0, "overdue": 0})
+    try:
+        from db.patients import get_patient_detail, get_org_domain
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        counts = await asyncio.to_thread(_get_open_milestone_count, patient_id, org_domain)
+        return JSONResponse({"open": counts["total_open"], "overdue": counts["overdue"]})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"open": 0, "overdue": 0, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/patients/{patient_id}/milestones")
+@limiter.limit("120/hour")
+async def list_patient_milestones(
+    request: Request, patient_id: int,
+    include_resolved: bool = False,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        return JSONResponse({"milestones": []})
+    try:
+        from db.patients import get_patient_detail, get_org_domain
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        milestones = await asyncio.to_thread(
+            _get_milestones_for_patient, patient_id, org_domain, include_resolved
+        )
+        return JSONResponse({"milestones": milestones, "total": len(milestones)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"milestones": [], "error": str(e)}, status_code=500)
+
+
+@app.post("/api/patients/{patient_id}/milestones")
+@limiter.limit("60/hour")
+async def create_patient_milestone(
+    request: Request, patient_id: int,
+    body: dict = Body(default={}),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Milestone service not available")
+    try:
+        from db.patients import get_patient_detail, get_org_domain
+        from datetime import datetime as _dt_cls
+        org_domain = get_org_domain(ctx.email)
+        patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        due_date_raw = body.get("due_date")
+        due_date = _dt_cls.fromisoformat(due_date_raw) if due_date_raw else None
+        milestone = await asyncio.to_thread(
+            _create_milestone,
+            patient_id, org_domain,
+            body.get("barrier_type", "custom"),
+            ctx.email,
+            body.get("description", ""),
+            body.get("priority", "medium"),
+            body.get("assigned_to"),
+            due_date,
+            "manual",
+        )
+        result = dict(milestone) if not isinstance(milestone, dict) else milestone
+        return JSONResponse({"milestone": result}, status_code=201)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.patch("/api/patients/{patient_id}/milestones/{milestone_id}")
+@limiter.limit("120/hour")
+async def update_patient_milestone(
+    request: Request, patient_id: int, milestone_id: int,
+    body: dict = Body(default={}),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Milestone service not available")
+    try:
+        from db.patients import get_org_domain
+        from datetime import datetime as _dt_cls
+        org_domain = get_org_domain(ctx.email)
+        existing = await asyncio.to_thread(_get_milestone_by_id, milestone_id, org_domain)
+        if not existing or existing["patient_id"] != patient_id:
+            raise HTTPException(status_code=404, detail="Milestone not found")
+        due_date_raw = body.get("due_date")
+        due_date = _dt_cls.fromisoformat(due_date_raw) if due_date_raw else None
+        updated = await asyncio.to_thread(
+            _update_milestone,
+            milestone_id, org_domain, ctx.email,
+            body.get("status"),
+            body.get("priority"),
+            body.get("assigned_to"),
+            due_date,
+            body.get("notes"),
+            body.get("dismiss_reason"),
+        )
+        return JSONResponse({"milestone": updated})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/patients/{patient_id}/milestones/{milestone_id}")
+@limiter.limit("60/hour")
+async def delete_patient_milestone(
+    request: Request, patient_id: int, milestone_id: int,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _MILESTONES_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Milestone service not available")
+    try:
+        from db.patients import get_org_domain
+        org_domain = get_org_domain(ctx.email)
+        existing = await asyncio.to_thread(_get_milestone_by_id, milestone_id, org_domain)
+        if not existing or existing["patient_id"] != patient_id:
+            raise HTTPException(status_code=404, detail="Milestone not found")
+        deleted = await asyncio.to_thread(_delete_milestone, milestone_id, org_domain, ctx.email)
+        if not deleted:
+            raise HTTPException(status_code=403, detail="Cannot delete AI-detected barriers; use dismiss instead")
+        return JSONResponse({"success": True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ── Legacy Epic SMART launch (kept for backward-compatibility) ────────────────

@@ -208,9 +208,11 @@ def get_patients_for_org(org_domain: str, limit: int = 100) -> list[dict]:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT p.*,
-                        COUNT(r.id) as total_runs,
+                        COUNT(DISTINCT r.id) as total_runs,
                         MAX(r.completed_at) as last_run_at,
-                        (SELECT r2.run_by FROM plan_runs r2 WHERE r2.patient_id = p.id ORDER BY r2.started_at DESC LIMIT 1) as last_run_by
+                        (SELECT r2.run_by FROM plan_runs r2 WHERE r2.patient_id = p.id ORDER BY r2.started_at DESC LIMIT 1) as last_run_by,
+                        COALESCE((SELECT COUNT(*) FROM discharge_milestones m WHERE m.patient_id = p.id AND m.status = 'open'), 0) as open_milestone_count,
+                        COALESCE((SELECT COUNT(*) FROM discharge_milestones m WHERE m.patient_id = p.id AND m.status = 'open' AND m.due_date IS NOT NULL AND m.due_date < NOW()), 0) as overdue_milestone_count
                     FROM patients p
                     LEFT JOIN plan_runs r ON r.patient_id = p.id
                     WHERE p.org_domain = %s

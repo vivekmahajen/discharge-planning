@@ -193,11 +193,9 @@
   <div class="spacer"></div>
   <a href="/my-patients">My Patients</a>
   <a href="/">← Planner</a>
+  <a href="/ward-barriers">Barriers <span id="nav-overdue-badge" style="display:none;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;border-radius:999px;padding:1px 5px;margin-left:2px"></span></a>
   <a href="/discharge-summary-generator">Summary</a>
-  <a href="/teachback-checklist">Teach-back</a>
   <a href="/hrrp-flagging">HRRP</a>
-  <a href="/roi-tracker">ROI</a>
-  <a href="/readmission-tracker">Tracker</a>
   <a href="/predictive-discharge">Predict LOS</a>
   <a href="/post-acute-directory">Directory</a>
   <a href="/api/auth/logout">Sign Out</a>
@@ -280,11 +278,16 @@ function renderCard(p) {
   const lastBy = p.last_run_by ? ` by ${p.last_run_by.split('@')[0]}` : '';
   const lastAt = p.last_run_at ? timeAgo(p.last_run_at) : 'no runs yet';
   const admDate = p.admission_date ? new Date(p.admission_date).toLocaleDateString() : '—';
+  const openBarriers = p.open_milestone_count || 0;
+  const overdueBarriers = p.overdue_milestone_count || 0;
+  const barrierBadge = openBarriers > 0
+    ? `<span style="display:inline-block;font-size:0.72rem;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:6px;${overdueBarriers > 0 ? 'background:#fee2e2;color:#dc2626' : 'background:#fef3c7;color:#d97706'}">${overdueBarriers > 0 ? `⚠ ${overdueBarriers} overdue` : `${openBarriers} barrier${openBarriers>1?'s':''}`}</span>`
+    : '';
 
   return `<div class="patient-card" data-status="${p.status}" data-id="${p.id}">
     <div class="status-dot dot-${p.status}"></div>
     <div class="patient-info">
-      <div class="patient-name">${name} &nbsp; ${statusBadge(p.status)}</div>
+      <div class="patient-name">${name} &nbsp; ${statusBadge(p.status)}${barrierBadge}</div>
       <div class="patient-meta">MRN: ${p.mrn} · Admitted: ${admDate}${diag ? ' · ' + diag : ''}</div>
       <div class="patient-activity">${runs} plan run${runs !== 1 ? 's' : ''} · Last: ${lastAt}${lastBy}</div>
     </div>
@@ -385,7 +388,20 @@ document.getElementById('search-input').addEventListener('input', e => {
   searchTimer = setTimeout(() => loadPatients(q), 400);
 });
 
+async function loadWardOverdueBadge() {
+  try {
+    const r = await fetch('/api/milestones/ward-summary');
+    if (!r.ok) return;
+    const d = await r.json();
+    const summary = d.summary || {};
+    const overdue = summary.overdue_count || 0;
+    const badge = document.getElementById('nav-overdue-badge');
+    if (badge && overdue > 0) { badge.textContent = overdue; badge.style.display = ''; }
+  } catch(e) {}
+}
+
 loadPatients();
+loadWardOverdueBadge();
 </script>
 </body>
 </html>
