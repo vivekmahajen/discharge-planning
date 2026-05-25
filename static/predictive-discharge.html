@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00529B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DischargePlan" />
+  <link rel="stylesheet" href="/static/mobile.css" />
 <title>Predictive Discharge Date · Discharge Planning AI</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -317,7 +325,7 @@
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-primary" id="predictBtn" onclick="runPrediction()">
+      <button class="btn btn-primary" id="predictBtn" onclick="runPrediction()" data-requires-network="true">
         🔮 Predict Discharge Date
       </button>
       <button class="btn btn-sample" onclick="loadSample()">⚡ Load Sample Patient</button>
@@ -582,5 +590,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admission_date').value = new Date().toISOString().slice(0, 10);
 });
 </script>
+  <script src="/static/pwa.js" defer></script>
 </body>
 </html>

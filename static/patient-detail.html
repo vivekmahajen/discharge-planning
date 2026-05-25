@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00529B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DischargePlan" />
+  <link rel="stylesheet" href="/static/mobile.css" />
 <title>Patient Detail — Discharge Planning AI</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -289,11 +297,16 @@ async function load() {
     ]);
     if (pr.status === 401 || mr.status === 401) { location.href = '/login'; return; }
     if (!pr.ok) { document.querySelector('.layout').innerHTML = '<div style="padding:40px;color:#ef4444">Patient not found.</div>'; return; }
+    if (pr.headers && pr.headers.get('x-sw-offline') === '1') {
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div style="position:fixed;top:0;left:0;right:0;background:#b34000;color:#fff;padding:8px 16px;text-align:center;font-size:13px;z-index:99999;">&#x1F4F5; Showing cached record &mdash; you are offline. AI generation unavailable.</div>');
+    }
     const data = await pr.json();
     patient = data.patient;
     const meData = await mr.json();
     myEmail = meData.email;
     render();
+    if (window.PwaUtils) window.PwaUtils.prefetchPatientForOffline(patientId);
   } catch(e) {
     document.querySelector('.layout').innerHTML = '<div style="padding:40px;color:#ef4444">Failed to load patient data.</div>';
   }
@@ -635,5 +648,6 @@ async function init() {
 
 init();
 </script>
+  <script src="/static/pwa.js" defer></script>
 </body>
 </html>
