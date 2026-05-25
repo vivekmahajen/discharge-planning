@@ -60,6 +60,7 @@ def upsert_org_roi_settings(org_domain: str, settings: dict) -> dict:
     allowed = {
         "hospital_type", "cost_per_day", "hospital_name",
         "license_beds", "annual_discharges", "fiscal_year_start",
+        "platform_subscription_monthly",
     }
     filtered = {k: v for k, v in settings.items() if k in allowed}
     if not filtered:

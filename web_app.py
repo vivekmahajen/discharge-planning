@@ -2468,6 +2468,189 @@ async def export_roi_csv(
     )
 
 
+# ── Pilot Programme & TCM ROI Calculator routes ──────────────────────────────
+
+@app.get("/tcm-roi-calculator", response_class=HTMLResponse)
+async def tcm_roi_calculator_page(request: Request):
+    with open(STATIC_DIR / "tcm-roi-calculator.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/pilot", response_class=HTMLResponse)
+async def pilot_page_route(request: Request):
+    with open(STATIC_DIR / "pilot.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/pilot/spots")
+async def pilot_spots(request: Request):
+    if not DATABASE_URL:
+        return JSONResponse({"total_spots": 5, "confirmed_pilots": 0, "remaining": 5})
+    try:
+        from db.connection import get_db_conn as _gdc
+        conn = _gdc()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS n FROM pilot_applications WHERE status = 'confirmed'")
+                    confirmed = cur.fetchone()["n"] or 0
+        finally:
+            conn.close()
+        remaining = max(0, 5 - confirmed)
+        return JSONResponse({"total_spots": 5, "confirmed_pilots": confirmed, "remaining": remaining})
+    except Exception as _e:
+        return JSONResponse({"total_spots": 5, "confirmed_pilots": 0, "remaining": 5})
+
+
+@app.post("/api/pilot/apply")
+@limiter.limit("3/hour")
+async def pilot_apply(request: Request, body: dict = Body(default={})):
+    hospital_name = (body.get("hospital_name") or "").strip()
+    applicant_name = (body.get("applicant_name") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    licensed_beds = body.get("licensed_beds")
+    consent_revenue_share = body.get("consent_revenue_share", False)
+    consent_ca_hospital = body.get("consent_ca_hospital", False)
+
+    if not hospital_name:
+        raise HTTPException(status_code=400, detail="Hospital name is required")
+    if not applicant_name:
+        raise HTTPException(status_code=400, detail="Your name is required")
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Valid work email is required")
+    if not consent_revenue_share or not consent_ca_hospital:
+        raise HTTPException(status_code=400, detail="Both acknowledgments are required")
+    if licensed_beds is not None:
+        try:
+            if int(licensed_beds) < 100:
+                raise HTTPException(status_code=400, detail="Pilot is open to hospitals with 100+ licensed beds")
+        except (ValueError, TypeError):
+            pass
+
+    if DATABASE_URL:
+        try:
+            from db.connection import get_db_conn as _gdc
+            conn = _gdc()
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO pilot_applications
+                            (hospital_name, applicant_name, applicant_title, email, phone,
+                             licensed_beds, ehr_system, annual_discharges, how_found,
+                             challenge_text, calculator_inputs)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """, (
+                            hospital_name, applicant_name,
+                            body.get("applicant_title"), email, body.get("phone"),
+                            licensed_beds, body.get("ehr_system"),
+                            body.get("annual_discharges"), body.get("how_found"),
+                            body.get("challenge_text"),
+                            json.dumps(body.get("calculator_inputs", {})),
+                        ))
+            finally:
+                conn.close()
+        except Exception as _e:
+            logging.getLogger(__name__).warning("Pilot apply DB error: %s", _e)
+
+    logging.getLogger("pilot.applications").info(
+        "New pilot application: hospital=%s email_domain=%s beds=%s",
+        hospital_name[:50], email.split("@")[-1], licensed_beds,
+    )
+    first_name = applicant_name.split()[0] if applicant_name else applicant_name
+    return JSONResponse({
+        "ok": True,
+        "message": (
+            f"Thank you, {first_name}. Your application for {hospital_name} has been received. "
+            f"We'll respond to {email} within 2 business days."
+        ),
+    })
+
+
+@app.get("/api/tcm/platform-roi")
+@limiter.limit("60/hour")
+async def tcm_platform_roi(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    import datetime as _dt
+    from db.patients import get_org_domain as _god
+    org_domain = _god(ctx.email)
+
+    settings = {}
+    if DATABASE_URL:
+        try:
+            from db.roi import get_org_roi_settings as _gros
+            settings = await asyncio.to_thread(_gros, org_domain)
+        except Exception:
+            pass
+
+    subscription_monthly = float(settings.get("platform_subscription_monthly") or 7000)
+    annual_beds = int(settings.get("license_beds") or 250)
+    annual_discharges = int(settings.get("annual_discharges") or 10000)
+
+    monthly_revenue = 0.0
+    alltime_revenue = 0.0
+    total_episodes = 0
+    completed_episodes = 0
+
+    if DATABASE_URL:
+        try:
+            from db.connection import get_db_conn as _gdc
+            conn = _gdc()
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT COUNT(*) AS n, COALESCE(SUM(estimated_revenue),0) AS rev "
+                            "FROM tcm_episodes WHERE org_id = %s AND status IN ('claim_ready','billed')",
+                            (ctx.org_id,)
+                        )
+                        row = cur.fetchone()
+                        completed_episodes = int(row["n"] or 0)
+                        alltime_revenue = float(row["rev"] or 0)
+
+                        first_of_month = _dt.date.today().replace(day=1)
+                        cur.execute(
+                            "SELECT COALESCE(SUM(estimated_revenue),0) AS rev "
+                            "FROM tcm_episodes WHERE org_id = %s AND status IN ('claim_ready','billed') "
+                            "AND discharge_date >= %s",
+                            (ctx.org_id, first_of_month)
+                        )
+                        monthly_revenue = float(cur.fetchone()["rev"] or 0)
+
+                        cur.execute("SELECT COUNT(*) AS n FROM tcm_episodes WHERE org_id = %s", (ctx.org_id,))
+                        total_episodes = int(cur.fetchone()["n"] or 0)
+            finally:
+                conn.close()
+        except Exception as _e:
+            logging.getLogger(__name__).warning("TCM platform ROI query failed: %s", _e)
+
+    annual_sub = subscription_monthly * 12
+    annual_current = monthly_revenue * 12 if monthly_revenue > 0 else (alltime_revenue if alltime_revenue > 0 else 0)
+    annual_net = annual_current - annual_sub
+    annual_roi = round(annual_current / annual_sub, 2) if annual_sub > 0 else 0
+
+    # 50% capture projection using CA-adjusted 2026 rates
+    tcm_50_episodes = annual_discharges * 0.44 * 0.65 * 0.50
+    avg_rate = (259.60 * 0.70 + 351.64 * 0.30) * 0.60 + (220 * 0.70 + 298 * 0.30) * 0.40
+    annual_50pct = round(tcm_50_episodes * avg_rate, 2)
+
+    calculator_url = f"/tcm-roi-calculator?beds={annual_beds}&discharges={annual_discharges}&target_capture=50"
+
+    return JSONResponse({
+        "monthly_tcm_revenue": round(monthly_revenue, 2),
+        "alltime_tcm_revenue": round(alltime_revenue, 2),
+        "subscription_monthly": subscription_monthly,
+        "coverage_ratio_monthly": round(monthly_revenue / subscription_monthly, 2) if subscription_monthly > 0 else 0,
+        "total_episodes": total_episodes,
+        "completed_episodes": completed_episodes,
+        "annual_projection_current": round(annual_current, 2),
+        "annual_projection_50pct": annual_50pct,
+        "annual_sub_cost": round(annual_sub, 2),
+        "annual_net_current": round(annual_net, 2),
+        "annual_roi_current": annual_roi,
+        "calculator_share_url": calculator_url,
+    })
+
+
 # ── PWA routes ───────────────────────────────────────────────────────────────
 
 @app.get("/sw.js")

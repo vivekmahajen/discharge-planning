@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>California Hospital Pilot Program — Discharge Planning AI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #0f172a; line-height: 1.6; }
+
+    /* ── Nav ── */
+    .top-nav {
+      background: #1e3a5f; color: #fff;
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 24px; position: sticky; top: 0; z-index: 100;
+    }
+    .top-nav .logo { font-size: 1.1rem; font-weight: 700; }
+    .top-nav .logo span { color: #60a5fa; }
+    .top-nav .spacer { flex: 1; }
+    .top-nav a { color: #cbd5e1; font-size: .9rem; text-decoration: none; padding: 6px 12px;
+                  border-radius: 6px; transition: background .15s; }
+    .top-nav a:hover { background: rgba(255,255,255,.15); }
+    .top-nav .signin { background: #2563eb; color: #fff; font-weight: 600; }
+
+    /* ── Hero ── */
+    .hero { background: linear-gradient(135deg,#1e3a5f 0%,#1e40af 100%); color: #fff;
+             padding: 60px 24px 48px; text-align: center; }
+    .hero .badge { display: inline-block; background: #f59e0b; color: #7c2d12;
+                    font-weight: 700; font-size: .8rem; border-radius: 20px;
+                    padding: 4px 14px; margin-bottom: 20px; text-transform: uppercase;
+                    letter-spacing: .06em; }
+    .hero h1 { font-size: 2.2rem; font-weight: 800; margin-bottom: 12px; max-width: 700px; margin-inline: auto; }
+    .hero .subtitle { font-size: 1.1rem; opacity: .88; margin-bottom: 4px; }
+    .hero .sub2 { font-size: 1.15rem; font-weight: 700; color: #fbbf24; margin-top: 8px; }
+
+    /* ── Spots counter ── */
+    .spots-bar { background: #fff; border-bottom: 1px solid #e2e8f0;
+                  padding: 12px 24px; text-align: center; }
+    .spots-badge { display: inline-flex; align-items: center; gap: 10px;
+                    font-weight: 600; font-size: .95rem; }
+    .spots-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+    .dot-green  { background: #16a34a; }
+    .dot-amber  { background: #d97706; }
+    .dot-red    { background: #dc2626; }
+
+    /* ── Sections ── */
+    .container { max-width: 900px; margin: 0 auto; padding: 40px 16px 80px; }
+    .section { margin-bottom: 40px; }
+    .section h2 { font-size: 1.1rem; font-weight: 800; text-transform: uppercase;
+                   letter-spacing: .07em; color: #1e40af; margin-bottom: 20px;
+                   padding-bottom: 8px; border-bottom: 2px solid #bfdbfe; }
+
+    /* ── Feature list ── */
+    .feature-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    @media(min-width:600px){ .feature-grid { grid-template-columns: 1fr 1fr; } }
+    .feature-item { display: flex; align-items: flex-start; gap: 10px;
+                     background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+    .feature-item .check { color: #16a34a; font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+    .feature-item .ft { font-size: .9rem; color: #374151; }
+
+    /* ── Math box ── */
+    .math-box { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; }
+    .math-row { display: flex; justify-content: space-between; align-items: baseline;
+                 padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: .95rem; }
+    .math-row:last-child { border-bottom: none; }
+    .math-row .label { color: #64748b; }
+    .math-row .val { font-weight: 700; color: #0f172a; }
+    .math-row .val.green { color: #16a34a; font-size: 1.1rem; }
+    .math-row.divider { border-top: 2px solid #bfdbfe; margin-top: 4px; padding-top: 14px; }
+    .math-highlight { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px;
+                       padding: 16px; margin-top: 16px; font-size: .9rem; color: #166534; }
+
+    /* ── Eligibility ── */
+    .elig-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .elig-list li { display: flex; gap: 10px; align-items: flex-start;
+                     font-size: .9rem; color: #374151; }
+    .elig-list li::before { content: "●"; color: #2563eb; flex-shrink: 0; margin-top: 3px; font-size: .65rem; }
+
+    /* ── Form ── */
+    .form-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 32px; }
+    .form-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media(min-width:600px){ .form-grid { grid-template-columns: 1fr 1fr; } }
+    .form-field { display: flex; flex-direction: column; gap: 6px; }
+    .form-field.full { grid-column: 1 / -1; }
+    .form-field label { font-size: .85rem; font-weight: 600; color: #374151; }
+    .form-field input, .form-field select, .form-field textarea {
+      border: 1.5px solid #d1d5db; border-radius: 8px; padding: 10px 12px;
+      font-size: .95rem; font-family: inherit; transition: border-color .15s;
+      background: #fff;
+    }
+    .form-field input:focus, .form-field select:focus, .form-field textarea:focus {
+      outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    }
+    .form-field textarea { resize: vertical; min-height: 80px; }
+
+    .consent-row { display: flex; gap: 10px; align-items: flex-start;
+                    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+                    padding: 12px; font-size: .88rem; color: #374151; cursor: pointer; }
+    .consent-row input[type=checkbox] { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; accent-color: #2563eb; }
+
+    .submit-btn { width: 100%; background: #2563eb; color: #fff; border: none;
+                   border-radius: 10px; padding: 16px; font-size: 1.05rem; font-weight: 700;
+                   cursor: pointer; transition: background .15s; margin-top: 8px; }
+    .submit-btn:hover { background: #1d4ed8; }
+    .submit-btn:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .form-note { font-size: .82rem; color: #6b7280; text-align: center; margin-top: 12px; }
+    .error-msg { background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px;
+                  padding: 12px; color: #dc2626; font-size: .9rem; margin-top: 8px; display: none; }
+    .success-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 12px;
+                    padding: 32px; text-align: center; display: none; }
+    .success-box h3 { color: #16a34a; font-size: 1.3rem; margin-bottom: 12px; }
+    .success-box p { color: #374151; margin-bottom: 8px; }
+
+    /* ── FAQ ── */
+    .faq-item { border-bottom: 1px solid #e2e8f0; }
+    .faq-q { width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+               padding: 16px 0; font-size: .95rem; font-weight: 600; color: #1e3a5f;
+               display: flex; justify-content: space-between; align-items: center; gap: 12px;
+               font-family: inherit; }
+    .faq-q .arrow { color: #2563eb; font-size: 1.1rem; transition: transform .2s; flex-shrink: 0; }
+    .faq-q.open .arrow { transform: rotate(180deg); }
+    .faq-a { font-size: .9rem; color: #374151; padding: 0 0 16px; display: none; line-height: 1.7; }
+    .faq-a.open { display: block; }
+
+    /* ── Legal note ── */
+    .legal-box { background: #fefce8; border: 1px solid #fde047; border-radius: 8px;
+                  padding: 16px; font-size: .82rem; color: #713f12; margin-top: 16px; }
+
+    /* ── Contact ── */
+    .contact-section { text-align: center; padding: 32px; background: #fff;
+                         border: 1px solid #e2e8f0; border-radius: 12px; }
+    .contact-section a { color: #2563eb; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="logo">🏥 Discharge Planning <span>AI</span></div>
+  <div class="spacer"></div>
+  <a href="/tcm-roi-calculator">TCM Calculator</a>
+  <a href="/login" class="signin">Sign In</a>
+</nav>
+
+<div class="hero">
+  <div class="badge">California Pilot Program</div>
+  <h1>5 Hospitals · Revenue Share · No Upfront Cost</h1>
+  <div class="subtitle">We are inviting 5 California acute care hospitals to join our founding pilot.</div>
+  <div class="sub2">If we don't generate TCM revenue for you, we don't get paid.</div>
+</div>
+
+<div class="spots-bar" id="spots-bar">
+  <div class="spots-badge">
+    <span class="spots-dot dot-green" id="spots-dot"></span>
+    <span id="spots-text">Loading availability…</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ── What you get ── -->
+  <div class="section">
+    <h2>What You Get — 6-Month Pilot</h2>
+    <div class="feature-grid">
+      <div class="feature-item"><span class="check">✓</span><span class="ft">Full platform access — all features, unlimited users</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">TCM automation — CPT 99495/99496, MDM assessment, claims generation</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">AI discharge planning — 6 specialist agents for every patient</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">SMART on FHIR R4 — connects to Epic or Cerner automatically</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">CDPH / Medi-Cal / CalAIM compliance — built for California</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">Dedicated onboarding — 4-hour setup, no IT project required</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">Weekly TCM revenue reports delivered to your billing team</span></div>
+      <div class="feature-item"><span class="check">✓</span><span class="ft">HIPAA BAA provided before any patient data is processed</span></div>
+    </div>
+  </div>
+
+  <!-- ── The math ── -->
+  <div class="section">
+    <h2>The Estimated Math (500-bed CA Hospital Example)</h2>
+    <div class="math-box">
+      <div class="math-row"><span class="label">Annual discharges</span><span class="val">18,000</span></div>
+      <div class="math-row"><span class="label">Medicare discharges (est. 46%)</span><span class="val">8,280 / year</span></div>
+      <div class="math-row"><span class="label">TCM-eligible (home discharge, 65%)</span><span class="val">5,382 / year</span></div>
+      <div class="math-row"><span class="label">At 40% capture rate (conservative pilot target)</span><span class="val">2,153 estimated TCM claims / year</span></div>
+      <div class="math-row"><span class="label">Estimated revenue (CA-adjusted 2026 CMS rates)</span><span class="val">~$513,800 / year</span></div>
+      <div class="math-row divider"><span class="label">Platform cost (revenue share 12%)</span><span class="val">~$61,700 / year ← you pay us this</span></div>
+      <div class="math-row"><span class="label">You keep</span><span class="val green">~$452,100 / year ← new money</span></div>
+      <div class="math-highlight">
+        This is revenue your hospital is currently not capturing. The average CA hospital bills TCM for
+        only 10–15% of eligible patients. We automate the workflow so you can capture 40–65%.
+        All figures are estimates based on CMS 2026 Physician Fee Schedule and CA GPCI adjustments.
+      </div>
+    </div>
+    <div class="legal-box">
+      Revenue share applies to TCM claims where the episode was initiated and tracked through the
+      Discharge Planning AI platform. Claims submitted independently of the platform are not subject
+      to revenue share. A HIPAA Business Associate Agreement is required before any patient data is
+      processed. We will provide a BAA template before the pilot begins. All revenue figures are
+      estimated projections, not guarantees. Actual results depend on payer contracts, documentation
+      completion, provider enrollment, and clinical workflow adoption.
+    </div>
+  </div>
+
+  <!-- ── Eligibility ── -->
+  <div class="section">
+    <h2>Pilot Eligibility</h2>
+    <ul class="elig-list">
+      <li>California-licensed acute care hospital (critical access hospitals welcome — see FAQ)</li>
+      <li>Minimum 100 licensed beds</li>
+      <li>Uses Epic or Cerner (or willing to use manual FHIR entry for the pilot period)</li>
+      <li>Billing team willing to participate in a 4-hour onboarding session</li>
+      <li>Able to designate a discharge planning champion (RN, case manager, or social worker)</li>
+      <li>OSHPD licensed (we verify during application review)</li>
+      <li>Available to start within 30 days of application acceptance</li>
+    </ul>
+  </div>
+
+  <!-- ── Application form ── -->
+  <div class="section">
+    <h2>Apply for the Pilot Program</h2>
+    <div class="form-card">
+      <div id="form-area">
+        <div class="form-grid" id="form-grid">
+          <div class="form-field">
+            <label for="hospital_name">Hospital name *</label>
+            <input type="text" id="hospital_name" placeholder="e.g. Valley Medical Center" required />
+          </div>
+          <div class="form-field">
+            <label for="applicant_name">Your name *</label>
+            <input type="text" id="applicant_name" placeholder="First Last" required />
+          </div>
+          <div class="form-field">
+            <label for="applicant_title">Title</label>
+            <select id="applicant_title">
+              <option value="">Select title…</option>
+              <option>CFO</option>
+              <option>CMO</option>
+              <option>VP Operations</option>
+              <option>VP Patient Services</option>
+              <option>Director, Case Management</option>
+              <option>Director, Discharge Planning</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="email">Work email *</label>
+            <input type="email" id="email" placeholder="you@hospital.org" required />
+          </div>
+          <div class="form-field">
+            <label for="phone">Phone</label>
+            <input type="tel" id="phone" placeholder="(555) 555-5555" />
+          </div>
+          <div class="form-field">
+            <label for="licensed_beds">Licensed beds</label>
+            <input type="number" id="licensed_beds" placeholder="e.g. 350" min="100" />
+          </div>
+          <div class="form-field">
+            <label for="ehr_system">EHR system</label>
+            <select id="ehr_system">
+              <option value="">Select EHR…</option>
+              <option>Epic</option>
+              <option>Cerner (Oracle Health)</option>
+              <option>Meditech</option>
+              <option>CPSI</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="annual_discharges">Annual discharges (estimate)</label>
+            <input type="number" id="annual_discharges" placeholder="e.g. 12000" />
+          </div>
+          <div class="form-field">
+            <label for="how_found">How did you find us?</label>
+            <select id="how_found">
+              <option value="">Select…</option>
+              <option>Referral from colleague</option>
+              <option>Google / web search</option>
+              <option>Conference or trade show</option>
+              <option>LinkedIn</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-field full">
+            <label for="challenge_text">What's your biggest discharge planning challenge? (optional)</label>
+            <textarea id="challenge_text" placeholder="e.g. We miss TCM windows because there's no workflow…"></textarea>
+          </div>
+
+          <div class="form-field full">
+            <label class="consent-row" for="consent_revenue_share">
+              <input type="checkbox" id="consent_revenue_share" />
+              I understand this is a revenue-share pilot — Discharge Planning AI earns 12% of TCM claims
+              generated through the platform. There is no upfront subscription cost during the 6-month pilot.
+            </label>
+          </div>
+          <div class="form-field full">
+            <label class="consent-row" for="consent_ca_hospital">
+              <input type="checkbox" id="consent_ca_hospital" />
+              I confirm this is a California-licensed acute care hospital with 100+ licensed beds.
+            </label>
+          </div>
+        </div>
+
+        <div class="error-msg" id="error-msg"></div>
+        <button class="submit-btn" id="submit-btn" onclick="submitApplication()">
+          Apply for the Pilot Program →
+        </button>
+        <div class="form-note">
+          You'll receive a response within 2 business days.<br>
+          No commitment required until you sign the pilot agreement.
+        </div>
+      </div>
+
+      <div class="success-box" id="success-box">
+        <h3>✅ Application Received</h3>
+        <p id="success-msg"></p>
+        <p style="margin-top:16px;font-size:.88rem;color:#6b7280;">
+          While you wait, explore the platform:
+          <a href="/login" style="color:#2563eb;font-weight:600;">Sign in or create an account →</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── FAQ ── -->
+  <div class="section">
+    <h2>Frequently Asked Questions</h2>
+    <div id="faq-container"></div>
+  </div>
+
+  <!-- ── Contact ── -->
+  <div class="section">
+    <div class="contact-section">
+      <strong>Still have questions?</strong><br>
+      Email us at <a href="mailto:pilot@discharge-planning.ai">pilot@discharge-planning.ai</a>
+      or <a href="/tcm-roi-calculator">run the numbers yourself →</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const FAQS = [
+    {
+      q: "What exactly is TCM (Transitional Care Management)?",
+      a: "TCM is a CMS reimbursement program for managing patients in the 30 days after hospital discharge. Two CPT codes: 99495 (moderate complexity, $220 national avg in 2026) and 99496 (high complexity, $298). Requirements: contact patient within 2 business days of discharge, face-to-face visit within 7 or 14 days depending on complexity. Most CA hospitals bill TCM for only 10–20% of eligible patients — leaving significant estimated revenue uncaptured."
+    },
+    {
+      q: "How does the revenue share work exactly?",
+      a: "You pay nothing upfront. For every TCM claim your team submits that was tracked and initiated through our platform, we collect 12% of the reimbursed amount. Your billing team submits the claims to Medicare/MA directly (we generate the claim-ready CSV). When the claim is paid, you remit 12% to us. We track this through our TCM dashboard. After the 6-month pilot, you can convert to a flat monthly subscription at a rate we'll agree on during the pilot. Revenue share applies only to claims initiated through the platform."
+    },
+    {
+      q: "What does onboarding look like?",
+      a: "A 4-hour session with your discharge planning team and billing coordinator. Week 1: connect your EHR via FHIR (30-minute IT task for Epic/Cerner, or manual entry for other EHRs). Week 1: configure your hospital NPI and billing credentials. Week 2: first live discharge plan generated. Week 3: first TCM episodes tracked. Week 4: first claim-ready CSV delivered to your billing team. We provide a dedicated onboarding contact throughout."
+    },
+    {
+      q: "Does this require an IT project?",
+      a: "No. FHIR connection to Epic or Cerner typically takes 30–60 minutes for your IT team to authorize our registered app. No custom development, no interface engines, no HL7 mapping. If your IT team cannot prioritize this during the pilot, we support manual data entry as a fallback."
+    },
+    {
+      q: "What happens to California Medi-Cal / CalAIM patients?",
+      a: "CalAIM Enhanced Care Management (ECM) is a separate revenue stream at $122 per member per month (DHCS FY2025 rate). Medi-Cal managed care patients who meet ECM criteria can be enrolled through your Community Supports partner. Our platform identifies ECM-eligible patients during discharge planning. CalAIM ECM is tracked separately from TCM and is not included in the revenue share — ECM enrollment is between you and your Medi-Cal MCO."
+    },
+    {
+      q: "Is my patient data secure and HIPAA compliant?",
+      a: "Yes. The platform is deployed on HIPAA-eligible infrastructure (Vercel + Postgres). We maintain a HIPAA audit log for every clinical API call, secure HttpOnly session cookies, SSO support, and role-based access control. We will provide a Business Associate Agreement (BAA) before the pilot begins — no patient data is processed until the BAA is signed. Patient data is isolated to your org domain — no data is shared between pilot hospitals."
+    },
+    {
+      q: "What if we only capture 20% instead of 40%?",
+      a: "The revenue share means we only earn if you earn. At a 20% estimated capture rate on a 500-bed hospital, you'd generate approximately $256,900 in projected TCM revenue and pay us approximately $30,800. You still net approximately $226,100 that didn't exist before. There is no minimum commitment and no penalty for lower-than-projected capture rates."
+    },
+    {
+      q: "How many pilot spots are available?",
+      a: "We're accepting exactly 5 hospitals for this cohort to ensure each receives dedicated onboarding support. Applications are reviewed in order received. Once 5 pilots are confirmed, we'll maintain a waitlist for the next cohort."
+    },
+    {
+      q: "Can critical access hospitals apply?",
+      a: "Critical access hospitals are welcome to apply. Note that CMS TCM reimbursement rules are the same for CAHs, but reimbursement amounts may differ depending on your cost-based payment structure. We recommend confirming TCM billing eligibility with your Medicare Administrative Contractor (MAC) before applying."
+    },
+  ];
+
+  /* ── Render FAQ ── */
+  const faqContainer = document.getElementById('faq-container');
+  FAQS.forEach((faq, i) => {
+    const item = document.createElement('div');
+    item.className = 'faq-item';
+    item.innerHTML = `
+      <button class="faq-q" id="fq-${i}" onclick="toggleFaq(${i})">
+        <span>${faq.q}</span>
+        <span class="arrow">▾</span>
+      </button>
+      <div class="faq-a" id="fa-${i}">${faq.a}</div>
+    `;
+    faqContainer.appendChild(item);
+  });
+
+  function toggleFaq(i) {
+    const btn = document.getElementById('fq-' + i);
+    const ans = document.getElementById('fa-' + i);
+    btn.classList.toggle('open');
+    ans.classList.toggle('open');
+  }
+
+  /* ── Spots counter ── */
+  async function loadSpots() {
+    try {
+      const r = await fetch('/api/pilot/spots', { cache: 'no-store' });
+      const d = await r.json();
+      const remaining = d.remaining;
+      const dot = document.getElementById('spots-dot');
+      const txt = document.getElementById('spots-text');
+      if (remaining <= 0) {
+        dot.className = 'spots-dot dot-red';
+        txt.textContent = 'All 5 pilot spots are confirmed — waitlist is open';
+      } else if (remaining <= 1) {
+        dot.className = 'spots-dot dot-red';
+        txt.textContent = `Only ${remaining} pilot spot remaining — apply now`;
+      } else if (remaining <= 2) {
+        dot.className = 'spots-dot dot-amber';
+        txt.textContent = `${remaining} of 5 pilot spots remaining`;
+      } else {
+        dot.className = 'spots-dot dot-green';
+        txt.textContent = `${remaining} of 5 pilot spots available`;
+      }
+    } catch (e) {
+      document.getElementById('spots-text').textContent = '5 pilot spots available';
+    }
+  }
+  loadSpots();
+
+  /* ── Pre-fill from URL params ── */
+  (function prefill() {
+    const p = new URLSearchParams(location.search);
+    if (p.get('discharges')) {
+      const el = document.getElementById('annual_discharges');
+      if (el) el.value = p.get('discharges');
+    }
+  })();
+
+  /* ── Form submission ── */
+  async function submitApplication() {
+    const btn = document.getElementById('submit-btn');
+    const errEl = document.getElementById('error-msg');
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+
+    const body = {
+      hospital_name:       document.getElementById('hospital_name').value.trim(),
+      applicant_name:      document.getElementById('applicant_name').value.trim(),
+      applicant_title:     document.getElementById('applicant_title').value,
+      email:               document.getElementById('email').value.trim(),
+      phone:               document.getElementById('phone').value.trim(),
+      licensed_beds:       parseInt(document.getElementById('licensed_beds').value) || null,
+      ehr_system:          document.getElementById('ehr_system').value,
+      annual_discharges:   parseInt(document.getElementById('annual_discharges').value) || null,
+      how_found:           document.getElementById('how_found').value,
+      challenge_text:      document.getElementById('challenge_text').value.trim(),
+      consent_revenue_share: document.getElementById('consent_revenue_share').checked,
+      consent_ca_hospital:   document.getElementById('consent_ca_hospital').checked,
+      calculator_inputs:   Object.fromEntries(new URLSearchParams(location.search)),
+    };
+
+    try {
+      const r = await fetch('/api/pilot/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        errEl.textContent = d.detail || 'Something went wrong. Please try again.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Apply for the Pilot Program →';
+        return;
+      }
+      // Success
+      document.getElementById('success-msg').textContent = d.message;
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('success-box').style.display = 'block';
+    } catch (e) {
+      errEl.textContent = 'Network error. Please check your connection and try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Apply for the Pilot Program →';
+    }
+  }
+</script>
+</body>
+</html>

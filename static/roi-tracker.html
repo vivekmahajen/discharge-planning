@@ -116,8 +116,31 @@
   <a href="/multilingual-prompt-system">Multilingual</a>
   <a href="/post-acute-directory">Facilities</a>
   <a href="/predictive-discharge">Predict LOS</a>
+  <a href="/tcm-roi-calculator" target="_blank">TCM Calculator</a>
   <a href="/api/auth/logout">Sign Out</a>
 </header>
+
+<!-- ── Pilot banner ── -->
+<div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:10px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+  <span style="color:#1e40af;font-size:.9rem;">💡 Know a CA hospital that would benefit from TCM automation?</span>
+  <a href="/pilot" target="_blank" style="color:#1d4ed8;font-weight:700;font-size:.9rem;text-decoration:none;">Share the pilot program →</a>
+</div>
+
+<!-- ── Platform ROI card ── -->
+<div id="platform-roi-card" style="max-width:900px;margin:24px auto 0;padding:0 16px;">
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+    <div style="background:#1e3a5f;color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:800;font-size:1rem;">PLATFORM ROI — DOES THE PLATFORM PAY FOR ITSELF?</div>
+        <div style="font-size:.8rem;opacity:.75;margin-top:2px;">Based on your actual TCM claims to date</div>
+      </div>
+      <div id="roi-coverage-badge" style="background:rgba(255,255,255,.15);border-radius:6px;padding:6px 14px;font-weight:700;font-size:1rem;">—</div>
+    </div>
+    <div id="platform-roi-body" style="padding:20px 24px;">
+      <div style="color:#94a3b8;font-size:.9rem;">Loading…</div>
+    </div>
+  </div>
+</div>
 
 <div id="root"></div>
 
@@ -125,6 +148,82 @@
   fetch('/api/me').then(r => {
     if (!r.ok) window.location.href = '/login';
   });
+
+  // ── Platform ROI card ──
+  (async function loadPlatformRoi() {
+    const body = document.getElementById('platform-roi-body');
+    const badge = document.getElementById('roi-coverage-badge');
+    try {
+      const r = await fetch('/api/tcm/platform-roi', { cache: 'no-store' });
+      if (!r.ok) throw new Error('not ok');
+      const d = await r.json();
+
+      const fmt = v => '$' + Math.round(v || 0).toLocaleString('en-US');
+      const ratio = d.coverage_ratio_monthly || 0;
+      const ratioTxt = ratio >= 1
+        ? ratio.toFixed(1) + 'x ✅ Pays for itself'
+        : ratio.toFixed(1) + 'x ⚠ Below cost';
+
+      badge.textContent = 'This month: ' + ratioTxt;
+      badge.style.background = ratio >= 1 ? '#16a34a' : '#d97706';
+
+      body.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px;">
+          <div style="background:#f8fafc;border-radius:8px;padding:14px;">
+            <div style="font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">TCM Revenue This Month</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#0f172a;margin-top:4px;">${fmt(d.monthly_tcm_revenue)}</div>
+          </div>
+          <div style="background:#f8fafc;border-radius:8px;padding:14px;">
+            <div style="font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">TCM Revenue All Time</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#0f172a;margin-top:4px;">${fmt(d.alltime_tcm_revenue)}</div>
+          </div>
+          <div style="background:#f8fafc;border-radius:8px;padding:14px;">
+            <div style="font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Platform Subscription</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#0f172a;margin-top:4px;">${fmt(d.subscription_monthly)}/mo</div>
+            <div style="font-size:.75rem;color:#94a3b8;margin-top:2px;">Configure in Settings → ROI</div>
+          </div>
+          <div style="background:#f8fafc;border-radius:8px;padding:14px;">
+            <div style="font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Episodes Completed</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#0f172a;margin-top:4px;">${d.completed_episodes || 0}</div>
+            <div style="font-size:.75rem;color:#94a3b8;margin-top:2px;">of ${d.total_episodes || 0} total episodes</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid #e2e8f0;padding-top:16px;">
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:10px;">Projection</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:.9rem;">
+            <div>
+              <div style="color:#64748b;">At current capture rate — estimated annual TCM</div>
+              <div style="font-weight:700;font-size:1.05rem;">${fmt(d.annual_projection_current)}</div>
+            </div>
+            <div>
+              <div style="color:#64748b;">Annual net after platform cost</div>
+              <div style="font-weight:700;font-size:1.05rem;color:${(d.annual_net_current||0)>=0?'#16a34a':'#dc2626'}">${fmt(d.annual_net_current)}</div>
+            </div>
+            <div>
+              <div style="color:#64748b;">At 50% capture — estimated annual TCM</div>
+              <div style="font-weight:700;font-size:1.05rem;color:#2563eb;">${fmt(d.annual_projection_50pct)}</div>
+            </div>
+            <div>
+              <div style="color:#64748b;">Annual ROI at current rate</div>
+              <div style="font-weight:700;font-size:1.05rem;">${(d.annual_roi_current||0).toFixed(1)}x</div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
+          <button onclick="window.print()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:8px 16px;font-size:.85rem;cursor:pointer;font-family:inherit;">📥 Export for CFO</button>
+          <button onclick="copyCalcLink('${d.calculator_share_url||'/tcm-roi-calculator'}')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:8px 16px;font-size:.85rem;cursor:pointer;font-family:inherit;">🔗 Share calculator link</button>
+          <a href="/pilot" target="_blank" style="background:#2563eb;color:#fff;border-radius:6px;padding:8px 16px;font-size:.85rem;font-weight:600;text-decoration:none;">Apply for pilot →</a>
+        </div>
+      `;
+    } catch(e) {
+      body.innerHTML = '<div style="color:#94a3b8;font-size:.88rem;">Platform ROI data unavailable — TCM claims data not yet configured.</div>';
+    }
+  })();
+
+  function copyCalcLink(path) {
+    const url = location.origin + path;
+    navigator.clipboard.writeText(url).then(() => alert('Calculator link copied to clipboard:\n' + url));
+  }
 </script>
 
 <script type="text/babel">

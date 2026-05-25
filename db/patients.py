@@ -164,7 +164,28 @@ def run_migrations() -> None:
     CREATE INDEX IF NOT EXISTS idx_roi_outcomes_date    ON roi_outcomes(actual_discharge_date);
     CREATE INDEX IF NOT EXISTS idx_roi_outcomes_drg     ON roi_outcomes(drg_code);
     CREATE INDEX IF NOT EXISTS idx_roi_outcomes_patient ON roi_outcomes(patient_id);
-    CREATE INDEX IF NOT EXISTS idx_drg_reference_code   ON drg_reference(drg_code)
+    CREATE INDEX IF NOT EXISTS idx_drg_reference_code   ON drg_reference(drg_code);
+    CREATE TABLE IF NOT EXISTS pilot_applications (
+        id              SERIAL PRIMARY KEY,
+        hospital_name   VARCHAR(300) NOT NULL,
+        applicant_name  VARCHAR(200) NOT NULL,
+        applicant_title VARCHAR(100),
+        email           VARCHAR(255) NOT NULL,
+        phone           VARCHAR(30),
+        licensed_beds   INTEGER,
+        ehr_system      VARCHAR(50),
+        annual_discharges INTEGER,
+        how_found       VARCHAR(100),
+        challenge_text  TEXT,
+        status          VARCHAR(30) DEFAULT 'pending',
+        submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+        reviewed_at     TIMESTAMPTZ,
+        reviewed_by     VARCHAR(255),
+        notes           TEXT,
+        calculator_inputs JSONB
+    );
+    ALTER TABLE org_roi_settings
+        ADD COLUMN IF NOT EXISTS platform_subscription_monthly FLOAT DEFAULT 7000
     """
     try:
         conn = get_db_conn()
