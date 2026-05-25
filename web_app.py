@@ -2224,8 +2224,21 @@ async def roi_dashboard(request: Request, months: int = 12,
         })
     from db.patients import get_org_domain
     org_domain = get_org_domain(ctx.email)
-    data = await asyncio.to_thread(_get_roi_dashboard_data, org_domain, months)
-    return JSONResponse(data)
+    try:
+        data = await asyncio.to_thread(_get_roi_dashboard_data, org_domain, months)
+        return JSONResponse(data)
+    except Exception as _e:
+        logging.getLogger(__name__).warning("ROI dashboard DB error: %s", _e)
+        return JSONResponse({
+            "settings": {"hospital_type": "nonprofit", "cost_per_day": 4000},
+            "totals": _aggregate_org_roi([]) if _ROI_ENGINE_AVAILABLE else {},
+            "monthly_trend": [],
+            "drg_breakdown": [],
+            "clinician_breakdown": [],
+            "data_quality": {"episodes_without_drg": 0, "completeness_pct": 0, "recommendation": ""},
+            "unavailable": True,
+            "db_error": str(_e),
+        })
 
 
 @app.get("/api/roi/outcomes")
@@ -2245,10 +2258,14 @@ async def list_roi_outcomes(
     org_domain = get_org_domain(ctx.email)
     sd = _date.fromisoformat(start_date) if start_date else None
     ed = _date.fromisoformat(end_date) if end_date else None
-    outcomes = await asyncio.to_thread(
-        _get_org_roi_outcomes, org_domain, sd, ed, drg_code, clinician
-    )
-    return JSONResponse({"outcomes": outcomes, "total": len(outcomes)})
+    try:
+        outcomes = await asyncio.to_thread(
+            _get_org_roi_outcomes, org_domain, sd, ed, drg_code, clinician
+        )
+        return JSONResponse({"outcomes": outcomes, "total": len(outcomes)})
+    except Exception as _e:
+        logging.getLogger(__name__).warning("ROI outcomes DB error: %s", _e)
+        return JSONResponse({"outcomes": [], "total": 0, "unavailable": True})
 
 
 @app.get("/api/roi/outcomes/{patient_id}")
