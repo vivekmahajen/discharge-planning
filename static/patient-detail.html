@@ -175,6 +175,7 @@
   <div class="spacer"></div>
   <a href="/my-patients">My Patients</a>
   <a href="/">← Planner</a>
+  <a href="/roi-measured" style="font-weight:700;color:#c8920a;">ROI Measured ★</a>
   <a href="/ward-barriers">Barriers <span id="nav-overdue-badge" style="display:none;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;border-radius:999px;padding:1px 5px;margin-left:2px"></span></a>
   <a href="/post-acute-directory">Directory</a>
   <a href="/api/auth/logout">Sign Out</a>
@@ -197,6 +198,8 @@
 <div class="view-tabs">
   <button class="view-tab active" id="tab-barriers" onclick="switchView('barriers')">Discharge Barriers <span class="tab-badge" id="barriers-overdue-badge" style="display:none"></span></button>
   <button class="view-tab" id="tab-plan" onclick="switchView('plan')">Plan Runs</button>
+  <button class="view-tab" id="tab-discharge" onclick="switchView('discharge')">📋 Record Discharge</button>
+  <button class="view-tab" id="tab-roi" onclick="switchView('roi')">📊 ROI Outcome</button>
 </div>
 
 <div class="layout">
@@ -229,6 +232,92 @@
       <button class="btn-add-barrier" onclick="openAddBarrier()">+ Add Barrier</button>
     </div>
     <div id="barrier-list"><div class="barriers-empty">Loading barriers…</div></div>
+  </div>
+
+  <!-- Discharge Data Panel -->
+  <div id="discharge-panel" style="display:none;flex:1;padding:24px;overflow-y:auto;background:#f8fafc;">
+    <div style="max-width:600px;margin:0 auto;">
+      <h3 style="font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:20px;padding-bottom:10px;border-bottom:2px solid #e2e8f0;">📋 Record Discharge Data</h3>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+        <div>
+          <label style="font-size:.75rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px;">Actual Discharge Date</label>
+          <input type="date" id="discharge-date-input" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem;" oninput="updateOutcomePreview()"/>
+        </div>
+        <div>
+          <label style="font-size:.75rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px;">Discharge Destination</label>
+          <select id="discharge-dest-input" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem;">
+            <option value="">— Select —</option>
+            <option value="home">Home / Self-care</option>
+            <option value="snf">Skilled Nursing Facility (SNF)</option>
+            <option value="irf">Inpatient Rehab Facility (IRF)</option>
+            <option value="ltach">Long-Term Acute Care (LTACH)</option>
+            <option value="hospice">Hospice</option>
+            <option value="transfer">Transfer to other hospital</option>
+            <option value="ama">AMA (Against Medical Advice)</option>
+            <option value="expired">Expired</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <label style="font-size:.75rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px;">DRG Code</label>
+        <div style="position:relative;">
+          <input type="text" id="drg-code-input" placeholder="Search by code or description (e.g. 291 or Heart Failure)…"
+            style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem;"
+            oninput="drgSearch(this.value)" autocomplete="off"/>
+          <div id="drg-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #cbd5e1;border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:100;"></div>
+        </div>
+        <div id="drg-info" style="margin-top:8px;padding:10px 12px;background:#eff6ff;border-radius:6px;font-size:.85rem;display:none;">
+          <strong id="drg-desc"></strong><br>
+          <span style="color:#64748b;">Expected LOS: <span id="drg-los"></span> days (CMS FY 2026 geometric mean)</span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+        <div>
+          <label style="font-size:.75rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px;">30-Day Readmission?</label>
+          <select id="readmit-input" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem;" onchange="toggleReadmitFields()">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+        <div id="readmit-date-field" style="display:none;">
+          <label style="font-size:.75rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px;">Readmission Date</label>
+          <input type="date" id="readmit-date-input" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem;"/>
+        </div>
+      </div>
+
+      <!-- Live outcome preview -->
+      <div id="outcome-preview" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin-bottom:20px;">
+        <div style="font-size:.78rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px;">Outcome Preview</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div><div style="font-size:.72rem;color:#64748b;">Actual LOS</div><div style="font-size:1.2rem;font-weight:700;" id="prev-actual-los">—</div></div>
+          <div><div style="font-size:.72rem;color:#64748b;">Expected LOS</div><div style="font-size:1.2rem;font-weight:700;" id="prev-expected-los">—</div></div>
+          <div><div style="font-size:.72rem;color:#64748b;">Days Saved</div><div style="font-size:1.2rem;font-weight:700;" id="prev-days-saved">—</div></div>
+        </div>
+        <div id="prev-cost" style="margin-top:10px;font-size:.9rem;font-weight:600;"></div>
+        <div id="prev-hrrp" style="margin-top:4px;font-size:.85rem;color:#166534;"></div>
+      </div>
+
+      <div style="display:flex;gap:12px;">
+        <button onclick="saveDischargeData()" style="flex:1;padding:12px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:.95rem;font-weight:700;cursor:pointer;">Save Discharge Data</button>
+        <button onclick="switchView('barriers')" style="padding:12px 20px;background:#f1f5f9;color:#475569;border:none;border-radius:7px;font-size:.9rem;cursor:pointer;">Cancel</button>
+      </div>
+      <div id="discharge-save-msg" style="margin-top:12px;font-size:.85rem;"></div>
+    </div>
+  </div>
+
+  <!-- ROI Outcome Panel -->
+  <div id="roi-panel" style="display:none;flex:1;padding:24px;overflow-y:auto;background:#f8fafc;">
+    <div style="max-width:640px;margin:0 auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <h3 style="font-size:1rem;font-weight:700;color:#1e293b;">📊 Measured ROI Outcome</h3>
+        <button onclick="recalcROI()" style="padding:7px 14px;background:#1a56db;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer;">Recalculate</button>
+      </div>
+      <div id="roi-outcome-content"><p style="color:#94a3b8;font-size:.9rem;">No outcome recorded. Mark patient as discharged and add a DRG code to generate measurement.</p></div>
+    </div>
   </div>
 </div>
 
@@ -508,12 +597,239 @@ function showToast(msg) {
 let currentView = 'barriers';
 function switchView(view) {
   currentView = view;
-  document.getElementById('tab-barriers').classList.toggle('active', view === 'barriers');
-  document.getElementById('tab-plan').classList.toggle('active', view === 'plan');
+  ['barriers','plan','discharge','roi'].forEach(v => {
+    document.getElementById(`tab-${v}`)?.classList.toggle('active', v === view);
+  });
   document.getElementById('plan-sidebar').style.display = view === 'plan' ? '' : 'none';
   document.getElementById('main-panel').style.display = view === 'plan' ? '' : 'none';
   document.getElementById('barrier-panel').style.display = view === 'barriers' ? '' : 'none';
+  document.getElementById('discharge-panel').style.display = view === 'discharge' ? 'flex' : 'none';
+  document.getElementById('roi-panel').style.display = view === 'roi' ? 'flex' : 'none';
   if (view === 'barriers') loadBarriers();
+  if (view === 'discharge') prefillDischargeForm();
+  if (view === 'roi') loadRoiOutcome();
+}
+
+// ── Discharge data capture ────────────────────────────────────────────────────
+let selectedDrg = null;
+let drgSearchTimer = null;
+
+function prefillDischargeForm() {
+  if (!patient) return;
+  if (patient.actual_discharge_date) {
+    document.getElementById('discharge-date-input').value = patient.actual_discharge_date;
+  }
+  if (patient.discharge_destination) {
+    document.getElementById('discharge-dest-input').value = patient.discharge_destination;
+  }
+  if (patient.drg_code) {
+    document.getElementById('drg-code-input').value = patient.drg_code;
+    if (patient.drg_description) {
+      selectedDrg = { drg_code: patient.drg_code, drg_description: patient.drg_description, geometric_mean_los: null };
+      showDrgInfo(patient.drg_code, patient.drg_description, null);
+    }
+  }
+  if (patient.was_readmitted) {
+    document.getElementById('readmit-input').value = 'true';
+    toggleReadmitFields();
+    if (patient.readmission_date) document.getElementById('readmit-date-input').value = patient.readmission_date;
+  }
+  updateOutcomePreview();
+}
+
+function toggleReadmitFields() {
+  const isYes = document.getElementById('readmit-input').value === 'true';
+  document.getElementById('readmit-date-field').style.display = isYes ? '' : 'none';
+}
+
+function drgSearch(q) {
+  clearTimeout(drgSearchTimer);
+  if (q.length < 2) { document.getElementById('drg-dropdown').style.display = 'none'; return; }
+  drgSearchTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/drg/search?q=${encodeURIComponent(q)}`);
+      const data = await r.json();
+      renderDrgDropdown(data.results || []);
+    } catch(_) {}
+  }, 300);
+}
+
+function renderDrgDropdown(results) {
+  const dd = document.getElementById('drg-dropdown');
+  if (!results.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = results.map(d => `
+    <div onclick="selectDrg(${JSON.stringify(d).replace(/"/g,'&quot;')})"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.85rem;"
+      onmouseenter="this.style.background='#eff6ff'" onmouseleave="this.style.background=''">
+      <strong>${d.drg_code}</strong> — ${d.drg_description}
+      <span style="float:right;color:#64748b;font-size:.8rem;">${d.geometric_mean_los}d expected${d.is_ca_hrrp_drg ? ' · <span style="color:#ef4444;">HRRP</span>' : ''}</span>
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+
+function selectDrg(drg) {
+  selectedDrg = drg;
+  document.getElementById('drg-code-input').value = `${drg.drg_code} — ${drg.drg_description}`;
+  document.getElementById('drg-dropdown').style.display = 'none';
+  showDrgInfo(drg.drg_code, drg.drg_description, drg.geometric_mean_los);
+  updateOutcomePreview();
+}
+
+function showDrgInfo(code, desc, geoLos) {
+  document.getElementById('drg-desc').textContent = `${code} — ${desc}`;
+  document.getElementById('drg-los').textContent = geoLos || '—';
+  document.getElementById('drg-info').style.display = geoLos ? '' : 'none';
+}
+
+function updateOutcomePreview() {
+  const admDate = patient?.admission_date;
+  const discDate = document.getElementById('discharge-date-input').value;
+  if (!admDate || !discDate) { document.getElementById('outcome-preview').style.display = 'none'; return; }
+  const actualLos = Math.round((new Date(discDate) - new Date(admDate)) / 86400000);
+  const geoLos = selectedDrg?.geometric_mean_los;
+  document.getElementById('prev-actual-los').textContent = `${actualLos} days`;
+  document.getElementById('prev-expected-los').textContent = geoLos ? `${geoLos} days` : '—';
+  if (geoLos) {
+    const saved = (geoLos - actualLos).toFixed(1);
+    const el = document.getElementById('prev-days-saved');
+    el.textContent = `${saved > 0 ? '+' : ''}${saved} days`;
+    el.style.color = saved >= 0 ? '#16a34a' : '#ef4444';
+    const cost = (parseFloat(saved) * 4100).toLocaleString('en-US', {style:'currency',currency:'USD',maximumFractionDigits:0});
+    document.getElementById('prev-cost').textContent = `Cost impact: ${cost} at $4,100/day (AHA 2024, CA)`;
+    document.getElementById('prev-cost').style.color = saved >= 0 ? '#166534' : '#991b1b';
+    if (selectedDrg?.is_ca_hrrp_drg) {
+      document.getElementById('prev-hrrp').textContent = '⚠️ HRRP condition — readmission within 30 days may trigger CMS penalty';
+    }
+  }
+  document.getElementById('outcome-preview').style.display = '';
+}
+
+async function saveDischargeData() {
+  const discDateRaw = document.getElementById('discharge-date-input').value;
+  if (!discDateRaw) { alert('Please enter the actual discharge date.'); return; }
+
+  const drgInput = document.getElementById('drg-code-input').value.trim();
+  const drgCode = selectedDrg?.drg_code || drgInput.split('—')[0].trim();
+
+  const body = {
+    actual_discharge_date: discDateRaw,
+    discharge_destination: document.getElementById('discharge-dest-input').value || null,
+    was_readmitted: document.getElementById('readmit-input').value === 'true',
+  };
+  if (drgCode) body.drg_code = drgCode;
+  if (selectedDrg?.drg_description) body.drg_description = selectedDrg.drg_description;
+  if (body.was_readmitted) {
+    const rd = document.getElementById('readmit-date-input').value;
+    if (rd) body.readmission_date = rd;
+  }
+
+  const btn = document.querySelector('#discharge-panel button');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await fetch(`/api/patients/${patientId}/discharge-data`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    patient = data.patient?.patient || patient;
+    const msg = document.getElementById('discharge-save-msg');
+    msg.style.color = '#166534';
+    msg.textContent = '✅ Discharge data saved. ROI outcome calculated.';
+    setTimeout(() => { msg.textContent = ''; }, 4000);
+    // Auto-switch to ROI tab if outcome was computed
+    if (data.roi_outcome) {
+      setTimeout(() => switchView('roi'), 1200);
+    }
+  } catch(e) {
+    const msg = document.getElementById('discharge-save-msg');
+    msg.style.color = '#991b1b';
+    msg.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save Discharge Data';
+  }
+}
+
+// ── ROI Outcome panel ─────────────────────────────────────────────────────────
+async function loadRoiOutcome() {
+  const el = document.getElementById('roi-outcome-content');
+  el.innerHTML = '<p style="color:#94a3b8;">Loading…</p>';
+  try {
+    const r = await fetch(`/api/roi/outcomes/${patientId}`);
+    if (r.status === 404) {
+      el.innerHTML = '<p style="color:#94a3b8;font-size:.9rem;">No outcome recorded. Add discharge date and DRG code in the "Record Discharge" tab.</p>';
+      return;
+    }
+    if (!r.ok) throw new Error(await r.text());
+    const { outcome } = await r.json();
+    renderRoiOutcome(outcome, el);
+  } catch(e) {
+    el.innerHTML = `<p style="color:#ef4444;">${e.message}</p>`;
+  }
+}
+
+function renderRoiOutcome(o, el) {
+  const fmt = v => v == null ? '—' : v.toLocaleString('en-US', {style:'currency',currency:'USD',maximumFractionDigits:0});
+  const fmtDays = v => v == null ? '—' : `${v > 0 ? '+' : ''}${v} days`;
+  const saved = o.excess_days_saved;
+  const savedColor = saved == null ? '#64748b' : saved >= 0 ? '#16a34a' : '#ef4444';
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;">Days Saved</div>
+        <div style="font-size:1.6rem;font-weight:800;color:${savedColor};">${fmtDays(saved)}</div>
+        <div style="font-size:.75rem;color:#94a3b8;">vs DRG ${o.drg_code || '—'} (${o.drg_geometric_mean_los || '—'}d expected)</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;">Cost Impact</div>
+        <div style="font-size:1.6rem;font-weight:800;color:${savedColor};">${fmt(o.cost_savings_dollars)}</div>
+        <div style="font-size:.75rem;color:#94a3b8;">at $${(o.cost_per_day||4100).toLocaleString()}/day</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;">Total Value</div>
+        <div style="font-size:1.6rem;font-weight:800;color:#1a56db;">${fmt(o.total_value_dollars)}</div>
+        <div style="font-size:.75rem;color:#94a3b8;">incl. HRRP + TCM</div>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:16px;font-size:.85rem;">
+      <div style="font-weight:700;color:#1e293b;margin-bottom:10px;">Episode Details</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;color:#475569;">
+        <div>Admission: <strong>${o.admission_date||'—'}</strong></div>
+        <div>Discharge: <strong>${o.actual_discharge_date||'—'}</strong></div>
+        <div>Actual LOS: <strong>${o.actual_los_days != null ? o.actual_los_days + ' days' : '—'}</strong></div>
+        <div>Destination: <strong>${o.discharge_destination||'—'}</strong></div>
+        <div>Barriers resolved: <strong>${o.barriers_resolved||0} / ${o.barriers_identified||0}</strong></div>
+        <div>HRRP avoided: <strong>${o.hrrp_penalty_avoided === true ? '✅ Yes (~$4,500)' : o.hrrp_penalty_avoided === false ? '❌ No' : '—'}</strong></div>
+        <div>TCM revenue: <strong>${fmt(o.tcm_revenue)}</strong></div>
+        <div>Prediction error: <strong>${o.prediction_error_days != null ? o.prediction_error_days + ' days' : '—'}</strong></div>
+      </div>
+    </div>
+    <details style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;">
+      <summary style="font-weight:700;font-size:.85rem;cursor:pointer;color:#475569;">Methodology &amp; Audit Trail</summary>
+      <div style="margin-top:12px;font-size:.8rem;color:#64748b;line-height:1.7;">
+        ${(o.methodology_notes_text || 'No methodology notes stored. Recalculate to generate audit trail.').split('\n').map(n=>`<div>• ${n}</div>`).join('')}
+        <div style="margin-top:8px;font-style:italic;">DRG baseline: CMS FY 2026 IPPS Final Rule Table 5 geometric mean LOS. Cost per day: AHA 2024, CA hospitals.</div>
+      </div>
+    </details>`;
+}
+
+async function recalcROI() {
+  const btn = document.querySelector('#roi-panel button');
+  btn.disabled = true; btn.textContent = 'Calculating…';
+  try {
+    const r = await fetch(`/api/roi/outcomes/${patientId}/calculate`, {method:'POST'});
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    if (data.outcome) {
+      renderRoiOutcome(data.outcome, document.getElementById('roi-outcome-content'));
+    } else {
+      document.getElementById('roi-outcome-content').innerHTML = `<p style="color:#94a3b8;">${data.message || 'Discharge date required.'}</p>`;
+    }
+  } catch(e) {
+    alert('Failed to recalculate: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Recalculate';
+  }
 }
 
 // ── Barriers ─────────────────────────────────────────────────────────────────
