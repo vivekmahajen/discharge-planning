@@ -128,6 +128,63 @@
     <div id="statusRows">Loading…</div>
   </div>
 
+  <!-- Referral Settings -->
+  <div class="card" id="ref-settings-card">
+    <h3>📤 Post-Acute Referral Settings</h3>
+    <p style="font-size:.88rem;color:#64748b;margin-bottom:16px;">
+      Configure delivery channels for post-acute referrals. Fax via Documo (HIPAA-compliant, BAA available) is available immediately.
+      CarePort integration activates automatically when <code>CAREPORT_API_KEY</code> is set — no code change required.
+    </p>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Fax (Documo)</div>
+        <div class="setting-desc">HIPAA-compliant fax via Documo API. Set <code>DOCUMO_API_KEY</code> env var to activate.</div>
+      </div>
+      <div class="setting-value" id="ref-fax-status"><span class="badge badge-gray">Checking…</span></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">CarePort Integration</div>
+        <div class="setting-desc">CarePort does not have a public API. This channel activates automatically once a partnership is established and <code>CAREPORT_API_KEY</code> is set.</div>
+      </div>
+      <div class="setting-value" id="ref-careport-status"><span class="badge badge-gray">Checking…</span></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Direct Secure Messaging</div>
+        <div class="setting-desc">Requires HISP (Health Information Service Provider) configuration.</div>
+      </div>
+      <div class="setting-value" id="ref-direct-status"><span class="badge badge-gray">Checking…</span></div>
+    </div>
+
+    <div style="border-top:1px solid #f1f5f9;padding-top:16px;margin-top:8px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Default Channel</label>
+          <select id="ref-default-channel" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;">
+            <option value="fax">Fax (Documo)</option>
+            <option value="manual">Manual / Print</option>
+            <option value="careport">CarePort</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Org NPI</label>
+          <input type="text" id="ref-org-npi" placeholder="1234567890" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;" />
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Organization Name (fax header)</label>
+          <input type="text" id="ref-org-name" placeholder="General Hospital" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;" />
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Org Fax Number</label>
+          <input type="tel" id="ref-org-fax" placeholder="+1 415 555 0000" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;" />
+        </div>
+      </div>
+      <button id="ref-save-btn" onclick="saveReferralSettings()" style="padding:9px 20px;background:#1a56db;color:#fff;border:none;border-radius:6px;font-size:.85rem;font-weight:600;cursor:pointer;">Save</button>
+    </div>
+  </div>
+
   <!-- Eligibility Setup -->
   <div class="card">
     <h3>💳 Real-Time Insurance Eligibility</h3>
@@ -321,6 +378,57 @@ async function runMockCheck() {
 
 loadSettings();
 loadPayers();
+loadReferralSettings();
+
+async function loadReferralSettings() {
+  try {
+    const [settingsResp, statusResp] = await Promise.all([
+      fetch('/api/referrals/settings'),
+      fetch('/api/referrals/delivery-status'),
+    ]);
+    const settings = settingsResp.ok ? await settingsResp.json() : {};
+    const status = statusResp.ok ? await statusResp.json() : {};
+
+    document.getElementById('ref-default-channel').value = settings.default_channel || 'fax';
+    document.getElementById('ref-org-name').value = settings.org_name || '';
+    document.getElementById('ref-org-fax').value = settings.org_fax || '';
+    document.getElementById('ref-org-npi').value = settings.org_npi || '';
+
+    document.getElementById('ref-fax-status').innerHTML = status.fax
+      ? '<span class="badge badge-green">Active (Documo)</span>'
+      : '<span class="badge badge-amber">Not configured — set DOCUMO_API_KEY</span>';
+    document.getElementById('ref-careport-status').innerHTML = status.careport
+      ? '<span class="badge badge-green">Active</span>'
+      : '<span class="badge badge-gray">Not activated — set CAREPORT_API_KEY when partnership is established</span>';
+    document.getElementById('ref-direct-status').innerHTML =
+      '<span class="badge badge-gray">Requires HISP configuration</span>';
+  } catch(e) {
+    document.getElementById('ref-settings-card').innerHTML += '<p style="color:#dc2626;font-size:.82rem;">Could not load referral settings.</p>';
+  }
+}
+
+async function saveReferralSettings() {
+  const btn = document.getElementById('ref-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/referrals/settings', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        default_channel: document.getElementById('ref-default-channel').value,
+        org_name: document.getElementById('ref-org-name').value.trim(),
+        org_fax: document.getElementById('ref-org-fax').value.trim(),
+        org_npi: document.getElementById('ref-org-npi').value.trim(),
+      }),
+    });
+    if (!r.ok) throw new Error('Failed to save');
+    btn.textContent = '✓ Saved';
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Save'; }, 2000);
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Save';
+    alert('Failed to save referral settings: ' + e.message);
+  }
+}
 </script>
   <script src="/static/pwa.js" defer></script>
 </body>

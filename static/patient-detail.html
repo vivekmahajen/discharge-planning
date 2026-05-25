@@ -165,6 +165,12 @@
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
   .btn-cancel { background: #f1f5f9; color: #475569; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.85rem; cursor: pointer; }
   .btn-save { background: #1a56db; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+  .badge-draft { background: #f1f5f9; color: #64748b; }
+  .badge-sent { background: #dbeafe; color: #1d4ed8; }
+  .badge-pending_review { background: #fef3c7; color: #92400e; }
+  .badge-accepted { background: #dcfce7; color: #166534; }
+  .badge-declined { background: #fee2e2; color: #991b1b; }
+  .badge-cancelled { background: #f1f5f9; color: #64748b; }
 </style>
 </head>
 <body>
@@ -178,6 +184,7 @@
   <a href="/roi-measured" style="font-weight:700;color:#c8920a;">ROI Measured ★</a>
   <a href="/ward-barriers">Barriers <span id="nav-overdue-badge" style="display:none;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;border-radius:999px;padding:1px 5px;margin-left:2px"></span></a>
   <a href="/post-acute-directory">Directory</a>
+  <a href="/ward-referrals">Referrals</a>
   <a href="/tcm-roi-calculator" target="_blank">TCM Calculator</a>
   <a href="/api/auth/logout">Sign Out</a>
 </header>
@@ -201,6 +208,7 @@
   <button class="view-tab" id="tab-plan" onclick="switchView('plan')">Plan Runs</button>
   <button class="view-tab" id="tab-discharge" onclick="switchView('discharge')">📋 Record Discharge</button>
   <button class="view-tab" id="tab-roi" onclick="switchView('roi')">📊 ROI Outcome</button>
+  <button class="view-tab" id="tab-referrals" onclick="switchView('referrals')">📤 Referrals <span class="tab-badge" id="referrals-count-badge" style="display:none"></span></button>
 </div>
 
 <div class="layout">
@@ -318,6 +326,18 @@
         <button onclick="recalcROI()" style="padding:7px 14px;background:#1a56db;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer;">Recalculate</button>
       </div>
       <div id="roi-outcome-content"><p style="color:#94a3b8;font-size:.9rem;">No outcome recorded. Mark patient as discharged and add a DRG code to generate measurement.</p></div>
+    </div>
+  </div>
+
+  <!-- Referrals Panel -->
+  <div id="referrals-panel" style="display:none;flex:1;padding:24px;overflow-y:auto;background:#f8fafc;">
+    <div style="max-width:700px;margin:0 auto;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;font-weight:700;color:#1e293b;flex:1;">📤 Post-Acute Referrals</h3>
+        <a href="/post-acute-directory" style="padding:7px 14px;background:#16a34a;color:#fff;border-radius:6px;font-size:.8rem;font-weight:600;text-decoration:none;">+ New Referral</a>
+        <a href="/ward-referrals" style="padding:7px 14px;background:#f1f5f9;color:#475569;border-radius:6px;font-size:.8rem;font-weight:600;text-decoration:none;">All Referrals →</a>
+      </div>
+      <div id="patient-referrals-list"><p style="color:#94a3b8;font-size:.9rem;">Loading referrals…</p></div>
     </div>
   </div>
 </div>
@@ -598,7 +618,7 @@ function showToast(msg) {
 let currentView = 'barriers';
 function switchView(view) {
   currentView = view;
-  ['barriers','plan','discharge','roi'].forEach(v => {
+  ['barriers','plan','discharge','roi','referrals'].forEach(v => {
     document.getElementById(`tab-${v}`)?.classList.toggle('active', v === view);
   });
   document.getElementById('plan-sidebar').style.display = view === 'plan' ? '' : 'none';
@@ -606,9 +626,11 @@ function switchView(view) {
   document.getElementById('barrier-panel').style.display = view === 'barriers' ? '' : 'none';
   document.getElementById('discharge-panel').style.display = view === 'discharge' ? 'flex' : 'none';
   document.getElementById('roi-panel').style.display = view === 'roi' ? 'flex' : 'none';
+  document.getElementById('referrals-panel').style.display = view === 'referrals' ? 'flex' : 'none';
   if (view === 'barriers') loadBarriers();
   if (view === 'discharge') prefillDischargeForm();
   if (view === 'roi') loadRoiOutcome();
+  if (view === 'referrals') loadPatientReferrals();
 }
 
 // ── Discharge data capture ────────────────────────────────────────────────────
@@ -831,6 +853,52 @@ async function recalcROI() {
   } finally {
     btn.disabled = false; btn.textContent = 'Recalculate';
   }
+}
+
+// ── Referrals Tab ────────────────────────────────────────────────────────────
+async function loadPatientReferrals() {
+  const el = document.getElementById('patient-referrals-list');
+  try {
+    const r = await fetch(`/api/referrals?patient_id=${patientId}`);
+    if (!r.ok) { el.innerHTML = '<p style="color:#dc2626;font-size:.9rem;">Error loading referrals.</p>'; return; }
+    const data = await r.json();
+    const refs = data.referrals || [];
+    const badge = document.getElementById('referrals-count-badge');
+    if (refs.length) { badge.textContent = refs.length; badge.style.display = ''; }
+    if (!refs.length) {
+      el.innerHTML = '<p style="color:#94a3b8;font-size:.9rem;">No referrals for this patient. <a href="/post-acute-directory" style="color:#1a56db;">Browse the directory</a> to send one.</p>';
+      return;
+    }
+    el.innerHTML = refs.map(ref => `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+          <span style="font-weight:600;font-size:.95rem;">${escHtml(ref.facility_name || 'Unknown Facility')}</span>
+          <span style="font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;" class="badge-${escHtml(ref.status||'draft')}">${formatRefStatus(ref.status)}</span>
+          ${ref.urgency && ref.urgency!=='routine' ? `<span style="font-size:.68rem;font-weight:700;padding:2px 6px;border-radius:4px;background:#fef3c7;color:#92400e;">${escHtml(ref.urgency.toUpperCase())}</span>` : ''}
+        </div>
+        <div style="font-size:.78rem;color:#94a3b8;display:flex;gap:10px;flex-wrap:wrap;">
+          ${ref.service_type ? `<span>${escHtml(ref.service_type)}</span>` : ''}
+          ${ref.delivery_channel ? `<span>via ${formatRefChannel(ref.delivery_channel)}</span>` : ''}
+          <span>Created ${formatRefDate(ref.created_at)}</span>
+          ${ref.sent_at ? `<span>Sent ${formatRefDate(ref.sent_at)}</span>` : ''}
+          ${ref.accepted_at ? `<span style="color:#16a34a;font-weight:600;">Accepted ${formatRefDate(ref.accepted_at)}</span>` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    el.innerHTML = '<p style="color:#dc2626;font-size:.9rem;">Network error.</p>';
+  }
+}
+
+function formatRefStatus(s) {
+  return { draft:'Draft', sent:'Sent', pending_review:'Pending Review', accepted:'Accepted', declined:'Declined', cancelled:'Cancelled' }[s] || (s||'?');
+}
+function formatRefChannel(s) {
+  return { fax:'Fax', direct:'Direct Msg', careport:'CarePort', manual:'Manual', email:'Email' }[s] || (s||'—');
+}
+function formatRefDate(s) {
+  if (!s) return '—';
+  try { return new Date(s).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}); } catch { return s; }
 }
 
 // ── Barriers ─────────────────────────────────────────────────────────────────
