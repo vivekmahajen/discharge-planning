@@ -119,6 +119,29 @@ try:
 except Exception:
     pass
 
+# ROI outcomes engine (imported lazily)
+_ROI_ENGINE_AVAILABLE = False
+try:
+    from services.roi_engine import compute_episode_roi as _compute_episode_roi, \
+        aggregate_org_roi as _aggregate_org_roi, get_cost_per_day as _get_cost_per_day
+    from db.roi import (
+        get_org_roi_settings as _get_org_roi_settings,
+        upsert_org_roi_settings as _upsert_org_roi_settings,
+        get_drg_reference as _get_drg_reference,
+        search_drg as _search_drg,
+        upsert_roi_outcome as _upsert_roi_outcome,
+        get_roi_outcome as _get_roi_outcome,
+        get_org_roi_outcomes as _get_org_roi_outcomes,
+        get_monthly_roi_trend as _get_monthly_roi_trend,
+        get_drg_roi_breakdown as _get_drg_roi_breakdown,
+        get_clinician_roi_breakdown as _get_clinician_roi_breakdown,
+        get_roi_dashboard_data as _get_roi_dashboard_data,
+        trigger_outcome_calculation as _trigger_outcome_calculation,
+    )
+    _ROI_ENGINE_AVAILABLE = True
+except Exception as _roi_import_e:
+    logging.getLogger(__name__).debug("ROI engine unavailable: %s", _roi_import_e)
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent
@@ -556,6 +579,12 @@ async def startup():
             _run_milestone_migrations()
         except Exception as _e:
             logging.getLogger(__name__).warning("Milestone migrations failed: %s", _e)
+    if DATABASE_URL and _ROI_ENGINE_AVAILABLE:
+        try:
+            from scripts.seed_drg_reference import seed_drg_reference as _seed_drg
+            await asyncio.to_thread(_seed_drg)
+        except Exception as _e:
+            logging.getLogger(__name__).warning("DRG seed failed: %s", _e)
     if DATABASE_URL and _DIRECTORY_DB_AVAILABLE:
         try:
             run_directory_migrations()
@@ -1155,6 +1184,11 @@ async def generate_roi_summary(request: Request, body: dict[str, Any] = Body(def
 
     try:
         result = json.loads(clean)
+        result["disclaimer"] = (
+            "These are AI-estimated projections, not measured outcomes. "
+            "For auditable measured ROI, use the Measured ROI dashboard at /roi-measured."
+        )
+        result["measured_roi_url"] = "/roi-measured"
         return JSONResponse({"success": True, "result": result})
     except json.JSONDecodeError as exc:
         return JSONResponse({"success": False, "error": f"JSON parse failed: {exc}", "raw": raw_text}, status_code=500)
@@ -1780,6 +1814,10 @@ async def update_patient_status_endpoint(request: Request, patient_id: int,
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         await asyncio.to_thread(update_patient_status, patient_id, new_status, ctx.email, note)
+        if new_status == "discharged" and _ROI_ENGINE_AVAILABLE and DATABASE_URL:
+            asyncio.create_task(
+                asyncio.to_thread(_trigger_outcome_calculation, patient_id, org_domain)
+            )
         return JSONResponse({"ok": True, "status": new_status})
     except HTTPException:
         raise
@@ -2157,6 +2195,260 @@ async def get_settings(request: Request, ctx: OrgContext = Depends(get_current_o
         "directory_available": _DIRECTORY_DB_AVAILABLE,
         "eligibility_service_available": _ELIGIBILITY_AVAILABLE,
     })
+
+
+# ── Measured ROI Outcomes Engine ─────────────────────────────────────────────
+
+@app.get("/roi-measured", response_class=HTMLResponse)
+async def roi_measured_page(request: Request):
+    redirect = require_login(request)
+    if redirect:
+        return redirect
+    with open(STATIC_DIR / "roi-measured.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/roi/dashboard")
+@limiter.limit("30/hour")
+async def roi_dashboard(request: Request, months: int = 12,
+                        ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        return JSONResponse({
+            "settings": {"hospital_type": "nonprofit", "cost_per_day": 4000},
+            "totals": _aggregate_org_roi([]) if _ROI_ENGINE_AVAILABLE else {},
+            "monthly_trend": [],
+            "drg_breakdown": [],
+            "clinician_breakdown": [],
+            "data_quality": {"episodes_without_drg": 0, "completeness_pct": 0, "recommendation": ""},
+            "unavailable": True,
+        })
+    from db.patients import get_org_domain
+    org_domain = get_org_domain(ctx.email)
+    data = await asyncio.to_thread(_get_roi_dashboard_data, org_domain, months)
+    return JSONResponse(data)
+
+
+@app.get("/api/roi/outcomes")
+@limiter.limit("30/hour")
+async def list_roi_outcomes(
+    request: Request,
+    start_date: str = None,
+    end_date: str = None,
+    drg_code: str = None,
+    clinician: str = None,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        return JSONResponse({"outcomes": [], "total": 0, "unavailable": True})
+    from db.patients import get_org_domain
+    from datetime import date as _date
+    org_domain = get_org_domain(ctx.email)
+    sd = _date.fromisoformat(start_date) if start_date else None
+    ed = _date.fromisoformat(end_date) if end_date else None
+    outcomes = await asyncio.to_thread(
+        _get_org_roi_outcomes, org_domain, sd, ed, drg_code, clinician
+    )
+    return JSONResponse({"outcomes": outcomes, "total": len(outcomes)})
+
+
+@app.get("/api/roi/outcomes/{patient_id}")
+@limiter.limit("60/hour")
+async def get_patient_roi_outcome_endpoint(request: Request, patient_id: int,
+                                           ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="ROI engine not available")
+    from db.patients import get_org_domain
+    org_domain = get_org_domain(ctx.email)
+    outcome = await asyncio.to_thread(_get_roi_outcome, patient_id, org_domain)
+    if not outcome:
+        raise HTTPException(status_code=404, detail="No ROI outcome recorded for this patient")
+    return JSONResponse({"outcome": outcome})
+
+
+@app.post("/api/roi/outcomes/{patient_id}/calculate")
+@limiter.limit("30/hour")
+async def recalculate_patient_roi(request: Request, patient_id: int,
+                                   ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="ROI engine not available")
+    from db.patients import get_org_domain, get_patient_detail
+    org_domain = get_org_domain(ctx.email)
+    patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    outcome = await asyncio.to_thread(_trigger_outcome_calculation, patient_id, org_domain)
+    if not outcome:
+        return JSONResponse({"outcome": None, "message": "Discharge date required to calculate ROI"})
+    return JSONResponse({"outcome": outcome})
+
+
+@app.patch("/api/patients/{patient_id}/discharge-data")
+@limiter.limit("60/hour")
+async def update_discharge_data(request: Request, patient_id: int,
+                                 ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _PATIENT_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    from db.patients import get_org_domain, get_patient_detail
+    org_domain = get_org_domain(ctx.email)
+    patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    body = await request.json()
+
+    # Validate allowed fields
+    allowed_fields = {
+        "actual_discharge_date", "drg_code", "drg_description",
+        "discharge_destination", "was_readmitted", "readmission_date", "readmission_dx",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid discharge fields provided")
+
+    # Compute actual_los_days if we have both dates
+    admission = patient.get("admission_date")
+    discharge = updates.get("actual_discharge_date")
+    if discharge and admission:
+        from datetime import date as _date
+        try:
+            d_date = _date.fromisoformat(str(discharge))
+            a_date = admission if isinstance(admission, _date) else _date.fromisoformat(str(admission))
+            updates["actual_los_days"] = (d_date - a_date).days
+        except (ValueError, TypeError):
+            pass
+
+    # DRG description lookup if drg_code provided without description
+    if "drg_code" in updates and not updates.get("drg_description") and _ROI_ENGINE_AVAILABLE:
+        drg_ref = await asyncio.to_thread(_get_drg_reference, updates["drg_code"])
+        if drg_ref:
+            updates["drg_description"] = drg_ref["drg_description"]
+
+    # Build SET clause
+    set_parts = ", ".join(f"{k} = %s" for k in updates)
+    values = list(updates.values()) + [patient_id]
+
+    from db.connection import get_db_conn as _get_db_conn
+    conn = _get_db_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE patients SET {set_parts}, updated_at = NOW() WHERE id = %s",
+                    values,
+                )
+    finally:
+        conn.close()
+
+    # Trigger ROI recalculation
+    roi_outcome = None
+    if _ROI_ENGINE_AVAILABLE and updates.get("actual_discharge_date"):
+        roi_outcome = await asyncio.to_thread(_trigger_outcome_calculation, patient_id, org_domain)
+
+    updated_patient = await asyncio.to_thread(get_patient_detail, patient_id, org_domain)
+    return JSONResponse({
+        "patient": updated_patient,
+        "roi_outcome": roi_outcome,
+    })
+
+
+@app.get("/api/drg/search")
+@limiter.limit("120/hour")
+async def drg_search_endpoint(request: Request, q: str = "",
+                               ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        return JSONResponse({"results": []})
+    if len(q) < 2:
+        return JSONResponse({"results": []})
+    results = await asyncio.to_thread(_search_drg, q)
+    return JSONResponse({"results": results})
+
+
+@app.get("/api/roi/settings")
+@limiter.limit("60/hour")
+async def get_roi_settings_endpoint(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        return JSONResponse({"hospital_type": "nonprofit", "cost_per_day": 4000})
+    from db.patients import get_org_domain
+    org_domain = get_org_domain(ctx.email)
+    settings = await asyncio.to_thread(_get_org_roi_settings, org_domain)
+    return JSONResponse(settings)
+
+
+@app.patch("/api/roi/settings")
+@limiter.limit("10/hour")
+async def update_roi_settings(request: Request, body: dict = Body(default={}),
+                               ctx: OrgContext = Depends(get_current_org)):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="ROI engine not available")
+    from db.patients import get_org_domain
+    org_domain = get_org_domain(ctx.email)
+    settings = await asyncio.to_thread(_upsert_org_roi_settings, org_domain, body)
+    return JSONResponse(settings)
+
+
+@app.get("/api/roi/export")
+@limiter.limit("10/hour")
+async def export_roi_csv(
+    request: Request,
+    start_date: str = None,
+    end_date: str = None,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not DATABASE_URL or not _ROI_ENGINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="ROI engine not available")
+    from db.patients import get_org_domain
+    from datetime import date as _date
+    import csv, io as _io
+
+    org_domain = get_org_domain(ctx.email)
+    sd = _date.fromisoformat(start_date) if start_date else None
+    ed = _date.fromisoformat(end_date) if end_date else None
+    outcomes = await asyncio.to_thread(_get_org_roi_outcomes, org_domain, sd, ed)
+
+    output = _io.StringIO()
+    # Methodology header
+    output.write(
+        "# Discharge Planning AI Measured ROI Export | "
+        "Baseline: CMS FY 2026 IPPS Final Rule Table 5 geometric mean LOS | "
+        f"Cost per day: AHA 2024 CA defaults\n"
+    )
+    writer = csv.writer(output)
+    writer.writerow([
+        "episode_id", "drg_code", "drg_description",
+        "admission_date", "discharge_date",
+        "actual_los", "drg_expected_los", "excess_days_saved",
+        "cost_savings", "hrrp_flagged", "hrrp_avoided",
+        "tcm_revenue", "total_value",
+        "discharge_destination", "barriers_identified", "barriers_resolved",
+        "avg_barrier_resolution_hours",
+    ])
+    for o in outcomes:
+        writer.writerow([
+            o.get("id"),
+            o.get("drg_code", ""),
+            o.get("drg_description", ""),
+            o.get("admission_date", ""),
+            o.get("actual_discharge_date", ""),
+            o.get("actual_los_days", ""),
+            o.get("drg_geometric_mean_los", ""),
+            o.get("excess_days_saved", ""),
+            o.get("cost_savings_dollars", ""),
+            o.get("hrrp_condition_flagged", False),
+            o.get("hrrp_penalty_avoided", ""),
+            o.get("tcm_revenue", 0),
+            o.get("total_value_dollars", 0),
+            o.get("discharge_destination", ""),
+            o.get("barriers_identified", 0),
+            o.get("barriers_resolved", 0),
+            o.get("avg_barrier_resolution_hours", ""),
+        ])
+
+    csv_bytes = output.getvalue().encode("utf-8")
+    filename = f"roi_export_{org_domain.replace('.', '_')}.csv"
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── PWA routes ───────────────────────────────────────────────────────────────

@@ -91,7 +91,80 @@ def run_migrations() -> None:
         expires_at      TIMESTAMPTZ  NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_eligibility_cache_key ON eligibility_cache(cache_key);
-    CREATE INDEX IF NOT EXISTS idx_eligibility_cache_exp ON eligibility_cache(expires_at)
+    CREATE INDEX IF NOT EXISTS idx_eligibility_cache_exp ON eligibility_cache(expires_at);
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS actual_discharge_date DATE;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS drg_code VARCHAR(10);
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS drg_description VARCHAR(300);
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS actual_los_days INTEGER;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS hospital_type VARCHAR(20) DEFAULT 'nonprofit';
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS discharge_destination VARCHAR(50);
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS was_readmitted BOOLEAN DEFAULT FALSE;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS readmission_date DATE;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS readmission_dx VARCHAR(300);
+    CREATE TABLE IF NOT EXISTS drg_reference (
+        drg_code            VARCHAR(10)  PRIMARY KEY,
+        drg_description     VARCHAR(300) NOT NULL,
+        mdc_code            VARCHAR(5),
+        mdc_description     VARCHAR(200),
+        drg_type            VARCHAR(20),
+        relative_weight     FLOAT,
+        geometric_mean_los  FLOAT NOT NULL,
+        arithmetic_mean_los FLOAT,
+        fiscal_year         INTEGER DEFAULT 2026,
+        is_ca_hrrp_drg      BOOLEAN DEFAULT FALSE
+    );
+    CREATE TABLE IF NOT EXISTS roi_outcomes (
+        id                          SERIAL PRIMARY KEY,
+        patient_id                  INTEGER      NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        org_domain                  VARCHAR(255) NOT NULL,
+        mrn                         VARCHAR(50)  NOT NULL,
+        admission_date              DATE         NOT NULL,
+        actual_discharge_date       DATE         NOT NULL,
+        actual_los_days             INTEGER      NOT NULL,
+        drg_code                    VARCHAR(10),
+        drg_description             VARCHAR(300),
+        drg_geometric_mean_los      FLOAT,
+        hospital_type               VARCHAR(20)  DEFAULT 'nonprofit',
+        cost_per_day                FLOAT        NOT NULL,
+        excess_days_saved           FLOAT,
+        cost_savings_dollars        FLOAT,
+        discharge_destination       VARCHAR(50),
+        was_readmitted              BOOLEAN DEFAULT FALSE,
+        readmission_within_30d      BOOLEAN DEFAULT FALSE,
+        hrrp_condition_flagged      BOOLEAN DEFAULT FALSE,
+        hrrp_penalty_avoided        BOOLEAN,
+        barriers_identified         INTEGER DEFAULT 0,
+        barriers_resolved           INTEGER DEFAULT 0,
+        avg_barrier_resolution_hours FLOAT,
+        had_overdue_barriers        BOOLEAN DEFAULT FALSE,
+        total_plan_runs             INTEGER DEFAULT 1,
+        first_run_at                TIMESTAMPTZ,
+        predicted_los_days          FLOAT,
+        prediction_error_days       FLOAT,
+        tcm_episode_id              VARCHAR(50),
+        tcm_cpt_code                VARCHAR(10),
+        tcm_revenue                 FLOAT DEFAULT 0,
+        primary_clinician           VARCHAR(255),
+        calculated_at               TIMESTAMPTZ DEFAULT NOW(),
+        calculation_version         INTEGER DEFAULT 1,
+        UNIQUE(patient_id)
+    );
+    CREATE TABLE IF NOT EXISTS org_roi_settings (
+        org_domain          VARCHAR(255) PRIMARY KEY,
+        hospital_type       VARCHAR(20)  DEFAULT 'nonprofit',
+        cost_per_day        FLOAT        DEFAULT 4000,
+        hospital_name       VARCHAR(200),
+        license_beds        INTEGER,
+        annual_discharges   INTEGER,
+        fiscal_year_start   INTEGER DEFAULT 10,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_roi_outcomes_org     ON roi_outcomes(org_domain);
+    CREATE INDEX IF NOT EXISTS idx_roi_outcomes_date    ON roi_outcomes(actual_discharge_date);
+    CREATE INDEX IF NOT EXISTS idx_roi_outcomes_drg     ON roi_outcomes(drg_code);
+    CREATE INDEX IF NOT EXISTS idx_roi_outcomes_patient ON roi_outcomes(patient_id);
+    CREATE INDEX IF NOT EXISTS idx_drg_reference_code   ON drg_reference(drg_code)
     """
     try:
         conn = get_db_conn()

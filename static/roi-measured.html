@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00529B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DischargePlan" />
+  <link rel="stylesheet" href="/static/mobile.css" />
+  <title>Measured ROI Outcomes — Discharge Planning AI</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f8;
+      color: #1e293b;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #1a56db, #1e3a8a);
+      color: #fff;
+      padding: 0 20px;
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      flex-wrap: wrap;
+      padding-top: 6px;
+      padding-bottom: 6px;
+    }
+    .logo { font-size: 1.4rem; flex-shrink: 0; }
+    .header-brand { flex-shrink: 0; }
+    .header-brand h1 { font-size: 0.95rem; font-weight: 700; }
+    .header-brand p  { font-size: 0.68rem; opacity: 0.78; margin-top: 1px; }
+    .spacer { flex: 1; min-width: 8px; }
+    header a {
+      color: rgba(255,255,255,0.85);
+      text-decoration: none;
+      font-size: 0.78rem;
+      padding: 5px 10px;
+      border-radius: 6px;
+      transition: background 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    header a:hover { background: rgba(255,255,255,0.18); }
+    header a.active { background: rgba(255,255,255,0.22); font-weight: 600; }
+
+    /* Header controls group */
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .range-btn {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: rgba(255,255,255,0.85);
+      border-radius: 5px;
+      padding: 4px 9px;
+      font-size: 0.74rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .range-btn:hover, .range-btn.active { background: rgba(255,255,255,0.28); color: #fff; }
+    .custom-dates {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .custom-dates input[type="date"] {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: rgba(255,255,255,0.9);
+      border-radius: 5px;
+      padding: 3px 7px;
+      font-size: 0.74rem;
+      width: 130px;
+    }
+    .custom-dates input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(0.7); }
+    .header-action-btn {
+      background: rgba(255,255,255,0.16);
+      border: 1px solid rgba(255,255,255,0.28);
+      color: #fff;
+      border-radius: 5px;
+      padding: 5px 11px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .header-action-btn:hover { background: rgba(255,255,255,0.28); }
+    .header-sep { width: 1px; height: 20px; background: rgba(255,255,255,0.2); flex-shrink: 0; }
+
+    /* ── Main layout ── */
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 20px 56px; }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      gap: 14px;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #1a56db;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .spinner-text { font-size: 0.85rem; color: #64748b; }
+
+    /* ── Error state ── */
+    .error-box {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin: 24px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .error-icon { font-size: 1.3rem; flex-shrink: 0; }
+    .error-title { font-size: 0.95rem; font-weight: 700; color: #991b1b; margin-bottom: 4px; }
+    .error-msg { font-size: 0.82rem; color: #b91c1c; }
+    .retry-btn {
+      margin-top: 10px;
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 16px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    /* ── Banner ── */
+    .banner {
+      border-radius: 10px;
+      padding: 13px 18px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 0.83rem;
+      line-height: 1.5;
+    }
+    .banner.amber {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+    }
+    .banner-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+    .banner-text { flex: 1; }
+    .banner-link { color: #1a56db; font-weight: 600; text-decoration: none; }
+    .banner-link:hover { text-decoration: underline; }
+
+    /* ── Completeness progress ── */
+    .completeness-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 13px 18px;
+      flex-wrap: wrap;
+    }
+    .completeness-label { font-size: 0.82rem; color: #475569; white-space: nowrap; font-weight: 500; }
+    .progress-track {
+      flex: 1;
+      min-width: 160px;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.5s ease;
+    }
+    .completeness-pct { font-size: 0.85rem; font-weight: 700; color: #1e293b; white-space: nowrap; }
+    .completeness-note { font-size: 0.75rem; color: #64748b; white-space: nowrap; }
+
+    /* ── Stat cards ── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    @media (max-width: 900px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 500px) { .stat-row { grid-template-columns: 1fr; } }
+
+    .stat-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 18px 20px 16px;
+      position: relative;
+    }
+    .stat-card-accent {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 10px 10px 0 0;
+    }
+    .stat-card .card-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #64748b;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      color: #64748b;
+      font-size: 0.6rem;
+      font-weight: 700;
+      cursor: help;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .info-icon:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 400;
+      border-radius: 6px;
+      padding: 6px 10px;
+      white-space: nowrap;
+      max-width: 220px;
+      white-space: normal;
+      text-transform: none;
+      letter-spacing: 0;
+      z-index: 300;
+      pointer-events: none;
+      line-height: 1.4;
+    }
+    .stat-card .card-value {
+      font-size: 1.85rem;
+      font-weight: 800;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 6px;
+    }
+    .stat-card .card-sub {
+      font-size: 0.74rem;
+      color: #64748b;
+    }
+
+    /* Color themes */
+    .card-blue  .card-value { color: #1a56db; }
+    .card-blue  .stat-card-accent { background: #1a56db; }
+    .card-green .card-value { color: #059669; }
+    .card-green .stat-card-accent { background: #059669; }
+    .card-red   .card-value { color: #dc2626; }
+    .card-red   .stat-card-accent { background: #dc2626; }
+    .card-amber .card-value { color: #d97706; }
+    .card-amber .stat-card-accent { background: #d97706; }
+    .card-teal  .card-value { color: #0d9488; }
+    .card-teal  .stat-card-accent { background: #0d9488; }
+
+    /* ── Run rate bar ── */
+    .run-rate-bar {
+      background: linear-gradient(135deg, #1e3a8a 0%, #1a56db 100%);
+      border-radius: 10px;
+      padding: 13px 20px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #fff;
+    }
+    .run-rate-icon { font-size: 1.1rem; }
+    .run-rate-label { font-size: 0.78rem; opacity: 0.82; }
+    .run-rate-value { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .run-rate-note { font-size: 0.73rem; opacity: 0.65; margin-left: auto; }
+
+    /* ── Chart panel ── */
+    .chart-panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 18px 20px 16px;
+      margin-bottom: 20px;
+    }
+    .chart-panel-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chart-title { font-size: 0.92rem; font-weight: 700; color: #1e293b; }
+    .chart-sub   { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+    .chart-legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.74rem;
+      color: #475569;
+    }
+    .legend-line {
+      width: 22px; height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend-line.dashed {
+      background: repeating-linear-gradient(90deg, transparent, transparent 3px, currentColor 3px, currentColor 6px);
+    }
+    .legend-bar {
+      width: 12px; height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .chart-empty {
+      text-align: center;
+      color: #94a3b8;
+      padding: 50px 20px;
+      font-size: 0.88rem;
+    }
+    .chart-wrap { position: relative; height: 240px; }
+
+    /* ── Lower two-panel section ── */
+    .lower-panels {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    @media (max-width: 860px) { .lower-panels { flex-direction: column; } }
+    .left-panel  { flex: 0 0 38%; min-width: 0; }
+    .right-panel { flex: 1; min-width: 0; }
+
+    .panel-box {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .panel-title { font-size: 0.9rem; font-weight: 700; color: #1e293b; flex: 1; }
+    .panel-sub   { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+
+    /* ── Tables ── */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    .data-table th {
+      background: #f8fafc;
+      color: #64748b;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      padding: 9px 12px;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .data-table th:hover { background: #f1f5f9; }
+    .data-table th .sort-arrow { margin-left: 4px; opacity: 0.4; }
+    .data-table th.sort-asc .sort-arrow::after  { content: " ▲"; opacity: 1; }
+    .data-table th.sort-desc .sort-arrow::after { content: " ▼"; opacity: 1; }
+    .data-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+      vertical-align: middle;
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tr.clickable { cursor: pointer; }
+    .data-table tr.clickable:hover td { background: #f8fafc; }
+    .data-table tr.row-selected td { background: #eff6ff !important; }
+    .data-table tr.row-selected td:first-child { border-left: 3px solid #1a56db; padding-left: 9px; }
+
+    .cell-green { color: #059669; font-weight: 700; }
+    .cell-red   { color: #dc2626; font-weight: 700; }
+    .cell-mono  { font-variant-numeric: tabular-nums; }
+
+    .hrrp-pill {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .hrrp-pill.avoided { background: #dcfce7; color: #166534; }
+
+    /* ── Episode filter bar ── */
+    .episode-filters {
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-select {
+      padding: 5px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      background: #fff;
+      color: #1e293b;
+      cursor: pointer;
+    }
+    .filter-select:focus { outline: none; border-color: #1a56db; }
+
+    /* Load more */
+    .load-more-row {
+      text-align: center;
+      padding: 12px;
+      border-top: 1px solid #f1f5f9;
+    }
+    .load-more-btn {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 7px 18px;
+      font-size: 0.8rem;
+      color: #475569;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .load-more-btn:hover { background: #f1f5f9; }
+
+    /* ── Settings modal ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.5);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 500px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      overflow: hidden;
+    }
+    .modal-header {
+      background: linear-gradient(135deg, #1a56db, #1e3a8a);
+      color: #fff;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title { font-size: 1rem; font-weight: 700; }
+    .modal-close {
+      background: rgba(255,255,255,0.15);
+      border: none;
+      color: #fff;
+      border-radius: 6px;
+      width: 28px; height: 28px;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-body { padding: 20px; }
+    .modal-field { margin-bottom: 14px; }
+    .modal-label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+      margin-bottom: 5px;
+    }
+    .modal-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #1e293b;
+      background: #fff;
+    }
+    .modal-input:focus { outline: none; border-color: #1a56db; box-shadow: 0 0 0 3px rgba(26,86,219,0.1); }
+    .modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid #f1f5f9;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .btn-cancel {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 0.83rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-save {
+      background: #1a56db;
+      border: none;
+      color: #fff;
+      border-radius: 6px;
+      padding: 8px 18px;
+      font-size: 0.83rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn-save:disabled { opacity: 0.6; cursor: default; }
+    .modal-msg { font-size: 0.78rem; margin-top: 8px; }
+    .modal-msg.ok  { color: #059669; }
+    .modal-msg.err { color: #dc2626; }
+
+    /* ── Methodology collapsible ── */
+    .methodology {
+      margin-top: 28px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .methodology summary {
+      padding: 14px 18px;
+      background: #f8fafc;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #334155;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .methodology summary::-webkit-details-marker { display: none; }
+    .methodology[open] summary { border-bottom: 1px solid #e2e8f0; }
+    .methodology-body {
+      padding: 18px 20px;
+      background: #fff;
+      font-size: 0.82rem;
+      color: #475569;
+      line-height: 1.7;
+    }
+    .methodology-body h4 { color: #1e293b; font-size: 0.85rem; margin: 12px 0 4px; }
+    .methodology-body h4:first-child { margin-top: 0; }
+    .methodology-body a { color: #1a56db; }
+
+    /* ── Print styles ── */
+    @media print {
+      header, .header-controls, .no-print, .load-more-row { display: none !important; }
+      body { background: #fff !important; }
+      .container { padding: 12px !important; }
+      .panel-box, .chart-panel, .stat-card, .completeness-row { box-shadow: none !important; }
+      .lower-panels { flex-direction: column; }
+      .left-panel, .right-panel { flex: none; width: 100%; }
+      .print-header {
+        display: flex !important;
+        align-items: baseline;
+        gap: 16px;
+        margin-bottom: 16px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #1a56db;
+      }
+      .print-header .ph-title { font-size: 1.2rem; font-weight: 800; color: #1e293b; }
+      .print-header .ph-sub   { font-size: 0.8rem; color: #64748b; margin-left: auto; }
+    }
+    .print-header { display: none; }
+
+    /* ── Util ── */
+    .hidden { display: none !important; }
+    .tbl-empty { text-align: center; color: #94a3b8; padding: 28px 12px; font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════ HEADER ══════════════════════════ -->
+<header>
+  <div class="logo">🏥</div>
+  <div class="header-brand">
+    <h1>Discharge Planning AI</h1>
+    <p>Measured ROI Outcomes</p>
+  </div>
+
+  <!-- Date-range controls -->
+  <div class="header-controls no-print">
+    <button class="range-btn active" data-months="1"   onclick="setRange(1,this)">30d</button>
+    <button class="range-btn"        data-months="3"   onclick="setRange(3,this)">90d</button>
+    <button class="range-btn"        data-months="6"   onclick="setRange(6,this)">180d</button>
+    <button class="range-btn"        data-months="ytd" onclick="setRange('ytd',this)">YTD</button>
+    <button class="range-btn"        data-months="0"   onclick="toggleCustom(this)">Custom</button>
+    <div class="custom-dates hidden" id="custom-date-row">
+      <input type="date" id="custom-start" onchange="applyCustomRange()" />
+      <span style="color:rgba(255,255,255,0.6);font-size:.8rem;">–</span>
+      <input type="date" id="custom-end"   onchange="applyCustomRange()" />
+    </div>
+    <div class="header-sep"></div>
+    <button class="header-action-btn no-print" onclick="exportCsv()">⬇ Export CSV</button>
+    <button class="header-action-btn no-print" onclick="window.print()">🖨 Print</button>
+    <button class="header-action-btn no-print" onclick="openSettings()" style="background:rgba(255,255,255,0.22);">⚙ Configure</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <!-- Nav links -->
+  <a href="/my-patients">My Patients</a>
+  <a href="/">← Planner</a>
+  <a href="/ward-barriers">Ward Barriers</a>
+  <a href="/roi-tracker">ROI Estimates</a>
+  <a href="/api/auth/logout">Sign Out</a>
+</header>
+
+<!-- ═════════════════════════════════════ MAIN ═══════════════════════════════ -->
+<div class="container">
+
+  <!-- Print-only header -->
+  <div class="print-header" id="print-header">
+    <div class="ph-title">Measured ROI Outcomes Dashboard</div>
+    <div class="ph-sub" id="print-range-label">—</div>
+  </div>
+
+  <!-- Loading state -->
+  <div id="loading-state" class="spinner-wrap">
+    <div class="spinner"></div>
+    <div class="spinner-text">Loading dashboard data…</div>
+  </div>
+
+  <!-- Error state -->
+  <div id="error-state" class="error-box hidden">
+    <div class="error-icon">⚠️</div>
+    <div>
+      <div class="error-title">Failed to load dashboard</div>
+      <div class="error-msg" id="error-msg-text"></div>
+      <button class="retry-btn" onclick="loadDashboard()">↺ Retry</button>
+    </div>
+  </div>
+
+  <!-- Dashboard content (hidden until loaded) -->
+  <div id="dashboard-content" class="hidden">
+
+    <!-- Data quality banner (amber, conditional) -->
+    <div id="dq-banner" class="banner amber hidden">
+      <div class="banner-icon">⚠</div>
+      <div class="banner-text">
+        <strong>Data quality notice:</strong>
+        <span id="dq-recommendation"></span>
+        <a href="/my-patients" class="banner-link" style="margin-left:6px;">Enter DRG codes →</a>
+      </div>
+    </div>
+
+    <!-- Completeness progress (always shown) -->
+    <div class="completeness-row">
+      <span class="completeness-label">Data completeness</span>
+      <div class="progress-track">
+        <div class="progress-fill" id="completeness-fill" style="width:0%;background:#059669;"></div>
+      </div>
+      <span class="completeness-pct" id="completeness-pct">—%</span>
+      <span class="completeness-note" id="completeness-note"></span>
+    </div>
+
+    <!-- ── 4 stat cards ── -->
+    <div class="stat-row" id="stat-row">
+      <!-- Card 1: Total Value -->
+      <div class="stat-card card-blue">
+        <div class="stat-card-accent"></div>
+        <div class="card-label">
+          Total Value
+          <span class="info-icon" data-tip="Sum of cost savings from reduced excess days, HRRP penalty avoidance, and TCM professional fees captured.">i</span>
+        </div>
+        <div class="card-value" id="kpi-total-value">—</div>
+        <div class="card-sub" id="kpi-total-value-sub"></div>
+      </div>
+
+      <!-- Card 2: Days Saved -->
+      <div class="stat-card card-green" id="stat-card-days">
+        <div class="stat-card-accent" id="days-accent"></div>
+        <div class="card-label">
+          Days Saved
+          <span class="info-icon" data-tip="Total excess inpatient days eliminated versus CMS FY 2026 DRG geometric mean LOS baseline. Negative = LOS exceeded expectation.">i</span>
+        </div>
+        <div class="card-value" id="kpi-days-saved">—</div>
+        <div class="card-sub" id="kpi-days-saved-sub"></div>
+      </div>
+
+      <!-- Card 3: HRRP Avoided -->
+      <div class="stat-card card-amber">
+        <div class="stat-card-accent"></div>
+        <div class="card-label">
+          HRRP Avoided
+          <span class="info-icon" data-tip="Estimated CMS penalty dollars avoided for episodes flagged as HRRP-applicable conditions. Based on CMS median $4,500/episode (conservative).">i</span>
+        </div>
+        <div class="card-value" id="kpi-hrrp">—</div>
+        <div class="card-sub" id="kpi-hrrp-sub"></div>
+      </div>
+
+      <!-- Card 4: TCM Revenue -->
+      <div class="stat-card card-teal">
+        <div class="stat-card-accent"></div>
+        <div class="card-label">
+          TCM Revenue
+          <span class="info-icon" data-tip="Transitional Care Management professional fee revenue captured (CPT 99495/99496). Requires documented care coordination within 2 days of discharge.">i</span>
+        </div>
+        <div class="card-value" id="kpi-tcm">—</div>
+        <div class="card-sub" id="kpi-tcm-sub"></div>
+      </div>
+    </div>
+
+    <!-- Annualized run rate bar -->
+    <div id="run-rate-bar" class="run-rate-bar hidden">
+      <div class="run-rate-icon">📈</div>
+      <div>
+        <div class="run-rate-label">Annualized run rate</div>
+        <div class="run-rate-value" id="run-rate-value">—</div>
+      </div>
+      <div class="run-rate-note" id="run-rate-note"></div>
+    </div>
+    <div id="run-rate-insufficient" class="hidden" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 18px;margin-bottom:18px;font-size:.82rem;color:#64748b;">
+      📊 Insufficient data for annualized projection — need 10+ measured episodes.
+    </div>
+
+    <!-- ── Monthly Trend Chart ── -->
+    <div class="chart-panel no-print-avoid">
+      <div class="chart-panel-header">
+        <div>
+          <div class="chart-title">Monthly Value Trend</div>
+          <div class="chart-sub">Cost savings and total value (left axis) · Episode count (right axis)</div>
+        </div>
+        <div class="chart-legend">
+          <div class="legend-item">
+            <div class="legend-line" style="background:#1a56db;"></div>
+            Cost Savings
+          </div>
+          <div class="legend-item">
+            <div class="legend-line dashed" style="color:#059669;"></div>
+            Total Value
+          </div>
+          <div class="legend-item">
+            <div class="legend-bar" style="background:#94a3b8;"></div>
+            Episodes
+          </div>
+        </div>
+      </div>
+      <div id="chart-empty" class="chart-empty hidden">No monthly data available for the selected period.</div>
+      <div class="chart-wrap" id="chart-wrap">
+        <canvas id="trend-chart" aria-label="Monthly ROI trend line chart with dual Y axes for dollar values and episode count"></canvas>
+      </div>
+    </div>
+
+    <!-- ── Lower two-panel section ── -->
+    <div class="lower-panels">
+
+      <!-- LEFT: DRG Breakdown -->
+      <div class="left-panel">
+        <div class="panel-box">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">DRG Breakdown</div>
+              <div class="panel-sub">Click a row to filter episodes →</div>
+            </div>
+            <button class="load-more-btn no-print" onclick="clearDrgFilter()" id="clear-drg-btn" style="display:none;font-size:.72rem;padding:4px 10px;">✕ Clear filter</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" id="drg-table">
+              <thead>
+                <tr>
+                  <th onclick="sortDrg('drg_code')" data-col="drg_code">DRG <span class="sort-arrow"></span></th>
+                  <th onclick="sortDrg('episodes')" data-col="episodes" style="text-align:right;">Eps <span class="sort-arrow"></span></th>
+                  <th onclick="sortDrg('avg_excess_days')" data-col="avg_excess_days" style="text-align:right;">Avg Days <span class="sort-arrow"></span></th>
+                  <th onclick="sortDrg('total_savings')" data-col="total_savings" style="text-align:right;">Savings <span class="sort-arrow"></span></th>
+                </tr>
+              </thead>
+              <tbody id="drg-tbody">
+                <tr><td colspan="4" class="tbl-empty">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Episode Detail -->
+      <div class="right-panel">
+        <div class="panel-box">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Episode Detail</div>
+              <div class="panel-sub" id="episode-count-label">All measured episodes</div>
+            </div>
+          </div>
+
+          <!-- Filter bar -->
+          <div class="episode-filters no-print">
+            <select class="filter-select" id="drg-filter-select" onchange="applyEpisodeFilters()">
+              <option value="">All DRGs</option>
+            </select>
+            <select class="filter-select" id="clinician-filter-select" onchange="applyEpisodeFilters()">
+              <option value="">All Clinicians</option>
+            </select>
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="data-table" id="episode-table">
+              <thead>
+                <tr>
+                  <th>Ep. ID</th>
+                  <th>DRG</th>
+                  <th>Admit</th>
+                  <th>Discharge</th>
+                  <th style="text-align:right;">Actual LOS</th>
+                  <th style="text-align:right;">Expected</th>
+                  <th style="text-align:right;">Days Saved</th>
+                  <th style="text-align:right;">Cost Impact</th>
+                  <th>HRRP</th>
+                  <th style="text-align:right;">Total Value</th>
+                </tr>
+              </thead>
+              <tbody id="episode-tbody">
+                <tr><td colspan="10" class="tbl-empty">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="load-more-row" class="load-more-row hidden">
+            <button class="load-more-btn" onclick="loadMoreEpisodes()">Load more episodes</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /lower-panels -->
+
+    <!-- ── Methodology collapsible ── -->
+    <details class="methodology">
+      <summary>📋 Methodology &amp; Data Sources</summary>
+      <div class="methodology-body">
+        <h4>LOS Baseline</h4>
+        CMS FY 2026 IPPS Final Rule Table 5 — DRG geometric mean length of stay. Excess days = Actual LOS − DRG geometric mean LOS. Episodes without a DRG code cannot be included in savings calculations; cost impact shows $0 for those records.
+
+        <h4>Cost Per Day</h4>
+        Default $4,100/day (AHA 2024 data, California non-profit hospital average). Configurable per organization via ⚙ Configure → Cost Per Day. This figure represents the fully-allocated hospital cost (not charge) per inpatient day.
+
+        <h4>HRRP Penalty Estimate</h4>
+        ~$4,500 per episode flagged for applicable HRRP conditions (AMI, CHF, COPD, Pneumonia, Hip/Knee arthroplasty, CABG). This is a conservative CMS-median estimate. Actual penalty depends on hospital-specific excess readmission ratios and total Medicare base operating DRG payments.
+
+        <h4>TCM Revenue</h4>
+        CPT 99495 ($163 facility rate) and 99496 ($228 facility rate) — CMS 2025 MPFS national non-facility rates. Requires documented care coordination contact within 2 business days of discharge and face-to-face visit within 7 (99496) or 14 (99495) days.
+
+        <h4>Annualized Run Rate</h4>
+        Projected by dividing total measured value by days elapsed, then multiplying by 365. Requires 10+ measured episodes for projection to display. Marked as estimate — actual outcomes depend on volume, payer mix, and DRG completeness.
+
+        <h4>Data Sources</h4>
+        <a href="https://www.cms.gov/medicaremedicare-fee-service-paymenthospitalacuteinpatientpps/fy-2026-ipps-final-rule-home-page" target="_blank" rel="noopener">CMS FY 2026 IPPS Final Rule</a> ·
+        <a href="https://www.aha.org/research/data" target="_blank" rel="noopener">AHA Hospital Statistics 2024</a> ·
+        <a href="https://www.cms.gov/medicare/quality/value-based-programs/hospital-readmissions-reductions" target="_blank" rel="noopener">CMS HRRP Program</a>
+      </div>
+    </details>
+
+  </div><!-- /dashboard-content -->
+</div><!-- /container -->
+
+<!-- ═══════════════════════════════ SETTINGS MODAL ═══════════════════════════ -->
+<div class="modal-backdrop hidden" id="settings-modal" onclick="handleBackdropClick(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">⚙ Configure ROI Settings</div>
+      <button class="modal-close" onclick="closeSettings()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label class="modal-label" for="s-hospital-type">Hospital Type</label>
+        <select class="modal-input" id="s-hospital-type">
+          <option value="nonprofit">Non-profit</option>
+          <option value="forprofit">For-profit</option>
+          <option value="government">Government / Public</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="s-cost-per-day">Cost Per Day Override ($)</label>
+        <input type="number" class="modal-input" id="s-cost-per-day" min="0" step="100" placeholder="4100 (default AHA 2024 CA non-profit)" />
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="s-hospital-name">Hospital Name</label>
+        <input type="text" class="modal-input" id="s-hospital-name" placeholder="e.g. Mercy Community Hospital" />
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="s-licensed-beds">Licensed Beds</label>
+        <input type="number" class="modal-input" id="s-licensed-beds" min="1" step="1" placeholder="e.g. 150" />
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="s-annual-discharges">Annual Discharges</label>
+        <input type="number" class="modal-input" id="s-annual-discharges" min="1" step="1" placeholder="e.g. 4200" />
+      </div>
+      <div id="modal-msg" class="modal-msg hidden"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="btn-save" id="btn-save-settings" onclick="saveSettings()">Save &amp; Reload</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════ SCRIPTS ════════════════════════════════════ -->
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════════════════════ */
+let currentMonths    = 1;
+let customStart      = null;
+let customEnd        = null;
+let dashboardData    = null;
+let allOutcomes      = [];
+let outcomeTotal     = 0;
+let outcomePage      = 1;
+const PAGE_SIZE      = 20;
+let selectedDrgCode  = null;
+let drgSortCol       = 'total_savings';
+let drgSortDir       = 'desc';
+let trendChart       = null;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AUTH CHECK — redirect to /login if not authenticated
+══════════════════════════════════════════════════════════════════════════ */
+fetch('/api/me').then(r => {
+  if (!r.ok) window.location.href = '/login';
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DATE RANGE HELPERS
+══════════════════════════════════════════════════════════════════════════ */
+function isoDate(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function getRangeParams() {
+  if (customStart && customEnd) {
+    return { start_date: customStart, end_date: customEnd };
+  }
+  const end = new Date();
+  let start;
+  if (currentMonths === 'ytd') {
+    start = new Date(end.getFullYear(), 0, 1);
+  } else {
+    start = new Date(end);
+    start.setMonth(start.getMonth() - currentMonths);
+  }
+  return { start_date: isoDate(start), end_date: isoDate(end) };
+}
+
+function getRangeLabelText() {
+  const p = getRangeParams();
+  const fmt = s => new Date(s + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${fmt(p.start_date)} – ${fmt(p.end_date)}`;
+}
+
+function setRange(months, btn) {
+  currentMonths = months;
+  customStart = null;
+  customEnd = null;
+  document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('custom-date-row').classList.add('hidden');
+  loadDashboard();
+}
+
+function toggleCustom(btn) {
+  const row = document.getElementById('custom-date-row');
+  const isHidden = row.classList.contains('hidden');
+  document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  if (isHidden) {
+    row.classList.remove('hidden');
+    btn.classList.add('active');
+    // Default custom to last 90 days
+    const end = new Date();
+    const start = new Date(); start.setMonth(start.getMonth() - 3);
+    document.getElementById('custom-start').value = isoDate(start);
+    document.getElementById('custom-end').value   = isoDate(end);
+    customStart = isoDate(start);
+    customEnd   = isoDate(end);
+    loadDashboard();
+  } else {
+    row.classList.add('hidden');
+    currentMonths = 1;
+    document.querySelectorAll('.range-btn[data-months="1"]').forEach(b => b.classList.add('active'));
+    customStart = null; customEnd = null;
+    loadDashboard();
+  }
+}
+
+function applyCustomRange() {
+  customStart = document.getElementById('custom-start').value;
+  customEnd   = document.getElementById('custom-end').value;
+  if (customStart && customEnd && customStart <= customEnd) {
+    loadDashboard();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FORMATTING HELPERS
+══════════════════════════════════════════════════════════════════════════ */
+function fmt$(n) {
+  if (n === null || n === undefined) return '$0';
+  const val = Math.round(Math.abs(n));
+  const sign = n < 0 ? '-' : '';
+  if (val >= 1000000) return sign + '$' + (val / 1000000).toFixed(1) + 'M';
+  if (val >= 1000)    return sign + '$' + val.toLocaleString();
+  return sign + '$' + val;
+}
+
+function fmtDays(n) {
+  if (n === null || n === undefined) return '—';
+  return (n > 0 ? '+' : '') + Number(n).toFixed(1);
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  return new Date(s + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+}
+
+function fmtMonthLabel(year, month) {
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAIN LOAD
+══════════════════════════════════════════════════════════════════════════ */
+async function loadDashboard() {
+  showLoading(true);
+  try {
+    const params = getRangeParams();
+    const months = currentMonths === 'ytd' ? 12 : currentMonths;
+    const qp = new URLSearchParams({ months });
+
+    // Always fresh — no-cache
+    const [dashRes, outRes] = await Promise.all([
+      fetch(`/api/roi/dashboard?${qp}`, { cache: 'no-store' }),
+      fetch(`/api/roi/outcomes?limit=${PAGE_SIZE}&offset=0`, { cache: 'no-store' }),
+    ]);
+
+    if (dashRes.status === 401 || outRes.status === 401) {
+      window.location.href = '/login';
+      return;
+    }
+    if (!dashRes.ok) throw new Error(`Dashboard API error ${dashRes.status}`);
+    if (!outRes.ok)  throw new Error(`Outcomes API error ${outRes.status}`);
+
+    dashboardData = await dashRes.json();
+    const outData = await outRes.json();
+    allOutcomes   = outData.outcomes || [];
+    outcomeTotal  = outData.total || 0;
+    outcomePage   = 1;
+    selectedDrgCode = null;
+
+    renderDashboard(dashboardData);
+    renderEpisodeFilters(dashboardData);
+    renderEpisodes(allOutcomes, false);
+    renderDrgTable(dashboardData.drg_breakdown || []);
+    document.getElementById('print-range-label').textContent = getRangeLabelText();
+
+    showLoading(false);
+    document.getElementById('dashboard-content').classList.remove('hidden');
+  } catch (e) {
+    showLoading(false);
+    showError(e.message);
+  }
+}
+
+function showLoading(yes) {
+  document.getElementById('loading-state').classList.toggle('hidden', !yes);
+  document.getElementById('error-state').classList.add('hidden');
+}
+
+function showError(msg) {
+  document.getElementById('error-msg-text').textContent = msg;
+  document.getElementById('error-state').classList.remove('hidden');
+  document.getElementById('loading-state').classList.add('hidden');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER DASHBOARD
+══════════════════════════════════════════════════════════════════════════ */
+function renderDashboard(data) {
+  const t = data.totals || {};
+  const dq = data.data_quality || {};
+
+  // ── Data quality banner ──
+  const pct = t.data_completeness_pct ?? dq.completeness_pct ?? 0;
+  const epsDrg = t.episodes_with_drg ?? 0;
+  const banner = document.getElementById('dq-banner');
+  if (pct < 80) {
+    document.getElementById('dq-recommendation').textContent = ' ' + (dq.recommendation || 'Add DRG codes to episodes to improve cost savings accuracy.');
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  // ── Completeness progress ──
+  const fillPct = Math.min(100, Math.max(0, pct));
+  document.getElementById('completeness-fill').style.width = fillPct + '%';
+  document.getElementById('completeness-fill').style.background = fillPct >= 80 ? '#059669' : fillPct >= 50 ? '#d97706' : '#dc2626';
+  document.getElementById('completeness-pct').textContent = fillPct.toFixed(0) + '%';
+  document.getElementById('completeness-note').textContent =
+    `(${epsDrg} of ${t.total_episodes_measured ?? 0} episodes with DRG code)`;
+
+  // ── Stat cards ──
+  const totalVal = t.total_value_dollars ?? 0;
+  document.getElementById('kpi-total-value').textContent = fmt$(totalVal);
+  document.getElementById('kpi-total-value-sub').textContent =
+    `avg ${fmt$(t.avg_cost_savings_per_episode ?? 0)}/episode · ${t.total_episodes_measured ?? 0} episodes`;
+
+  const daysSaved = t.total_excess_days_saved ?? 0;
+  const daysCard = document.getElementById('stat-card-days');
+  const daysAccent = document.getElementById('days-accent');
+  daysCard.classList.remove('card-green', 'card-red');
+  if (daysSaved < 0) {
+    daysCard.classList.add('card-red');
+    daysAccent.style.background = '#dc2626';
+  } else {
+    daysCard.classList.add('card-green');
+    daysAccent.style.background = '#059669';
+  }
+  document.getElementById('kpi-days-saved').textContent = fmtDays(daysSaved);
+  document.getElementById('kpi-days-saved').style.color = daysSaved < 0 ? '#dc2626' : '#059669';
+  document.getElementById('kpi-days-saved-sub').textContent =
+    `avg ${(t.avg_excess_days_per_episode ?? 0).toFixed(1)} days/episode`;
+
+  const hrrp = t.total_hrrp_avoided_dollars ?? 0;
+  document.getElementById('kpi-hrrp').textContent = fmt$(hrrp);
+  document.getElementById('kpi-hrrp-sub').textContent =
+    `${t.total_hrrp_penalties_avoided ?? 0} bills avoided`;
+
+  const tcm = t.total_tcm_revenue ?? 0;
+  document.getElementById('kpi-tcm').textContent = fmt$(tcm);
+  document.getElementById('kpi-tcm-sub').textContent =
+    `${t.total_episodes_measured ?? 0} episodes measured`;
+
+  // ── Annualized run rate ──
+  const rrBar  = document.getElementById('run-rate-bar');
+  const rrInsuf = document.getElementById('run-rate-insufficient');
+  if (t.annualized_insufficient_data === true) {
+    rrBar.classList.add('hidden');
+    rrInsuf.classList.remove('hidden');
+  } else if (t.annualized_run_rate_dollars !== null && t.annualized_run_rate_dollars !== undefined) {
+    rrBar.classList.remove('hidden');
+    rrInsuf.classList.add('hidden');
+    document.getElementById('run-rate-value').textContent = fmt$(t.annualized_run_rate_dollars);
+    document.getElementById('run-rate-note').textContent = 'Projected annualized — based on current period · estimate only';
+  } else {
+    rrBar.classList.add('hidden');
+    rrInsuf.classList.add('hidden');
+  }
+
+  // ── Monthly trend chart ──
+  renderTrendChart(data.monthly_trend || []);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MONTHLY TREND CHART
+══════════════════════════════════════════════════════════════════════════ */
+function renderTrendChart(monthly) {
+  const empty = document.getElementById('chart-empty');
+  const wrap  = document.getElementById('chart-wrap');
+
+  if (!monthly || monthly.length === 0) {
+    empty.classList.remove('hidden');
+    wrap.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  wrap.classList.remove('hidden');
+
+  const labels       = monthly.map(m => fmtMonthLabel(m.year, m.month));
+  const costSavings  = monthly.map(m => m.cost_savings ?? 0);
+  const totalValue   = monthly.map(m => m.total_value ?? 0);
+  const episodes     = monthly.map(m => m.episodes ?? 0);
+
+  if (trendChart) { trendChart.destroy(); trendChart = null; }
+
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+  trendChart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Episodes',
+          data: episodes,
+          backgroundColor: 'rgba(148,163,184,0.35)',
+          borderColor: 'rgba(148,163,184,0.6)',
+          borderWidth: 1,
+          borderRadius: 3,
+          yAxisID: 'yRight',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: 'Cost Savings',
+          data: costSavings,
+          borderColor: '#1a56db',
+          backgroundColor: 'rgba(26,86,219,0.07)',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: '#1a56db',
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'yLeft',
+          order: 1,
+        },
+        {
+          type: 'line',
+          label: 'Total Value',
+          data: totalValue,
+          borderColor: '#059669',
+          backgroundColor: 'rgba(5,150,105,0.06)',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 3,
+          pointBackgroundColor: '#059669',
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'yLeft',
+          order: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === 'Episodes') return ` Episodes: ${ctx.raw}`;
+              return ` ${ctx.dataset.label}: ${fmt$(ctx.raw)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(0,0,0,0.04)' },
+          ticks: { color: '#64748b', font: { size: 11 } },
+          border: { display: false },
+        },
+        yLeft: {
+          type: 'linear',
+          position: 'left',
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          ticks: {
+            color: '#64748b',
+            font: { size: 10 },
+            callback: v => fmt$(v),
+          },
+          border: { display: false },
+        },
+        yRight: {
+          type: 'linear',
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: {
+            color: '#94a3b8',
+            font: { size: 10 },
+            stepSize: 1,
+          },
+          border: { display: false },
+        },
+      },
+    },
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DRG TABLE
+══════════════════════════════════════════════════════════════════════════ */
+function sortDrg(col) {
+  if (drgSortCol === col) {
+    drgSortDir = drgSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    drgSortCol = col;
+    drgSortDir = 'desc';
+  }
+  if (dashboardData) renderDrgTable(dashboardData.drg_breakdown || []);
+}
+
+function renderDrgTable(rows) {
+  // Update sort header classes
+  document.querySelectorAll('#drg-table th').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === drgSortCol) th.classList.add(drgSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+
+  const sorted = [...rows].sort((a, b) => {
+    const av = a[drgSortCol] ?? 0;
+    const bv = b[drgSortCol] ?? 0;
+    if (typeof av === 'string') {
+      return drgSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+    return drgSortDir === 'asc' ? av - bv : bv - av;
+  });
+
+  const tbody = document.getElementById('drg-tbody');
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="tbl-empty">No DRG data available.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(r => {
+    const isSel = r.drg_code === selectedDrgCode;
+    const descShort = (r.drg_description || '').length > 28
+      ? (r.drg_description || '').slice(0, 28) + '…'
+      : (r.drg_description || r.drg_code || '—');
+    return `<tr class="clickable ${isSel ? 'row-selected' : ''}" onclick="selectDrg('${escapeAttr(r.drg_code)}')" title="${escapeAttr(r.drg_description || '')}">
+      <td>
+        <div style="font-weight:600;font-size:.8rem;">${escapeHtml(r.drg_code || '—')}</div>
+        <div style="font-size:.7rem;color:#64748b;">${escapeHtml(descShort)}</div>
+      </td>
+      <td style="text-align:right;" class="cell-mono">${r.episodes ?? 0}</td>
+      <td style="text-align:right;" class="${(r.avg_excess_days ?? 0) < 0 ? 'cell-red' : 'cell-green'} cell-mono">${fmtDays(r.avg_excess_days)}</td>
+      <td style="text-align:right;" class="cell-mono">${fmt$(r.total_savings)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function selectDrg(code) {
+  if (selectedDrgCode === code) {
+    clearDrgFilter();
+    return;
+  }
+  selectedDrgCode = code;
+  document.getElementById('clear-drg-btn').style.display = '';
+  document.getElementById('drg-filter-select').value = code;
+  if (dashboardData) renderDrgTable(dashboardData.drg_breakdown || []);
+  applyEpisodeFilters();
+}
+
+function clearDrgFilter() {
+  selectedDrgCode = null;
+  document.getElementById('clear-drg-btn').style.display = 'none';
+  document.getElementById('drg-filter-select').value = '';
+  if (dashboardData) renderDrgTable(dashboardData.drg_breakdown || []);
+  applyEpisodeFilters();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EPISODE FILTERS & TABLE
+══════════════════════════════════════════════════════════════════════════ */
+function renderEpisodeFilters(data) {
+  const drgSel = document.getElementById('drg-filter-select');
+  const clinSel = document.getElementById('clinician-filter-select');
+
+  // DRG dropdown
+  drgSel.innerHTML = '<option value="">All DRGs</option>';
+  (data.drg_breakdown || []).forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.drg_code;
+    opt.textContent = `${r.drg_code} — ${(r.drg_description || '').slice(0, 40)}`;
+    drgSel.appendChild(opt);
+  });
+
+  // Clinician dropdown
+  clinSel.innerHTML = '<option value="">All Clinicians</option>';
+  (data.clinician_breakdown || []).forEach(r => {
+    if (!r.clinician) return;
+    const opt = document.createElement('option');
+    opt.value = r.clinician;
+    opt.textContent = r.clinician;
+    clinSel.appendChild(opt);
+  });
+}
+
+function applyEpisodeFilters() {
+  const drgVal  = document.getElementById('drg-filter-select').value;
+  const clinVal = document.getElementById('clinician-filter-select').value;
+
+  // Sync DRG selection with left panel
+  if (drgVal !== selectedDrgCode) {
+    selectedDrgCode = drgVal || null;
+    document.getElementById('clear-drg-btn').style.display = selectedDrgCode ? '' : 'none';
+    if (dashboardData) renderDrgTable(dashboardData.drg_breakdown || []);
+  }
+
+  let filtered = allOutcomes;
+  if (drgVal)  filtered = filtered.filter(o => o.drg_code === drgVal);
+  if (clinVal) filtered = filtered.filter(o => o.primary_clinician === clinVal);
+
+  const label = document.getElementById('episode-count-label');
+  label.textContent = filtered.length < outcomeTotal
+    ? `${filtered.length} episodes shown (filtered)`
+    : `${outcomeTotal} total episodes`;
+
+  renderEpisodes(filtered, false);
+}
+
+function renderEpisodes(rows, append) {
+  const tbody = document.getElementById('episode-tbody');
+
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="tbl-empty">No episodes match the current filters.</td></tr>';
+    document.getElementById('load-more-row').classList.add('hidden');
+    return;
+  }
+
+  const html = rows.map(o => {
+    const daysSaved = o.excess_days_saved ?? 0;
+    const daysCls   = daysSaved < 0 ? 'cell-red' : daysSaved > 0 ? 'cell-green' : '';
+    const cost      = o.cost_savings_dollars ?? 0;
+    const hrrpFlag  = o.hrrp_condition_flagged;
+    const hrrpAvoid = o.hrrp_penalty_avoided;
+    const hrrpHtml  = hrrpFlag
+      ? `<span class="hrrp-pill ${hrrpAvoid ? 'avoided' : ''}">${hrrpAvoid ? '✓ Avoided' : 'Flagged'}</span>`
+      : '<span style="color:#cbd5e1;font-size:.75rem;">—</span>';
+
+    return `<tr>
+      <td style="font-size:.75rem;color:#94a3b8;font-variant-numeric:tabular-nums;">${o.id}</td>
+      <td>
+        <div style="font-weight:600;font-size:.79rem;">${escapeHtml(o.drg_code || '—')}</div>
+        <div style="font-size:.68rem;color:#64748b;">${escapeHtml((o.drg_description || '').slice(0, 22))}</div>
+      </td>
+      <td style="font-size:.79rem;">${fmtDate(o.admission_date)}</td>
+      <td style="font-size:.79rem;">${fmtDate(o.actual_discharge_date)}</td>
+      <td style="text-align:right;" class="cell-mono">${o.actual_los_days != null ? o.actual_los_days + 'd' : '—'}</td>
+      <td style="text-align:right;" class="cell-mono">${o.drg_geometric_mean_los != null ? Number(o.drg_geometric_mean_los).toFixed(1) + 'd' : '—'}</td>
+      <td style="text-align:right;" class="${daysCls} cell-mono">${o.drg_geometric_mean_los != null ? fmtDays(daysSaved) : '—'}</td>
+      <td style="text-align:right;" class="cell-mono">${o.drg_code ? fmt$(cost) : '<span style="color:#cbd5e1;">$0</span>'}</td>
+      <td>${hrrpHtml}</td>
+      <td style="text-align:right;font-weight:700;" class="cell-mono">${fmt$(o.total_value_dollars ?? 0)}</td>
+    </tr>`;
+  }).join('');
+
+  if (append) {
+    tbody.insertAdjacentHTML('beforeend', html);
+  } else {
+    tbody.innerHTML = html;
+  }
+
+  // Load more button
+  const lmRow = document.getElementById('load-more-row');
+  const drgVal = document.getElementById('drg-filter-select').value;
+  const showing = tbody.querySelectorAll('tr').length;
+  if (!drgVal && showing < outcomeTotal) {
+    lmRow.classList.remove('hidden');
+  } else {
+    lmRow.classList.add('hidden');
+  }
+}
+
+async function loadMoreEpisodes() {
+  try {
+    const offset = allOutcomes.length;
+    const res = await fetch(`/api/roi/outcomes?limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to load more');
+    const data = await res.json();
+    const newRows = data.outcomes || [];
+    allOutcomes = allOutcomes.concat(newRows);
+    outcomeTotal = data.total || outcomeTotal;
+    outcomePage++;
+    renderEpisodes(newRows, true);
+
+    // Update load more visibility
+    const tbody = document.getElementById('episode-tbody');
+    const showing = tbody.querySelectorAll('tr').length;
+    if (showing >= outcomeTotal) {
+      document.getElementById('load-more-row').classList.add('hidden');
+    }
+  } catch (e) {
+    alert('Could not load more episodes: ' + e.message);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EXPORT CSV
+══════════════════════════════════════════════════════════════════════════ */
+function exportCsv() {
+  const p = getRangeParams();
+  const url = `/api/roi/export?start_date=${p.start_date}&end_date=${p.end_date}`;
+  window.open(url, '_blank');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SETTINGS MODAL
+══════════════════════════════════════════════════════════════════════════ */
+async function openSettings() {
+  try {
+    const res = await fetch('/api/roi/settings', { cache: 'no-store' });
+    if (res.ok) {
+      const s = await res.json();
+      document.getElementById('s-hospital-type').value      = s.hospital_type || 'nonprofit';
+      document.getElementById('s-cost-per-day').value       = s.cost_per_day || '';
+      document.getElementById('s-hospital-name').value      = s.hospital_name || '';
+      document.getElementById('s-licensed-beds').value      = s.licensed_beds || '';
+      document.getElementById('s-annual-discharges').value  = s.annual_discharges || '';
+    }
+  } catch (_) { /* show modal with blanks */ }
+  document.getElementById('modal-msg').classList.add('hidden');
+  document.getElementById('settings-modal').classList.remove('hidden');
+  document.getElementById('s-hospital-name').focus();
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+}
+
+function handleBackdropClick(e) {
+  if (e.target === document.getElementById('settings-modal')) closeSettings();
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('btn-save-settings');
+  const msg = document.getElementById('modal-msg');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  msg.classList.add('hidden');
+
+  const payload = {
+    hospital_type:     document.getElementById('s-hospital-type').value,
+    hospital_name:     document.getElementById('s-hospital-name').value.trim() || null,
+    licensed_beds:     parseInt(document.getElementById('s-licensed-beds').value) || null,
+    annual_discharges: parseInt(document.getElementById('s-annual-discharges').value) || null,
+  };
+  const cpd = parseFloat(document.getElementById('s-cost-per-day').value);
+  if (!isNaN(cpd) && cpd > 0) payload.cost_per_day = cpd;
+
+  try {
+    const res = await fetch('/api/roi/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    msg.textContent = 'Settings saved.';
+    msg.className = 'modal-msg ok';
+    msg.classList.remove('hidden');
+    setTimeout(() => {
+      closeSettings();
+      loadDashboard();
+    }, 900);
+  } catch (e) {
+    msg.textContent = 'Error: ' + e.message;
+    msg.className = 'modal-msg err';
+    msg.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save & Reload';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ESCAPE HELPERS
+══════════════════════════════════════════════════════════════════════════ */
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escapeAttr(s) {
+  return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════════════════════════════════ */
+loadDashboard();
+</script>
+
+<script src="/static/pwa.js" defer></script>
+</body>
+</html>
