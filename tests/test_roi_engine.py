@@ -774,3 +774,189 @@ class TestRoiExportDbPath:
         r = await db_authed_client.get("/api/roi/export?start_date=2026-01-01&end_date=2026-05-31")
         assert r.status_code == 200
         assert captured.get("sd") is not None
+
+
+# ── Public page routes ────────────────────────────────────────────────────────
+
+class TestPublicPageRoutes:
+    """TCM calculator and pilot pages must be accessible without auth."""
+
+    async def test_tcm_roi_calculator_returns_200(self, client):
+        r = await client.get("/tcm-roi-calculator")
+        assert r.status_code == 200
+        assert "TCM" in r.text or "calculator" in r.text.lower()
+
+    async def test_pilot_page_returns_200(self, client):
+        r = await client.get("/pilot")
+        assert r.status_code == 200
+        assert "pilot" in r.text.lower() or "Pilot" in r.text
+
+
+# ── /api/pilot/spots ──────────────────────────────────────────────────────────
+
+class TestPilotSpots:
+    async def test_spots_no_db_returns_5(self, client):
+        r = await client.get("/api/pilot/spots")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_spots"] == 5
+        assert data["remaining"] == 5
+
+    async def test_spots_with_db_mocked(self, db_authed_client, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {"n": 2}
+        mock_cur.__enter__ = MagicMock(return_value=mock_cur)
+        mock_cur.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cur
+        mock_conn.close = MagicMock()
+        monkeypatch.setattr("db.connection.get_db_conn", lambda: mock_conn)
+        r = await db_authed_client.get("/api/pilot/spots")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_spots"] == 5
+        assert data["remaining"] == 3
+
+    async def test_spots_db_error_falls_back_to_5(self, db_authed_client, monkeypatch):
+        monkeypatch.setattr("db.connection.get_db_conn", lambda: (_ for _ in ()).throw(Exception("DB error")))
+        r = await db_authed_client.get("/api/pilot/spots")
+        assert r.status_code == 200
+        assert r.json()["remaining"] == 5
+
+
+# ── POST /api/pilot/apply ─────────────────────────────────────────────────────
+
+class TestPilotApply:
+    def _valid_body(self):
+        return {
+            "hospital_name": "Valley Medical Center",
+            "applicant_name": "Jane Smith",
+            "applicant_title": "CFO",
+            "email": "jane@valleymedical.org",
+            "phone": "555-1234",
+            "licensed_beds": 350,
+            "ehr_system": "Epic",
+            "annual_discharges": 12000,
+            "how_found": "Google",
+            "challenge_text": "We miss TCM windows",
+            "consent_revenue_share": True,
+            "consent_ca_hospital": True,
+        }
+
+    async def test_valid_application_returns_ok(self, client):
+        r = await client.post("/api/pilot/apply", json=self._valid_body())
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert "Jane" in r.json()["message"]
+
+    async def test_missing_hospital_name_400(self, client):
+        body = self._valid_body()
+        body["hospital_name"] = ""
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 400
+
+    async def test_missing_applicant_name_400(self, client):
+        body = self._valid_body()
+        body["applicant_name"] = ""
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 400
+
+    async def test_invalid_email_400(self, client):
+        body = self._valid_body()
+        body["email"] = "notanemail"
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 400
+
+    async def test_missing_consent_400(self, client):
+        body = self._valid_body()
+        body["consent_revenue_share"] = False
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 400
+
+    async def test_too_few_beds_400(self, client):
+        body = self._valid_body()
+        body["licensed_beds"] = 50
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 400
+
+    async def test_100_beds_allowed(self, client):
+        body = self._valid_body()
+        body["licensed_beds"] = 100
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 200
+
+    async def test_no_beds_field_allowed(self, client):
+        body = self._valid_body()
+        body.pop("licensed_beds")
+        r = await client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 200
+
+    async def test_with_db_stores_application(self, db_authed_client, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.__enter__ = MagicMock(return_value=mock_cur)
+        mock_cur.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cur
+        mock_conn.close = MagicMock()
+        monkeypatch.setattr("db.connection.get_db_conn", lambda: mock_conn)
+        body = self._valid_body()
+        r = await db_authed_client.post("/api/pilot/apply", json=body)
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+
+# ── GET /api/tcm/platform-roi ─────────────────────────────────────────────────
+
+class TestTcmPlatformRoi:
+    async def test_requires_auth(self, client):
+        r = await client.get("/api/tcm/platform-roi", follow_redirects=False)
+        assert r.status_code in (302, 401, 403)
+
+    async def test_returns_200_no_db(self, authed_client):
+        r = await authed_client.get("/api/tcm/platform-roi")
+        assert r.status_code == 200
+        data = r.json()
+        assert "subscription_monthly" in data
+        assert "monthly_tcm_revenue" in data
+        assert "annual_roi_current" in data
+        assert "calculator_share_url" in data
+
+    async def test_subscription_default_7000(self, authed_client):
+        r = await authed_client.get("/api/tcm/platform-roi")
+        assert r.json()["subscription_monthly"] == 7000
+
+    async def test_with_db_mocked(self, db_authed_client, monkeypatch):
+        from unittest.mock import MagicMock
+        monkeypatch.setattr("db.patients.get_org_domain", lambda email: "example.com")
+        monkeypatch.setattr("db.roi.get_org_roi_settings",
+                            lambda org: {"platform_subscription_monthly": 5000,
+                                         "license_beds": 300, "annual_discharges": 12000})
+
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        # Return values for the two queries: completed episodes, monthly revenue
+        mock_cur.fetchone.side_effect = [
+            {"n": 10, "rev": 22000.0},   # all-time query
+            {"rev": 2200.0},              # this-month query
+            {"n": 15},                    # total episodes query
+        ]
+        mock_cur.__enter__ = MagicMock(return_value=mock_cur)
+        mock_cur.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cur
+        mock_conn.close = MagicMock()
+        monkeypatch.setattr("db.connection.get_db_conn", lambda: mock_conn)
+
+        r = await db_authed_client.get("/api/tcm/platform-roi")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["subscription_monthly"] == 5000
+        assert data["monthly_tcm_revenue"] == 2200.0
+        assert data["annual_sub_cost"] == 60000.0
