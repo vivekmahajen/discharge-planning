@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline — Discharge Planning AI</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#00529B" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #58a6ff;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: #8b949e;
+    }
+
+    #online-restored {
+      display: none;
+      background: #1a7a40;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 6px;
+      margin-bottom: 24px;
+      font-weight: 600;
+    }
+
+    section {
+      width: 100%;
+      max-width: 640px;
+      margin-bottom: 32px;
+    }
+
+    h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .patient-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .patient-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-decoration: none;
+      color: #e6edf3;
+      transition: border-color .15s;
+    }
+
+    .patient-card:hover { border-color: #58a6ff; }
+
+    .patient-name { font-weight: 600; }
+    .patient-meta { font-size: 12px; color: #8b949e; margin-top: 2px; }
+    .cached-badge {
+      font-size: 11px;
+      background: #21262d;
+      color: #8b949e;
+      padding: 2px 8px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      color: #8b949e;
+      font-size: 14px;
+      font-style: italic;
+      padding: 20px 0;
+      text-align: center;
+    }
+
+    .stat-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px 20px;
+      flex: 1;
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+
+    .go-home {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 10px 24px;
+      background: #00529B;
+      color: #fff;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .go-home:hover { background: #0066c0; }
+
+    footer {
+      margin-top: auto;
+      padding-top: 32px;
+      color: #8b949e;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (prefers-color-scheme: light) {
+      body { background: #f6f8fa; color: #1f2328; }
+      h1 { color: #00529B; }
+      .patient-card, .stat-card { background: #fff; border-color: #d0d7de; }
+      .patient-card:hover { border-color: #00529B; }
+      h2 { border-color: #d0d7de; }
+      .stat-value { color: #00529B; }
+    }
+  </style>
+</head>
+<body>
+  <div id="online-restored">Connection restored — <a href="/my-patients" style="color:#fff;">go to your patients</a></div>
+
+  <header>
+    <div class="icon">&#x1F4F5;</div>
+    <h1>You're offline</h1>
+    <p class="subtitle">Showing cached records. Connect to access live data and AI features.</p>
+  </header>
+
+  <section>
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-patients">—</div>
+        <div class="stat-label">Cached Patients</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-queued">—</div>
+        <div class="stat-label">Pending Syncs</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Cached Patients</h2>
+    <div class="patient-list" id="patient-list">
+      <p class="empty-state">Loading cached records…</p>
+    </div>
+  </section>
+
+  <a href="/my-patients" class="go-home">Go to My Patients</a>
+
+  <footer>
+    Data cached in this browser. Sensitive information stays on your device.<br />
+    This page refreshes automatically when connection returns.
+  </footer>
+
+  <script>
+    "use strict";
+
+    async function loadCachedPatients() {
+      const list = document.getElementById("patient-list");
+      const statPatients = document.getElementById("stat-patients");
+      const statQueued = document.getElementById("stat-queued");
+
+      // Find all dp-patient-* caches
+      const cacheKeys = await caches.keys();
+      const patientCaches = cacheKeys.filter(k => k.startsWith("dp-patient-"));
+
+      statPatients.textContent = patientCaches.length;
+
+      if (patientCaches.length === 0) {
+        list.innerHTML = '<p class="empty-state">No cached patients found. Visit patient records while online to cache them.</p>';
+      } else {
+        const cards = [];
+        for (const key of patientCaches) {
+          const patientId = key.replace("dp-patient-", "");
+          const cache = await caches.open(key);
+          const req = `/api/patients/${patientId}`;
+          const resp = await cache.match(req);
+          if (!resp) continue;
+          try {
+            const data = await resp.json();
+            const name = data.patient_name || `MRN ${data.mrn || patientId}`;
+            const mrn = data.mrn || "";
+            const dx = data.primary_diagnosis || "";
+            const cachedAt = resp.headers.get("x-sw-cached-at");
+            const ageStr = cachedAt ? _timeAgo(parseInt(cachedAt, 10)) : "";
+            cards.push(`
+              <a class="patient-card" href="/patient/${patientId}">
+                <div>
+                  <div class="patient-name">${_esc(name)}</div>
+                  <div class="patient-meta">${mrn ? "MRN " + _esc(mrn) : ""}${dx ? " · " + _esc(dx.slice(0, 60)) : ""}</div>
+                </div>
+                ${ageStr ? `<span class="cached-badge">cached ${ageStr}</span>` : ""}
+              </a>
+            `);
+          } catch (_) {
+            cards.push(`<div class="patient-card">Patient ${_esc(patientId)}</div>`);
+          }
+        }
+        list.innerHTML = cards.join("") || '<p class="empty-state">No readable cached patient data.</p>';
+      }
+
+      // Queue count from IndexedDB
+      try {
+        const db = await _openIdb();
+        const tx = db.transaction("mutations", "readonly");
+        const cnt = await new Promise((res, rej) => {
+          const r = tx.objectStore("mutations").count();
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+        statQueued.textContent = cnt;
+      } catch (_) {
+        statQueued.textContent = "0";
+      }
+    }
+
+    function _timeAgo(ts) {
+      const secs = Math.floor((Date.now() - ts) / 1000);
+      if (secs < 60) return "just now";
+      if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+      if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+      return `${Math.floor(secs / 86400)}d ago`;
+    }
+
+    function _esc(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function _openIdb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open("dp-sync-queue", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("mutations", { keyPath: "id", autoIncrement: true });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    // Auto-reload when back online
+    window.addEventListener("online", () => {
+      document.getElementById("online-restored").style.display = "block";
+      setTimeout(() => { window.location.href = "/my-patients"; }, 3000);
+    });
+
+    // Refresh every 10 s to update queue count
+    setInterval(loadCachedPatients, 10000);
+
+    loadCachedPatients();
+  </script>
+</body>
+</html>

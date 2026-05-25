@@ -3,6 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00529B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DischargePlan" />
+  <link rel="stylesheet" href="/static/mobile.css" />
   <title>ROI Tracker — Discharge Planning AI</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -411,7 +419,7 @@ function ROITracker() {
           <button onClick={() => window.print()} className="no-print" style={{ fontSize:11, padding:"5px 12px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", cursor:"pointer" }}>
             🖨 Print report
           </button>
-          <button onClick={genBrief} disabled={briefLoad} className="no-print" style={{ fontSize:11, padding:"5px 14px", borderRadius:"var(--border-radius-md)", background:"#C8920A", color:"#1A0A00", border:"none", cursor:briefLoad?"default":"pointer", display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
+          <button onClick={genBrief} disabled={briefLoad} className="no-print" data-requires-network="true" style={{ fontSize:11, padding:"5px 14px", borderRadius:"var(--border-radius-md)", background:"#C8920A", color:"#1A0A00", border:"none", cursor:briefLoad?"default":"pointer", display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
             <i className={`ti ti-${briefLoad?"loader":"sparkles"}`} aria-hidden="true" style={{ fontSize:13, animation:briefLoad?"spin 1s linear infinite":"none" }}></i>
             {briefLoad ? "Writing…" : "AI executive summary"}
           </button>
@@ -717,5 +725,6 @@ function ROITracker() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<ROITracker />);
 </script>
+  <script src="/static/pwa.js" defer></script>
 </body>
 </html>

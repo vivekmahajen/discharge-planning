@@ -55,6 +55,55 @@ class TestPageRoutes:
         assert r.status_code == 200
 
 
+class TestPwaRoutes:
+    async def test_sw_js_returns_200(self, client):
+        r = await client.get("/sw.js")
+        assert r.status_code == 200
+
+    async def test_sw_js_content_type_is_javascript(self, client):
+        r = await client.get("/sw.js")
+        assert "javascript" in r.headers.get("content-type", "")
+
+    async def test_sw_js_has_service_worker_allowed_header(self, client):
+        r = await client.get("/sw.js")
+        assert r.headers.get("service-worker-allowed") == "/"
+
+    async def test_sw_js_cache_control_no_cache(self, client):
+        r = await client.get("/sw.js")
+        cc = r.headers.get("cache-control", "")
+        assert "no-cache" in cc
+
+    async def test_manifest_returns_200(self, client):
+        r = await client.get("/manifest.json")
+        assert r.status_code == 200
+
+    async def test_manifest_content_type(self, client):
+        r = await client.get("/manifest.json")
+        assert "manifest" in r.headers.get("content-type", "") or "json" in r.headers.get("content-type", "")
+
+    async def test_manifest_has_name(self, client):
+        r = await client.get("/manifest.json")
+        data = r.json()
+        assert data["name"] == "Discharge Planning AI"
+
+    async def test_manifest_has_shortcuts(self, client):
+        r = await client.get("/manifest.json")
+        data = r.json()
+        assert len(data["shortcuts"]) == 3
+
+    async def test_offline_page_returns_200_without_auth(self, client):
+        r = await client.get("/offline")
+        assert r.status_code == 200
+
+    async def test_offline_page_contains_cached_patients(self, client):
+        r = await client.get("/offline")
+        assert "Cached Patients" in r.text
+
+    async def test_offline_page_no_redirect(self, client):
+        r = await client.get("/offline", follow_redirects=False)
+        assert r.status_code == 200
+
+
 class TestHealthz:
     async def test_healthz_returns_200(self, client):
         r = await client.get("/api/healthz")

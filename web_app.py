@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from dataclasses import dataclass
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from typing import Any
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from slowapi import Limiter
@@ -2157,6 +2157,40 @@ async def get_settings(request: Request, ctx: OrgContext = Depends(get_current_o
         "directory_available": _DIRECTORY_DB_AVAILABLE,
         "eligibility_service_available": _ELIGIBILITY_AVAILABLE,
     })
+
+
+# ── PWA routes ───────────────────────────────────────────────────────────────
+
+@app.get("/sw.js")
+async def service_worker(request: Request):
+    """Serve the service worker from the root scope (must not be under /static/)."""
+    sw_path = STATIC_DIR / "sw.js"
+    content = sw_path.read_text(encoding="utf-8")
+    return Response(
+        content=content,
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
+@app.get("/manifest.json")
+async def web_manifest(request: Request):
+    manifest_path = STATIC_DIR / "manifest.json"
+    return Response(
+        content=manifest_path.read_bytes(),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/offline", response_class=HTMLResponse)
+async def offline_page(request: Request):
+    """Offline fallback page — no auth required so the SW can serve it."""
+    with open(STATIC_DIR / "offline.html", encoding="utf-8") as f:
+        return f.read()
 
 
 # ── Discharge Milestone / Barrier Tracking API ───────────────────────────────

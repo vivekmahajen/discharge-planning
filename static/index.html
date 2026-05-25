@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00529B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DischargePlan" />
+  <link rel="stylesheet" href="/static/mobile.css" />
 <title>Discharge Planning AI</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
@@ -488,7 +496,7 @@
         </div>
       </div>
       <div style="margin-top:12px">
-        <button class="btn btn-secondary" onclick="quickEligibilityCheck()" id="eligibilityBtn">
+        <button class="btn btn-secondary" onclick="quickEligibilityCheck()" id="eligibilityBtn" data-requires-network="true">
           ⚡ Quick Eligibility Check
         </button>
         <span id="eligibilityCheckMsg" style="font-size:.82rem;color:#64748b;margin-left:10px;"></span>
@@ -618,7 +626,7 @@
         <div></div>
       </div>
 
-      <button class="btn-generate" id="generateBtn" onclick="generatePlan()">
+      <button class="btn-generate" id="generateBtn" onclick="generatePlan()" data-requires-network="true">
         🤖 Generate Discharge Plan
       </button>
       <div class="error-msg" id="errorMsg"></div>
@@ -1254,5 +1262,6 @@ function populateForm(data) {
   }
 })();
 </script>
+  <script src="/static/pwa.js" defer></script>
 </body>
 </html>
