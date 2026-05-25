@@ -4,11 +4,27 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 from db.connection import get_db_conn
 
 _log = logging.getLogger(__name__)
+
+
+def _json_safe(obj):
+    """Recursively convert DB-returned types (date, datetime, Decimal) to JSON primitives."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    return obj
 
 
 # ── Org settings ──────────────────────────────────────────────────────────────
@@ -25,7 +41,7 @@ def get_org_roi_settings(org_domain: str) -> dict:
                 )
                 row = cur.fetchone()
                 if row:
-                    return dict(row)
+                    return _json_safe(dict(row))
                 return {
                     "org_domain": org_domain,
                     "hospital_type": "nonprofit",
@@ -68,7 +84,7 @@ def upsert_org_roi_settings(org_domain: str, settings: dict) -> dict:
                     [org_domain] + list(filtered.values()) + list(filtered.values()),
                 )
                 row = cur.fetchone()
-                return dict(row) if row else get_org_roi_settings(org_domain)
+                return _json_safe(dict(row)) if row else get_org_roi_settings(org_domain)
     finally:
         conn.close()
 
@@ -94,7 +110,7 @@ def get_drg_reference(drg_code: str) -> Optional[dict]:
                         (drg_code.strip().zfill(3),),
                     )
                     row = cur.fetchone()
-                return dict(row) if row else None
+                return _json_safe(dict(row)) if row else None
     finally:
         conn.close()
 
@@ -119,7 +135,7 @@ def search_drg(query: str, limit: int = 20) -> list[dict]:
                     """,
                     (q, q, f"{query}%", limit),
                 )
-                return [dict(r) for r in cur.fetchall()]
+                return _json_safe([dict(r) for r in cur.fetchall()])
     finally:
         conn.close()
 
@@ -216,7 +232,7 @@ def upsert_roi_outcome(patient_id: int, org_domain: str, outcome_data: dict) -> 
                     ),
                 )
                 row = cur.fetchone()
-                return dict(row) if row else {}
+                return _json_safe(dict(row)) if row else {}
     finally:
         conn.close()
 
@@ -232,7 +248,7 @@ def get_roi_outcome(patient_id: int, org_domain: str) -> Optional[dict]:
                     (patient_id, org_domain),
                 )
                 row = cur.fetchone()
-                return dict(row) if row else None
+                return _json_safe(dict(row)) if row else None
     finally:
         conn.close()
 
@@ -274,7 +290,7 @@ def get_org_roi_outcomes(
                     f"ORDER BY actual_discharge_date DESC LIMIT %s",
                     params,
                 )
-                return [dict(r) for r in cur.fetchall()]
+                return _json_safe([dict(r) for r in cur.fetchall()])
     finally:
         conn.close()
 
@@ -304,7 +320,7 @@ def get_monthly_roi_trend(org_domain: str, months: int = 12) -> list[dict]:
                     """,
                     (org_domain, months),
                 )
-                return [dict(r) for r in cur.fetchall()]
+                return _json_safe([dict(r) for r in cur.fetchall()])
     finally:
         conn.close()
 
@@ -332,7 +348,7 @@ def get_drg_roi_breakdown(org_domain: str, limit: int = 20) -> list[dict]:
                     """,
                     (org_domain, limit),
                 )
-                return [dict(r) for r in cur.fetchall()]
+                return _json_safe([dict(r) for r in cur.fetchall()])
     finally:
         conn.close()
 
@@ -357,7 +373,7 @@ def get_clinician_roi_breakdown(org_domain: str) -> list[dict]:
                     """,
                     (org_domain,),
                 )
-                return [dict(r) for r in cur.fetchall()]
+                return _json_safe([dict(r) for r in cur.fetchall()])
     finally:
         conn.close()
 
