@@ -198,6 +198,8 @@ def run_migrations() -> None:
                             cur.execute(s)
         finally:
             conn.close()
+        from db.referrals import run_referral_migrations
+        run_referral_migrations()
     except Exception as e:
         _log.warning("Patient migrations skipped (no DB?): %s", e)
 

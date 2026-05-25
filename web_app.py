@@ -17,7 +17,7 @@ import httpx
 from dotenv import load_dotenv
 from dataclasses import dataclass
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from typing import Any
+from typing import Any, Optional
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -141,6 +141,36 @@ try:
     _ROI_ENGINE_AVAILABLE = True
 except Exception as _roi_import_e:
     logging.getLogger(__name__).debug("ROI engine unavailable: %s", _roi_import_e)
+
+# Referral workflow (imported lazily)
+_REFERRALS_AVAILABLE = False
+try:
+    from db.referrals import (
+        create_referral as _create_referral,
+        get_referral as _get_referral,
+        list_referrals as _list_referrals,
+        update_referral_status as _update_referral_status,
+        log_delivery_attempt as _log_delivery_attempt,
+        get_delivery_log as _get_delivery_log,
+        get_referral_analytics as _get_referral_analytics,
+        get_org_referral_settings as _get_org_referral_settings,
+        upsert_org_referral_settings as _upsert_org_referral_settings,
+        add_referral_message as _add_referral_message,
+        get_referral_messages as _get_referral_messages,
+    )
+    from services.referral_packet import (
+        build_fhir_service_request as _build_fhir_sr,
+        build_referral_html as _build_referral_html,
+        generate_ai_clinical_summary as _gen_ai_summary,
+    )
+    from services.referral_delivery import (
+        send_via_fax as _send_via_fax,
+        send_via_careport as _send_via_careport,
+        get_delivery_status as _get_delivery_status,
+    )
+    _REFERRALS_AVAILABLE = True
+except Exception as _ref_import_e:
+    logging.getLogger(__name__).debug("Referrals module unavailable: %s", _ref_import_e)
 
 load_dotenv()
 
@@ -2649,6 +2679,199 @@ async def tcm_platform_roi(request: Request, ctx: OrgContext = Depends(get_curre
         "annual_roi_current": annual_roi,
         "calculator_share_url": calculator_url,
     })
+
+
+# ── Referral Workflow ─────────────────────────────────────────────────────────
+
+@app.get("/ward-referrals", response_class=HTMLResponse)
+async def ward_referrals_page(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    return HTMLResponse((STATIC_DIR / "ward-referrals.html").read_text())
+
+
+@app.post("/api/referrals")
+@limiter.limit("60/hour")
+async def create_referral_endpoint(request: Request, body: dict = Body(...), ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_create_referral, body.get("patient_id"), org_domain, ctx.email, body)
+    return JSONResponse(ref)
+
+
+@app.get("/api/referrals")
+@limiter.limit("120/hour")
+async def list_referrals_endpoint(
+    request: Request,
+    patient_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"referrals": [], "total": 0})
+    org_domain = _get_org_domain(ctx.email)
+    refs = await asyncio.to_thread(_list_referrals, org_domain, patient_id, status, limit, offset)
+    return JSONResponse({"referrals": refs, "total": len(refs)})
+
+
+@app.get("/api/referrals/analytics")
+@limiter.limit("30/hour")
+async def referral_analytics_endpoint(request: Request, days: int = 90, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"by_status": {}, "by_channel": {}, "total": 0})
+    org_domain = _get_org_domain(ctx.email)
+    data = await asyncio.to_thread(_get_referral_analytics, org_domain, days)
+    return JSONResponse(data)
+
+
+@app.get("/api/referrals/settings")
+@limiter.limit("60/hour")
+async def get_referral_settings_endpoint(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"default_channel": "fax"})
+    org_domain = _get_org_domain(ctx.email)
+    settings = await asyncio.to_thread(_get_org_referral_settings, org_domain)
+    return JSONResponse(settings)
+
+
+@app.patch("/api/referrals/settings")
+@limiter.limit("30/hour")
+async def patch_referral_settings_endpoint(request: Request, body: dict = Body(...), ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    settings = await asyncio.to_thread(_upsert_org_referral_settings, org_domain, body)
+    return JSONResponse(settings)
+
+
+@app.get("/api/referrals/delivery-status")
+@limiter.limit("60/hour")
+async def referral_delivery_status_endpoint(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"fax": False, "careport": False, "direct": False})
+    status = _get_delivery_status()
+    return JSONResponse(status)
+
+
+@app.get("/api/referrals/{referral_id}")
+@limiter.limit("120/hour")
+async def get_referral_endpoint(request: Request, referral_id: int, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_get_referral, referral_id, org_domain)
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+    return JSONResponse(ref)
+
+
+@app.patch("/api/referrals/{referral_id}/status")
+@limiter.limit("60/hour")
+async def update_referral_status_endpoint(
+    request: Request,
+    referral_id: int,
+    body: dict = Body(...),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    status = body.get("status", "")
+    valid = {"draft", "sent", "pending_review", "accepted", "declined", "cancelled"}
+    if status not in valid:
+        raise HTTPException(422, f"Invalid status. Must be one of: {', '.join(sorted(valid))}")
+    ref = await asyncio.to_thread(_update_referral_status, referral_id, org_domain, status, ctx.email, body.get("notes"))
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+    return JSONResponse(ref)
+
+
+@app.post("/api/referrals/{referral_id}/send")
+@limiter.limit("30/hour")
+async def send_referral_endpoint(request: Request, referral_id: int, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_get_referral, referral_id, org_domain)
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+
+    channel = ref.get("delivery_channel") or "manual"
+    result = {"success": False, "channel": channel, "error": "No delivery attempted"}
+
+    if channel == "fax" and ref.get("facility_fax"):
+        packet_html = ref.get("packet_html") or ""
+        result = await _send_via_fax(referral_id, ref["facility_fax"], packet_html, ref.get("facility_ccn", ""))
+    elif channel == "careport":
+        fhir_sr = ref.get("fhir_service_request") or {}
+        result = await _send_via_careport(referral_id, fhir_sr, ref.get("facility_ccn", ""))
+    elif channel == "manual":
+        result = {"success": True, "channel": "manual", "reference_id": None, "error": None}
+
+    await asyncio.to_thread(
+        _log_delivery_attempt,
+        referral_id, channel, result.get("success", False),
+        result.get("reference_id"), result.get("error")
+    )
+
+    if result.get("success"):
+        await asyncio.to_thread(_update_referral_status, referral_id, org_domain, "sent", ctx.email, None)
+
+    return JSONResponse(result)
+
+
+@app.post("/api/referrals/{referral_id}/resend")
+@limiter.limit("20/hour")
+async def resend_referral_endpoint(request: Request, referral_id: int, ctx: OrgContext = Depends(get_current_org)):
+    return await send_referral_endpoint(request, referral_id, ctx)
+
+
+@app.get("/api/referrals/{referral_id}/delivery-log")
+@limiter.limit("60/hour")
+async def referral_delivery_log_endpoint(request: Request, referral_id: int, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"log": []})
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_get_referral, referral_id, org_domain)
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+    log = await asyncio.to_thread(_get_delivery_log, referral_id)
+    return JSONResponse({"log": log})
+
+
+@app.get("/api/referrals/{referral_id}/messages")
+@limiter.limit("60/hour")
+async def get_referral_messages_endpoint(request: Request, referral_id: int, ctx: OrgContext = Depends(get_current_org)):
+    if not _REFERRALS_AVAILABLE:
+        return JSONResponse({"messages": []})
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_get_referral, referral_id, org_domain)
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+    msgs = await asyncio.to_thread(_get_referral_messages, referral_id, org_domain)
+    return JSONResponse({"messages": msgs})
+
+
+@app.post("/api/referrals/{referral_id}/messages")
+@limiter.limit("60/hour")
+async def add_referral_message_endpoint(
+    request: Request,
+    referral_id: int,
+    body: dict = Body(...),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    if not _REFERRALS_AVAILABLE:
+        raise HTTPException(503, "Referrals module unavailable")
+    org_domain = _get_org_domain(ctx.email)
+    ref = await asyncio.to_thread(_get_referral, referral_id, org_domain)
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+    text = (body.get("message_text") or "").strip()
+    if not text:
+        raise HTTPException(422, "message_text required")
+    msg = await asyncio.to_thread(_add_referral_message, referral_id, org_domain, ctx.email, text)
+    return JSONResponse(msg)
 
 
 # ── PWA routes ───────────────────────────────────────────────────────────────
