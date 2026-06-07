@@ -573,3 +573,62 @@ class TestCmsFetch:
         assert res["status"] == "error"
         assert "CMS API request failed" in res["error"]
         assert captured["status"] == "error"
+
+
+# ─── Diagnostic probe endpoint ───────────────────────────────────────────────
+
+class TestDebugFetch:
+    def test_debug_cms_fetch_reports_statuses(self, monkeypatch):
+        import httpx
+        import services.directory_sync as ds
+        original = httpx.Client
+
+        def handler(request):
+            if "api.github.com" in str(request.url):
+                return httpx.Response(200, json={"ok": True})
+            if request.method == "POST":
+                return httpx.Response(403, text="Forbidden")
+            return httpx.Response(200, json={"results": [{"x": 1}]})
+
+        def factory(*a, **k):
+            k.pop("transport", None)
+            return original(*a, transport=httpx.MockTransport(handler), **k)
+
+        monkeypatch.setattr(ds.httpx, "Client", factory)
+        out = ds.debug_cms_fetch()
+        assert out["cms_post"]["status"] == 403
+        assert out["cms_get"]["status"] == 200
+        assert out["egress_control"]["status"] == 200
+
+    def test_debug_cms_fetch_captures_exceptions(self, monkeypatch):
+        import httpx
+        import services.directory_sync as ds
+        original = httpx.Client
+
+        def handler(request):
+            raise httpx.ConnectTimeout("connection timed out")
+
+        def factory(*a, **k):
+            k.pop("transport", None)
+            return original(*a, transport=httpx.MockTransport(handler), **k)
+
+        monkeypatch.setattr(ds.httpx, "Client", factory)
+        out = ds.debug_cms_fetch()
+        assert out["cms_post"]["ok"] is False
+        assert "ConnectTimeout" in out["cms_post"]["error"]
+
+    async def test_debug_endpoint_requires_auth(self, client):
+        r = await client.get("/api/directory/debug-fetch")
+        assert r.status_code == 401
+
+    async def test_debug_endpoint_returns_probe(self, authed_client):
+        fake = {
+            "cms_api": "https://x",
+            "cms_post": {"ok": False, "error": "ConnectTimeout: timed out"},
+            "cms_get": {"ok": False, "error": "ConnectTimeout: timed out"},
+            "egress_control": {"ok": True, "status": 200},
+        }
+        with patch("services.directory_sync.debug_cms_fetch", return_value=fake):
+            r = await authed_client.get("/api/directory/debug-fetch")
+        assert r.status_code == 200
+        assert r.json()["egress_control"]["status"] == 200
