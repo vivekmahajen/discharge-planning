@@ -2092,28 +2092,61 @@ async def directory_county_summary(request: Request, ctx: OrgContext = Depends(g
 
 
 @app.post("/api/directory/sync")
-@limiter.limit("30/hour")
+@limiter.limit("120/hour")
 async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    """Chunked sync driver. Each call processes ONE page (~500 rows) so it stays
+    well within a serverless function's time limit; the client calls repeatedly,
+    passing the returned next_offset, until status == "done". This is the only
+    approach that reliably completes within a short function budget."""
     if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
         raise HTTPException(status_code=503, detail="Directory database not available")
+    page_size = 500
     try:
-        from db.directory import get_sync_status as _gss
-        status = await asyncio.to_thread(_gss)
-        fh = status.get("data_freshness_hours", 999)
-        total = status.get("total_active_facilities", 0)
-        # Only treat data as "fresh" if a recent sync actually produced rows —
-        # otherwise a recent failed/empty sync would block recovery.
-        if total > 0 and fh is not None and fh < 1:
-            return JSONResponse({"message": "Sync completed recently — no refresh needed",
-                                 "data_freshness_hours": fh})
-        # Run synchronously: batched upserts make a CMS-only sync fast, and a
-        # background thread would not survive a serverless invocation.
-        from services.directory_sync import run_full_sync as _rfs
-        result = await asyncio.to_thread(_rfs, "manual")
-        message = "Sync complete" if result.get("status") == "success" else "Sync failed"
-        return JSONResponse({"message": message, **result})
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        offset = max(0, int(body.get("offset", 0) or 0))
+    except (TypeError, ValueError):
+        offset = 0
+
+    try:
+        # On the first page: short-circuit if data is already fresh, and make
+        # sure ZIP centroids are seeded for the coordinate fallback.
+        if offset == 0:
+            from db.directory import get_sync_status as _gss
+            status = await asyncio.to_thread(_gss)
+            fh = status.get("data_freshness_hours")
+            total = status.get("total_active_facilities", 0)
+            if total > 0 and fh is not None and fh < 1:
+                return JSONResponse({"status": "done", "total_active_facilities": total,
+                                     "message": "Sync completed recently — no refresh needed"})
+            from db.directory import seed_zip_coordinates as _seed
+            csv_path = str(BASE_DIR / "data" / "ca_zips.csv")
+            if os.path.exists(csv_path):
+                await asyncio.to_thread(_seed, csv_path)
+
+        from services.directory_sync import run_sync_page
+        result = await asyncio.to_thread(run_sync_page, offset, page_size)
+
+        if result["fetched"] < page_size:
+            # Last page — record a successful sync so freshness updates.
+            from db.directory import start_sync_log, finish_sync_log, get_sync_status
+            log_id = await asyncio.to_thread(start_sync_log, "chunk")
+            await asyncio.to_thread(finish_sync_log, log_id, result["upserted"], 0, "success")
+            final = await asyncio.to_thread(get_sync_status)
+            return JSONResponse({"status": "done", "upserted": result["upserted"],
+                                 "total_active_facilities": final.get("total_active_facilities", 0)})
+        return JSONResponse({"status": "running", "next_offset": offset + page_size,
+                             "upserted": result["upserted"]})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        try:
+            from db.directory import start_sync_log, finish_sync_log
+            log_id = await asyncio.to_thread(start_sync_log, "chunk")
+            await asyncio.to_thread(finish_sync_log, log_id, 0, 0, "error", str(e))
+        except Exception:
+            pass
+        return JSONResponse({"status": "error", "error": str(e)})
 
 
 @app.get("/api/directory/debug-fetch")

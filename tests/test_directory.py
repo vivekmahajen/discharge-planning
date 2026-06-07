@@ -314,22 +314,22 @@ class TestSyncTriggerWithDb:
         data = r.json()
         assert "no refresh needed" in data["message"].lower() or "recently" in data["message"].lower()
 
-    async def test_sync_trigger_stale_starts_sync(self, db_authed_client, monkeypatch):
-        """If data is stale (>1h), sync trigger returns sync started message."""
+    async def test_sync_trigger_stale_runs_first_chunk(self, db_authed_client, monkeypatch):
+        """A stale first page that returns a full page reports status=running with next_offset."""
         import web_app
         monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
         stale_status = dict(FAKE_SYNC_STATUS, data_freshness_hours=5.0)
-
-        # Mock run_full_sync to be a no-op so the background thread completes quickly
         with (
             patch("db.directory.get_sync_status", return_value=stale_status),
-            patch("db.directory.start_sync_log", return_value=42),
-            patch("services.directory_sync.run_full_sync", return_value={"status": "success"}),
+            patch("db.directory.seed_zip_coordinates", return_value=0),
+            patch("services.directory_sync.run_sync_page", return_value={"fetched": 500, "upserted": 500}),
         ):
-            r = await db_authed_client.post("/api/directory/sync")
+            r = await db_authed_client.post("/api/directory/sync", json={"offset": 0})
         assert r.status_code == 200
         data = r.json()
-        assert "sync_id" in data or "message" in data
+        assert data["status"] == "running"
+        assert data["next_offset"] == 500
+        assert data["upserted"] == 500
 
 
 # ─── Batch upsert + ZIP-centroid + sync execution (serverless-safe) ───────────
@@ -498,22 +498,40 @@ class TestCronSync:
         assert data["upserted"] == 1200
 
 
-class TestManualSyncSynchronous:
-    async def test_manual_sync_runs_inline_and_reports_count(self, db_authed_client, monkeypatch):
+class TestChunkedSync:
+    async def test_last_page_reports_done(self, db_authed_client, monkeypatch):
+        """A short final page finalizes the sync (status=done) and reports the total."""
         import web_app
         monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
-        stale = dict(FAKE_SYNC_STATUS, data_freshness_hours=5.0)
+        final = dict(FAKE_SYNC_STATUS, total_active_facilities=1200)
         with (
-            patch("db.directory.get_sync_status", return_value=stale),
-            patch("services.directory_sync.run_full_sync",
-                  return_value={"status": "success", "upserted": 1200, "deactivated": 2,
-                                "duration_seconds": 3.0}),
+            patch("db.directory.get_sync_status", return_value=final),
+            patch("db.directory.seed_zip_coordinates", return_value=0),
+            patch("db.directory.start_sync_log", return_value=7),
+            patch("db.directory.finish_sync_log", return_value=None),
+            patch("services.directory_sync.run_sync_page", return_value={"fetched": 200, "upserted": 200}),
         ):
-            r = await db_authed_client.post("/api/directory/sync")
+            r = await db_authed_client.post("/api/directory/sync", json={"offset": 1000})
         assert r.status_code == 200
         data = r.json()
-        assert data["message"] == "Sync complete"
-        assert data["upserted"] == 1200
+        assert data["status"] == "done"
+        assert data["total_active_facilities"] == 1200
+
+    async def test_sync_page_error_reported(self, db_authed_client, monkeypatch):
+        """A CMS failure during a chunk is surfaced as status=error."""
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        with (
+            patch("db.directory.start_sync_log", return_value=8),
+            patch("db.directory.finish_sync_log", return_value=None),
+            patch("services.directory_sync.run_sync_page",
+                  side_effect=RuntimeError("CMS API request failed: 403")),
+        ):
+            r = await db_authed_client.post("/api/directory/sync", json={"offset": 500})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "error"
+        assert "CMS API request failed" in data["error"]
 
 
 # ─── CMS fetch: WAF-resilient request + error surfacing ──────────────────────
@@ -697,15 +715,15 @@ class TestMappingCoordsAndFreshness:
         fresh_empty = dict(FAKE_SYNC_STATUS, data_freshness_hours=0.2, total_active_facilities=0)
         with (
             patch("db.directory.get_sync_status", return_value=fresh_empty),
-            patch("services.directory_sync.run_full_sync",
-                  return_value={"status": "success", "upserted": 1200, "deactivated": 0,
-                                "duration_seconds": 4.0}),
+            patch("db.directory.seed_zip_coordinates", return_value=0),
+            patch("services.directory_sync.run_sync_page", return_value={"fetched": 500, "upserted": 500}),
         ):
-            r = await db_authed_client.post("/api/directory/sync")
+            r = await db_authed_client.post("/api/directory/sync", json={"offset": 0})
+        # total==0 means it must NOT short-circuit as fresh — it runs the chunk.
         assert r.status_code == 200
         data = r.json()
-        assert data["message"] == "Sync complete"
-        assert data["upserted"] == 1200
+        assert data["status"] == "running"
+        assert data["upserted"] == 500
 
 
 class TestCmsPagination:
