@@ -41,6 +41,9 @@ addopts = [
 [tool.coverage.run]
 branch = true
 concurrency = ["thread"]
+# Store source paths relative to the repo root so the PR coverage-comment
+# action can resolve them (otherwise: "No source for code: orchestrator.py").
+relative_files = true
 omit = [
     "tests/*",
     "sample_patient.py",
