@@ -191,6 +191,40 @@ def fetch_cms_ca_facilities() -> list[dict]:
     return facilities
 
 
+def run_sync_page(offset: int, page_size: int = 500) -> dict:
+    """Sync a single page of CMS facilities — the unit of work for the chunked,
+    serverless-safe sync. Fetches one page, maps + assigns coordinates (CMS
+    lat/long, else ZIP centroid), and batch-upserts. Returns
+    {"fetched": n, "upserted": m}. Raises RuntimeError if the page can't be
+    fetched (so the caller surfaces the real reason)."""
+    from db.directory import upsert_facilities, get_all_zip_coords
+
+    with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
+        results, err = _cms_page_with_retry(client, offset, page_size)
+    if results is None:
+        raise RuntimeError(f"CMS API request failed: {err}")
+
+    try:
+        zip_coords = get_all_zip_coords()
+    except Exception as e:
+        logger.warning("ZIP coordinate load failed: %s", e)
+        zip_coords = {}
+
+    facilities = []
+    for r in results:
+        f = _map_cms_record(r)
+        if not f:
+            continue
+        if f.get("latitude") is None or f.get("longitude") is None:
+            coord = zip_coords.get((f.get("zip") or "")[:5])
+            if coord:
+                f["latitude"], f["longitude"] = coord[0], coord[1]
+        facilities.append(f)
+
+    upserted = upsert_facilities(facilities)
+    return {"fetched": len(results), "upserted": upserted}
+
+
 def _first(r: dict, *keys, default=None):
     """Return the first non-empty value among candidate column names."""
     for k in keys:
