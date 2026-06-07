@@ -2092,7 +2092,7 @@ async def directory_county_summary(request: Request, ctx: OrgContext = Depends(g
 
 
 @app.post("/api/directory/sync")
-@limiter.limit("5/hour")
+@limiter.limit("30/hour")
 async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get_current_org)):
     if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
         raise HTTPException(status_code=503, detail="Directory database not available")

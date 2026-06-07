@@ -129,52 +129,63 @@ def _cms_query_page(client: "httpx.Client", offset: int, limit: int) -> dict:
     raise last_err if last_err else RuntimeError("CMS query failed")
 
 
+def _cms_page_with_retry(client: "httpx.Client", offset: int, limit: int, max_retries: int = 2):
+    """Fetch one page, retrying transient errors. Returns the results list, or
+    None on failure (after retries)."""
+    last_err: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            data = _cms_query_page(client, offset, limit)
+            return data.get("results", data.get("data", [])), None
+        except httpx.HTTPError as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+    return None, last_err
+
+
 def fetch_cms_ca_facilities() -> list[dict]:
     """
     Fetch all CA nursing home facilities from CMS PDC.
-    Paginate in pages of 500 (the datastore rejects larger limits with 400),
-    retrying each page a couple of times with backoff.
+    Pages of 500 (the datastore rejects larger limits with 400). The first page
+    is fetched up front (to surface auth/connectivity errors fast); the rest are
+    fetched concurrently so the whole sync fits comfortably within a serverless
+    function's time limit.
     Raises RuntimeError if the very first page cannot be fetched, so the sync
     surfaces the real reason (e.g. a 403) instead of silently reporting 0.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
+    limit = 500            # CMS datastore caps page size; 2000 returns HTTP 400
+    max_pages = 8          # headroom up to 4000 facilities (CA has ~1,200)
     facilities: list[dict] = []
-    offset = 0
-    limit = 500  # CMS datastore caps page size; 2000 returns HTTP 400
-    max_retries = 2
 
     with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
-        while True:
-            data = None
-            last_err: Exception | None = None
-            for attempt in range(max_retries):
-                try:
-                    data = _cms_query_page(client, offset, limit)
-                    break
-                except httpx.HTTPError as e:
-                    last_err = e
-                    if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
+        first_results, err = _cms_page_with_retry(client, 0, limit)
+        if first_results is None:
+            raise RuntimeError(f"CMS API request failed: {err}")
+        for r in first_results:
+            f = _map_cms_record(r)
+            if f:
+                facilities.append(f)
 
-            if data is None:
-                if offset == 0:
-                    # Nothing was fetched at all — make the failure visible.
-                    raise RuntimeError(f"CMS API request failed: {last_err}")
-                logger.error("CMS fetch stopped at offset %d: %s", offset, last_err)
-                break
+        # Only one page of data — done.
+        if len(first_results) >= limit:
+            offsets = [limit * i for i in range(1, max_pages)]
 
-            results = data.get("results", data.get("data", []))
-            if not results:
-                break
+            def _fetch(off: int):
+                results, e = _cms_page_with_retry(client, off, limit)
+                if results is None:
+                    logger.warning("CMS page at offset %d failed: %s", off, e)
+                    return []
+                return results
 
-            for r in results:
-                facility = _map_cms_record(r)
-                if facility:
-                    facilities.append(facility)
-
-            if len(results) < limit:
-                break
-            offset += limit
-            time.sleep(0.5)
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                for results in ex.map(_fetch, offsets):
+                    for r in results:
+                        f = _map_cms_record(r)
+                        if f:
+                            facilities.append(f)
 
     logger.info("Fetched %d CMS CA facilities", len(facilities))
     return facilities
