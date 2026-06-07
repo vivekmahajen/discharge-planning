@@ -19,6 +19,45 @@ _HTTP_HEADERS = {
     "Accept": "application/json",
 }
 
+# Fail fast: a dropped/black-holed connection must not hang a serverless
+# invocation for minutes. Bounded connect + read timeouts keep the sync
+# resolving (to data or to a clear error) quickly.
+_HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=8.0, write=8.0, pool=5.0)
+
+
+def debug_cms_fetch() -> dict:
+    """Diagnostic probe: report exactly what this host sees when calling the
+    CMS endpoint (POST and GET), plus a control request to a known-reachable
+    host to distinguish a CMS-specific block from a total egress block."""
+    import time as _t
+
+    def probe(method: str, url: str, **kw) -> dict:
+        t0 = _t.time()
+        try:
+            with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as c:
+                r = c.request(method, url, **kw)
+            return {"ok": True, "status": r.status_code,
+                    "elapsed_ms": int((_t.time() - t0) * 1000),
+                    "body_snippet": (r.text or "")[:200]}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}",
+                    "elapsed_ms": int((_t.time() - t0) * 1000)}
+
+    payload = {"conditions": [{"property": "provider_state", "value": "CA", "operator": "="}],
+               "limit": 1, "offset": 0}
+    get_params = [
+        ("conditions[0][property]", "provider_state"),
+        ("conditions[0][operator]", "="),
+        ("conditions[0][value]", "CA"),
+        ("limit", "1"),
+    ]
+    return {
+        "cms_api": CMS_API,
+        "cms_post": probe("POST", CMS_API, json=payload),
+        "cms_get": probe("GET", CMS_API, params=get_params),
+        "egress_control": probe("GET", "https://api.github.com"),
+    }
+
 
 def _safe_int(val) -> Optional[int]:
     """Convert val to int or None."""
@@ -83,9 +122,9 @@ def fetch_cms_ca_facilities() -> list[dict]:
     facilities: list[dict] = []
     offset = 0
     limit = 2000
-    max_retries = 3
+    max_retries = 2
 
-    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
+    with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
             data = None
             last_err: Exception | None = None
@@ -220,7 +259,7 @@ def _fetch_cdph_locations(result: dict[str, dict]) -> None:
     """Fetch location data from CDPH and populate result dict."""
     offset = 0
     limit = 1000
-    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
+    with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
             try:
                 resp = client.get(
@@ -285,7 +324,7 @@ def _fetch_cdph_beds(result: dict[str, dict]) -> None:
     """Fetch bed counts from CDPH and add to result dict."""
     offset = 0
     limit = 1000
-    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
+    with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
             try:
                 resp = client.get(

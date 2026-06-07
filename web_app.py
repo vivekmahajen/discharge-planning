@@ -2113,6 +2113,16 @@ async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/directory/debug-fetch")
+@limiter.limit("20/hour")
+async def directory_debug_fetch(request: Request, ctx: OrgContext = Depends(get_current_org)):
+    """Diagnostic: report exactly what the deployment sees when calling the CMS
+    endpoint (POST + GET), plus a control request to a known-reachable host."""
+    from services.directory_sync import debug_cms_fetch
+    result = await asyncio.to_thread(debug_cms_fetch)
+    return JSONResponse(result)
+
+
 @app.get("/api/directory/cron-sync")
 @limiter.limit("12/hour")
 async def directory_cron_sync(request: Request):
