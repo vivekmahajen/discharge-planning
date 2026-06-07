@@ -1284,7 +1284,7 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
     system_prompt = (
         "You are a California healthcare compliance specialist. Analyze the discharge planning data "
         "provided and return a concise compliance risk report as JSON. Focus on California-specific "
-        "issues: CDPH CoPs, Medi-Cal managed care auth, Livanta QIO timelines, and the 3-day SNF rule. "
+        "issues: CDPH CoPs, Medi-Cal managed care auth, Commence Health QIO timelines, and the 3-day SNF rule. "
         "Be specific about regulatory citations. Return ONLY valid JSON — no prose, no markdown fences."
     )
 
@@ -1560,7 +1560,7 @@ You operate under these non-negotiable constraints:
 - NEVER include information that could identify a patient beyond what is explicitly provided
 - ALWAYS flag missing critical information rather than inventing it
 - ALWAYS use plain-language patient instructions alongside clinical terminology
-- ALWAYS include California-specific regulatory elements: CDPH CoP compliance, Livanta QIO appeal rights, Medi-Cal auth status where applicable
+- ALWAYS include California-specific regulatory elements: CDPH CoP compliance, Commence Health QIO appeal rights, Medi-Cal auth status where applicable
 - Output must be structured JSON matching the schema provided — no prose, no markdown fences, no preamble
 
 Your output will be parsed programmatically and rendered into a printable, legally defensible discharge document. Accuracy and completeness take precedence over brevity."""

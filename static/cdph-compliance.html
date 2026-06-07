@@ -123,7 +123,7 @@ const CHECKLIST = [
   { id:"p6", phase:"planning",   label:"Readmission risk assessed (LACE/HOSPITAL or equivalent tool)",                    cite:"CMS HRRP / CDPH QI",          priority:"required", medicare:false },
   { id:"p7", phase:"planning",   label:"Anticipated discharge date established and communicated to care team",             cite:"42 CFR §482.43(c)",           priority:"required", medicare:false },
   { id:"d1", phase:"pre_dc",     label:"IMM re-delivered no more than 2 calendar days before discharge",                   cite:"42 CFR §422.622(b)(2)",       priority:"critical", medicare:true  },
-  { id:"d2", phase:"pre_dc",     label:"Livanta QIO rights explained — 24-hour appeal window communicated",               cite:"42 CFR §422.622(c)",          priority:"critical", medicare:true  },
+  { id:"d2", phase:"pre_dc",     label:"Commence Health QIO rights explained — 24-hour appeal window communicated",               cite:"42 CFR §422.622(c)",          priority:"critical", medicare:true  },
   { id:"d3", phase:"pre_dc",     label:"Follow-up appointments scheduled (not just advised) before discharge",             cite:"42 CFR §482.43(c)(7)",        priority:"critical", medicare:false },
   { id:"d4", phase:"pre_dc",     label:"Medication reconciliation completed and reviewed with patient",                    cite:"TJC NPSG.03.06.01",           priority:"critical", medicare:false },
   { id:"d5", phase:"pre_dc",     label:"Discharge summary completed — diagnoses, meds, follow-up, warning signs",         cite:"42 CFR §482.24(c)(2)(viii)",  priority:"critical", medicare:false },
@@ -265,14 +265,14 @@ function CDPHComplianceChecklist() {
   const updateAuth = (id,k,v) => setAuthItems(prev=>prev.map(a=>a.id===id?{...a,[k]:v}:a));
   const addAuth    = () => setAuthItems(p=>[...p,{ id:Date.now()+"", service:"", status:"not_init", authNum:"", expiry:"", requested:"" }]);
 
-  const [livanta, setLivanta] = useState({
+  const [livanta, setCommence Health] = useState({
     immDate:"2026-05-14", immTime:"10:30", immSigned:true,
     redelivDate:"2026-05-17", redelivTime:"09:15", redelivSigned:true,
     appealFiled:false, appealDate:"", appealTime:"",
     livantaCalled:false, livantaCallTime:"", livantaCaseNum:"",
     determination:"", determinationDate:"",
   });
-  const setL = (k,v) => setLivanta(p=>({...p,[k]:v}));
+  const setL = (k,v) => setCommence Health(p=>({...p,[k]:v}));
 
   const [snf, setSnf] = useState({
     admitStatus:"inpatient", admitDate:"2026-05-14",
@@ -324,7 +324,7 @@ CDPH CHECKLIST: ${checkedCount}/${totalItems} items complete. Unchecked: ${CHECK
 
 MEDI-CAL AUTH: ${authItems.map(a=>`${a.service}: ${a.status}${a.authNum?" ("+a.authNum+")":""}`).join("; ")}
 
-LIVANTA: IMM delivered ${livanta.immDate||"not recorded"}, Re-delivery ${livanta.redelivDate||"not recorded"}, Appeal filed: ${livanta.appealFiled}, Livanta called: ${livanta.livantaCalled}
+COMMENCE HEALTH QIO: IMM delivered ${livanta.immDate||"not recorded"}, Re-delivery ${livanta.redelivDate||"not recorded"}, Appeal filed: ${livanta.appealFiled}, Commence Health called: ${livanta.livantaCalled}
 
 3-DAY SNF RULE: Admission status ${snf.admitStatus}, qualifying days: ${snfResult.days}, eligible: ${snfResult.eligible}, TEAM model exception: ${snf.teamModel}
 
@@ -335,7 +335,7 @@ Return JSON:
   "critical_gaps": [{ "issue": "<description>", "citation": "<CFR/CA code>", "action": "<required action>", "urgency": "immediate | today | before_dc" }],
   "warnings": [{ "issue": "<description>", "recommendation": "<action>" }],
   "california_specific_notes": ["<CA-specific observation>"],
-  "livanta_status": "<one sentence on Livanta compliance>",
+  "livanta_status": "<one sentence on Commence Health compliance>",
   "medi_cal_status": "<one sentence on auth status>",
   "snf_status": "<one sentence on 3-day rule status>",
   "attestation_ready": true | false,
@@ -368,7 +368,7 @@ Return JSON:
 
     const oneLiners = ["livanta_status","medi_cal_status","snf_status"]
       .filter(k => report[k])
-      .map(k => `<p class="oneliner"><b>${esc(k.replace(/_status/,"").replace("_"," "))}:</b> ${esc(report[k])}</p>`)
+      .map(k => `<p class="oneliner"><b>${esc({livanta_status:"Commence Health QIO",medi_cal_status:"Medi-Cal",snf_status:"SNF"}[k]||k)}:</b> ${esc(report[k])}</p>`)
       .join("");
 
     const gapItems = (report.critical_gaps||[]).map(g =>
@@ -418,7 +418,7 @@ Return JSON:
 </style></head>
 <body>
   <h1>California CDPH Discharge Compliance Report</h1>
-  <div class="sub">CDPH &middot; CMS CoP &sect;482.43 &middot; Medi-Cal Managed Care &middot; Livanta BFCC-QIO &nbsp;&middot;&nbsp; Generated ${esc(gen)}</div>
+  <div class="sub">CDPH &middot; CMS CoP &sect;482.43 &middot; Medi-Cal Managed Care &middot; Commence Health BFCC-QIO &nbsp;&middot;&nbsp; Generated ${esc(gen)}</div>
   <div class="scorebar">
     <div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b">Overall status</div>
     <div style="font-size:17px;font-weight:700;font-family:Georgia,serif">${esc(statusLabel)}</div></div>
@@ -458,7 +458,7 @@ Return JSON:
           <div style={{ width:38, height:38, borderRadius:8, background:"rgba(255,255,255,0.1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🏛</div>
           <div>
             <div style={{ fontFamily:"'Lora',Georgia,serif", fontSize:16, fontWeight:600, color:"#EFF4F8" }}>California CDPH Discharge Compliance</div>
-            <div style={{ fontSize:11, color:"rgba(255,255,255,0.5)", fontWeight:300 }}>CDPH · CMS CoP §482.43 · Medi-Cal Managed Care · Livanta BFCC-QIO</div>
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.5)", fontWeight:300 }}>CDPH · CMS CoP §482.43 · Medi-Cal Managed Care · Commence Health BFCC-QIO</div>
           </div>
         </div>
         <div style={{ display:"flex", gap:10, alignItems:"center" }}>
@@ -499,7 +499,7 @@ Return JSON:
         {[
           { id:"cdph",    label:"CDPH Checklist",   icon:"✅" },
           { id:"medcal",  label:"Medi-Cal Auth",     icon:"💳" },
-          { id:"livanta", label:"Livanta QIO",       icon:"⚖️" },
+          { id:"livanta", label:"Commence Health QIO",       icon:"⚖️" },
           { id:"snfrule", label:"3-Day SNF Rule",    icon:"🏥" },
           { id:"report",  label:"Compliance Report", icon:"📊" },
         ].map(t=>(
@@ -654,11 +654,11 @@ Return JSON:
           </div>
         )}
 
-        {/* ── TAB: LIVANTA QIO ────────────────────────────────────────────── */}
+        {/* ── TAB: COMMENCE HEALTH QIO ────────────────────────────────────────────── */}
         {tab==="livanta" && (
           <div style={{ animation:"fade .3s ease" }}>
             <div style={{ background:C.blue, borderRadius:10, padding:"14px 18px", marginBottom:14, display:"flex", gap:20, flexWrap:"wrap", alignItems:"center" }}>
-              {[["Livanta phone","1-888-524-9900"],["Livanta fax","1-888-985-8775"],["Hours","24/7 urgent appeals"],["Website","livantaqio.org"]].map(([l,v])=>(
+              {[["Commence Health phone","1-877-588-1123"],["TTY","1-855-887-6668"],["Hours","Mon–Fri 9a–5p · Sat/Sun/holidays 10a–4p · 24-hr voicemail"],["Website","commencehealthqio.cms.gov"]].map(([l,v])=>(
                 <div key={l}>
                   <div style={{ fontSize:9, color:"rgba(255,255,255,0.5)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:2 }}>{l}</div>
                   <div style={{ fontSize:13, fontWeight:700, color:"#B3D4F0", fontFamily:"'Source Code Pro',monospace" }}>{v}</div>
@@ -714,7 +714,7 @@ Return JSON:
                   {livanta.appealFiled && (
                     <>
                       <div style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:6, padding:"8px 10px", marginBottom:8, fontSize:12, color:C.red }}>
-                        🚨 <strong>DISCHARGE HOLD ACTIVE.</strong> Call Livanta at <strong>1-888-524-9900</strong> BEFORE discharging patient.
+                        🚨 <strong>DISCHARGE HOLD ACTIVE.</strong> Call Commence Health at <strong>1-877-588-1123</strong> BEFORE discharging patient.
                       </div>
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                         <Field label="Appeal date" value={livanta.appealDate} onChange={v=>setL("appealDate",v)} type="date" small/>
@@ -727,23 +727,23 @@ Return JSON:
             </div>
 
             <div style={cardStyle}>
-              <div style={sectionHead}>Livanta QIO notification</div>
+              <div style={sectionHead}>Commence Health QIO notification</div>
               {livanta.appealFiled && !livanta.livantaCalled && (
                 <div style={{ background:C.redPale, border:`1px solid #F5C4B3`, borderRadius:7, padding:"10px 13px", marginBottom:12, fontSize:12, color:C.red }}>
-                  ⚠ Appeal filed but Livanta not yet notified. Call <strong>1-888-524-9900</strong> NOW before any discharge action.
+                  ⚠ Appeal filed but Commence Health not yet notified. Call <strong>1-877-588-1123</strong> NOW before any discharge action.
                 </div>
               )}
-              {livantaDetDeadline && livanta.appealFiled && <Countdown deadlineDate={livantaDetDeadline} label="Livanta determination deadline (midnight)"/>}
+              {livantaDetDeadline && livanta.appealFiled && <Countdown deadlineDate={livantaDetDeadline} label="Commence Health determination deadline (midnight)"/>}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:10 }}>
                 <div>
-                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Livanta called</div>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Commence Health called</div>
                   <label style={{ display:"flex", gap:6, alignItems:"center", fontSize:13, cursor:"pointer" }}>
                     <input type="checkbox" checked={livanta.livantaCalled} onChange={e=>setL("livantaCalled",e.target.checked)} style={{ accentColor:C.forest, width:16, height:16 }}/>
                     <span style={{ color:livanta.livantaCalled?C.forest:C.ink }}>Confirmed called</span>
                   </label>
                 </div>
                 <Field label="Call timestamp" value={livanta.livantaCallTime} onChange={v=>setL("livantaCallTime",v)} type="datetime-local" small/>
-                <Field label="Livanta case #" value={livanta.livantaCaseNum} onChange={v=>setL("livantaCaseNum",v)} small/>
+                <Field label="Commence Health case #" value={livanta.livantaCaseNum} onChange={v=>setL("livantaCaseNum",v)} small/>
               </div>
               <div style={{ marginTop:10, display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                 <div>
@@ -756,7 +756,7 @@ Return JSON:
               </div>
               {livanta.determination==="upheld" && (
                 <div style={{ marginTop:8, background:C.amberPale, border:`1px solid #F0D99A`, borderRadius:6, padding:"9px 12px", fontSize:12, color:C.amber }}>
-                  📋 Determination upheld — issue Hospital-Issued Notice of Non-Coverage (HINN) on Day 1 patient is financially liable for continued stay. Patient may request expedited appeal from Livanta.
+                  📋 Determination upheld — issue Hospital-Issued Notice of Non-Coverage (HINN) on Day 1 patient is financially liable for continued stay. Patient may request expedited appeal from Commence Health.
                 </div>
               )}
             </div>
@@ -872,7 +872,7 @@ Return JSON:
               <div style={{ textAlign:"center", padding:"50px 20px" }}>
                 <div style={{ fontSize:30, animation:"spin 1.5s linear infinite", display:"inline-block", marginBottom:12 }}>⟳</div>
                 <div style={{ fontSize:14, fontWeight:600, color:C.forest }}>Analyzing compliance across all modules…</div>
-                {["Checking CDPH checklist gaps…","Reviewing Medi-Cal auth status…","Verifying Livanta timeline…","Calculating SNF eligibility…"].map((t,i)=>(
+                {["Checking CDPH checklist gaps…","Reviewing Medi-Cal auth status…","Verifying Commence Health timeline…","Calculating SNF eligibility…"].map((t,i)=>(
                   <div key={i} style={{ fontSize:12, color:C.muted, marginTop:5 }}>{t}</div>
                 ))}
               </div>
@@ -896,7 +896,7 @@ Return JSON:
 
                 {["livanta_status","medi_cal_status","snf_status"].map(k=>(
                   report[k] && <div key={k} style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:7, padding:"9px 13px", marginBottom:8, fontSize:13, color:C.ink }}>
-                    <span style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginRight:8 }}>{k.replace(/_status/,"").replace("_"," ")}</span>
+                    <span style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginRight:8 }}>{({livanta_status:"Commence Health QIO",medi_cal_status:"Medi-Cal",snf_status:"SNF"}[k]||k)}</span>
                     {report[k]}
                   </div>
                 ))}
