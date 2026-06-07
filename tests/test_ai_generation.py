@@ -142,6 +142,31 @@ class TestHrrpCadenceOverride:
         assert summary["readmission_risk"]["follow_up_call_cadence"] == "none"
 
 
+class TestTruncationHandling:
+    async def test_cdph_truncated_response_returns_clear_error(self, authed_client, mock_claude):
+        # Model hit the token ceiling: stop_reason=max_tokens and JSON cut mid-string.
+        resp = mock_claude.messages.create.return_value
+        resp.stop_reason = "max_tokens"
+        resp.content[0].text = '{"flags": [{"detail": "incomplete strin'
+        r = await authed_client.post("/api/cdph-compliance/analyze",
+                                     json={"prompt": "large compliance input"})
+        assert r.status_code == 500
+        body = r.json()
+        assert body["success"] is False
+        assert "cut off" in body["error"].lower()
+        # The cryptic parser message must not leak in place of the clear one.
+        assert "Unterminated string" not in body["error"]
+
+    async def test_cdph_complete_response_still_succeeds(self, authed_client, mock_claude):
+        resp = mock_claude.messages.create.return_value
+        resp.stop_reason = "end_turn"
+        resp.content[0].text = json.dumps({"compliance_score": 90, "flags": []})
+        r = await authed_client.post("/api/cdph-compliance/analyze",
+                                     json={"prompt": "ok"})
+        assert r.status_code == 200
+        assert r.json()["success"] is True
+
+
 def httpx_request():
     """Build a minimal httpx.Request for constructing anthropic.APIError."""
     import httpx

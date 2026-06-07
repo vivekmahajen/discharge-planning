@@ -159,11 +159,11 @@ BARRIER_CATALOG = {
                                   "Community Supports referral"],
     },
     "livanta_notice_not_issued": {
-        "label": "Livanta QIO Notice Not Issued",
+        "label": "Commence Health QIO Notice Not Issued",
         "category": "clinical",
         "default_sla_hours": 2,
-        "description": "Required Livanta QIO Important Message about hospital discharge rights not given",
-        "auto_detect_keywords": ["Livanta notice", "QIO notice", "discharge rights notice",
+        "description": "Required Commence Health QIO Important Message about hospital discharge rights not given",
+        "auto_detect_keywords": ["Commence Health notice", "Livanta notice", "QIO notice", "discharge rights notice",
                                   "Important Message not issued", "IM notice pending"],
     },
     "discharge_summary_not_completed": {

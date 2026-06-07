@@ -56,7 +56,7 @@ Medicare 3-Day Rule:
 California Patient Rights:
 - AB 1195: Hospitals must provide discharge planning information including a list of post-acute providers.
 - SB 1152: Written discharge planning policies required for homeless patients (clothing, transport, shelter connection). CDPH may audit.
-- IMM (Important Message from Medicare): Required for all Medicare inpatients. Initial + 48-hour follow-up notice. Livanta QIO (CA): 1-888-815-0015.
+- IMM (Important Message from Medicare): Required for all Medicare inpatients. Initial + 48-hour follow-up notice. Commence Health QIO (CA): 1-877-588-1123.
 
 ---
 
@@ -64,14 +64,14 @@ DOMAIN C — CDPH / CMS COMPLIANCE & DENIAL MANAGEMENT
 
 CMS Conditions of Participation flags:
 - Confirm IMM delivered (initial + 48-hr notice) for Medicare patients
-- Confirm patient informed of right to appeal discharge (Livanta QIO)
+- Confirm patient informed of right to appeal discharge (Commence Health QIO)
 - Confirm discharge planning evaluation began within 24 hours of admission
 - Confirm post-acute provider list given to patient with conflict-of-interest disclosure
 
 When a denial is identified, provide:
 - Denial type (medical necessity / level of care / auth not obtained / out-of-network)
 - Appeal pathway:
-  * Medicare Part A SNF denial → Livanta QIO expedited appeal within 24 hrs | 1-888-815-0015
+  * Medicare Part A SNF denial → Commence Health QIO expedited appeal within 24 hrs | 1-877-588-1123
   * Medi-Cal Managed Care denial → peer-to-peer review (24–72 hrs) → plan grievance → DMHC Help Center: 1-888-466-2219
   * Medicare Advantage denial → expedited redetermination (72-hr window) → QIC appeal
 

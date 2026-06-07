@@ -87,13 +87,13 @@ The IMM (CMS-R-193) is a federally mandated document that must be:
 3. Signed by the patient or authorized representative at each delivery
 4. Re-delivery triggered any time a new discharge date is set
 
-Livanta is the Beneficiary and Family Centered Care Quality Improvement Organization (BFCC-QIO) for California. When a patient exercises their right to appeal, Livanta must be notified BEFORE the discharge occurs. The hospital may not discharge until Livanta issues its determination unless the patient withdraws their appeal.
+Commence Health is the Beneficiary and Family Centered Care Quality Improvement Organization (BFCC-QIO) for California. When a patient exercises their right to appeal, Commence Health must be notified BEFORE the discharge occurs. The hospital may not discharge until Commence Health issues its determination unless the patient withdraws their appeal.
 
 You operate under these non-negotiable constraints:
 - NEVER record a delivery that did not occur — you log what the planner reports, and flag inconsistencies
 - NEVER create, edit, or delete a completed IMM log entry — all records are append-only after attestation
 - ALWAYS compute deadline timestamps server-side from the provided delivery timestamp — never trust user-entered deadlines
-- ALWAYS surface the Livanta phone number (1-888-524-9900) and fax (1-888-985-8775) when appeal rights are invoked
+- ALWAYS surface the Commence Health phone number (1-877-588-1123) and TTY (1-855-887-6668) when appeal rights are invoked
 - ALWAYS flag when re-delivery is overdue (within 2 days of planned discharge date)
 - Output must be structured JSON — no prose, no markdown fences, no preamble`;
 
@@ -124,10 +124,10 @@ const USER_PROMPT_TEMPLATE = `Log an IMM delivery event and compute all required
 ## Appeal Event Details (complete only if event_type includes appeal)
 - Appeal filed: {{APPEAL_FILED}} (true/false)
 - Appeal filed timestamp: {{APPEAL_TIMESTAMP}}
-- Livanta notified: {{LIVANTA_NOTIFIED}} (true/false)
-- Livanta notification timestamp: {{LIVANTA_NOTIFICATION_TIMESTAMP}}
-- Livanta case number: {{LIVANTA_CASE_NUMBER}}
-- Livanta determination: {{LIVANTA_DETERMINATION}}
+- Commence Health notified: {{LIVANTA_NOTIFIED}} (true/false)
+- Commence Health notification timestamp: {{LIVANTA_NOTIFICATION_TIMESTAMP}}
+- Commence Health case number: {{LIVANTA_CASE_NUMBER}}
+- Commence Health determination: {{LIVANTA_DETERMINATION}}
   (options: upheld_discharge | overturned_discharge | pending | null)
 - Determination timestamp: {{DETERMINATION_TIMESTAMP}}
 
@@ -186,10 +186,10 @@ Return a single valid JSON object. Do not wrap in markdown fences.
     "discharge_hold_active": false,
     "discharge_hold_reason": null,
     "livanta_contact": {
-      "phone": "1-888-524-9900",
-      "fax": "1-888-985-8775",
-      "website": "https://www.livantaqio.org",
-      "hours": "24/7 for urgent appeals"
+      "phone": "1-877-588-1123",
+      "tty": "1-855-887-6668",
+      "website": "https://www.commencehealthqio.cms.gov",
+      "hours": "Mon–Fri 9a–5p; Sat/Sun/holidays 10a–4p; 24-hr voicemail"
     }
   },
   "alerts": [],
@@ -251,19 +251,19 @@ const APPEAL_PROMPT = `You are a Medicare compliance specialist. A patient has f
 - Appeal filed: {{APPEAL_FILED}} (true/false)
 - Appeal filed timestamp: {{APPEAL_TIMESTAMP}}
 - Stated reason for appeal: {{APPEAL_REASON}}
-- Livanta notified: {{LIVANTA_NOTIFIED}} (true/false)
+- Commence Health notified: {{LIVANTA_NOTIFIED}} (true/false)
 - Current time: {{CURRENT_TIMESTAMP}}
 - Planned discharge time: {{PLANNED_DISCHARGE_TIME}}
 - Attending physician notified: {{PHYSICIAN_NOTIFIED}} (true/false)
 - Risk management notified: {{RISK_NOTIFIED}} (true/false)
 
 ## Rules
-- Livanta must be notified BEFORE the patient is discharged
+- Commence Health must be notified BEFORE the patient is discharged
 - Once an appeal is filed, a discharge hold is automatically active
-- Livanta has until midnight of the day following the appeal to issue a determination for standard appeals
+- Commence Health has until midnight of the day following the appeal to issue a determination for standard appeals
 - The hospital may not discharge until determination is received unless the patient withdraws the appeal
-- If Livanta upholds discharge, the patient may be discharged; if overturned, the stay must continue
-- Financial liability notice must be issued if patient continues stay after Livanta upholds discharge
+- If Commence Health upholds discharge, the patient may be discharged; if overturned, the stay must continue
+- Financial liability notice must be issued if patient continues stay after Commence Health upholds discharge
 
 Return JSON only:
 {
@@ -288,10 +288,10 @@ Return JSON only:
   "livanta_notification": {
     "required": true,
     "completed": false,
-    "phone": "1-888-524-9900",
-    "fax": "1-888-985-8775",
-    "website": "https://www.livantaqio.org",
-    "hours": "24/7",
+    "phone": "1-877-588-1123",
+    "tty": "1-855-887-6668",
+    "website": "https://www.commencehealthqio.cms.gov",
+    "hours": "Mon–Fri 9a–5p; Sat/Sun/holidays 10a–4p; 24-hr voicemail",
     "information_to_provide": [
       "Patient name and Medicare number",
       "Hospital name and NPI",
@@ -305,7 +305,7 @@ Return JSON only:
     "required_if_determination_upholds": true,
     "notice_form": "Hospital-Issued Notice of Non-coverage (HINN)",
     "timing": "Issue HINN on first day patient is liable for continued stay costs",
-    "guidance": "Patient is not liable for costs until day after Livanta upholds discharge"
+    "guidance": "Patient is not liable for costs until day after Commence Health upholds discharge"
   },
   "documentation_required": ["<document or note required>"],
   "alerts": [
@@ -591,15 +591,15 @@ const RULES = [
     ],
   },
   {
-    title: "Appeal & Livanta (BFCC-QIO) rules",
+    title: "Appeal & Commence Health (BFCC-QIO) rules",
     color: "#5F3F8A", bg: "#EEEDFE",
     items: [
       "Patient has until midnight of the day after re-delivery to file an appeal — the 24-hour window starts at re-delivery timestamp",
-      "Livanta (1-888-524-9900) must be called BEFORE the patient is discharged once an appeal is filed",
-      "Once appeal is filed, a discharge hold is active — hospital CANNOT discharge until Livanta issues determination",
-      "Livanta has until midnight of the day following the appeal to issue a determination for standard reviews",
-      "If Livanta upholds the discharge and patient stays anyway, issue a Hospital-Issued Notice of Non-coverage (HINN) — patient becomes liable for continued stay costs the next day",
-      "If Livanta overturns the discharge, document the determination and update the discharge plan immediately",
+      "Commence Health (1-877-588-1123) must be called BEFORE the patient is discharged once an appeal is filed",
+      "Once appeal is filed, a discharge hold is active — hospital CANNOT discharge until Commence Health issues determination",
+      "Commence Health has until midnight of the day following the appeal to issue a determination for standard reviews",
+      "If Commence Health upholds the discharge and patient stays anyway, issue a Hospital-Issued Notice of Non-coverage (HINN) — patient becomes liable for continued stay costs the next day",
+      "If Commence Health overturns the discharge, document the determination and update the discharge plan immediately",
     ],
   },
   {
@@ -610,7 +610,7 @@ const RULES = [
       "Use Postgres Row-Level Security to enforce immutability at the database level, not just application logic",
       "Every log entry requires a staff ID, not just a name — names can be duplicated, IDs cannot",
       "Audit log entries (separate table) must record who created, attested, and viewed sensitive records",
-      "In a Livanta audit or litigation, your audit trail is your primary defense — treat it as evidence from day one",
+      "In a Commence Health audit or litigation, your audit trail is your primary defense — treat it as evidence from day one",
       "Never store patient's full Medicare Beneficiary Identifier (MBI) in logs — last 4 digits only for reference",
     ],
   },
@@ -637,9 +637,9 @@ const headerMeta = {
   system:      { title: "System prompt", sub: "Role, constraints, and CMS/CDPH rules. Sent with every API call — never modify between requests." },
   delivery:    { title: "Delivery log prompt", sub: "20 template variables covering delivery, appeal, interpreter, and prior history. Returns full compliance status + alerts." },
   redelivery:  { title: "Re-delivery check prompt", sub: "Lightweight scheduled check. Run as a cron job every 6 hours against all active Medicare encounters." },
-  appeal:      { title: "Appeal workflow prompt", sub: "Triggered when a patient files or considers filing an appeal. Generates Livanta action checklist and discharge hold status." },
+  appeal:      { title: "Appeal workflow prompt", sub: "Triggered when a patient files or considers filing an appeal. Generates Commence Health action checklist and discharge hold status." },
   integration: { title: "Next.js API route / Postgres schema", sub: "Three actions: log_delivery, check_redelivery, attest. Includes audit trail and alert surfacing." },
-  rules:       { title: "Compliance rules reference", sub: "CMS §482.13(e), California Title 22, Livanta BFCC-QIO procedures, and audit trail requirements." },
+  rules:       { title: "Compliance rules reference", sub: "CMS §482.13(e), California Title 22, Commence Health BFCC-QIO procedures, and audit trail requirements." },
 };
 
 function IMMPromptSystem() {
@@ -681,14 +681,14 @@ function IMMPromptSystem() {
           IMM Delivery Logging · Prompt System
         </h1>
         <p style={{ fontSize: 12, color: "#888", margin: 0, lineHeight: 1.5 }}>
-          CMS §482.13(e) · California CDPH · Livanta BFCC-QIO · Append-only audit trail · HIPAA-compliant
+          CMS §482.13(e) · California CDPH · Commence Health BFCC-QIO · Append-only audit trail · HIPAA-compliant
         </p>
         <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
           {[
             { label: "2 days",   sub: "Initial delivery window" },
             { label: "2 days",   sub: "Re-delivery before DC" },
             { label: "24 hrs",   sub: "Patient appeal window" },
-            { label: "Livanta",  sub: "1-888-524-9900" },
+            { label: "Commence Health",  sub: "1-877-588-1123" },
           ].map((s, i) => (
             <div key={i} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 12px", display: "flex", gap: 6, alignItems: "baseline" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#378ADD" }}>{s.label}</span>
@@ -760,7 +760,7 @@ function IMMPromptSystem() {
             )}
             {activeTab === "appeal" && (
               <div style={{ background: "#FAECE7", border: "1px solid #F5C4B3", borderRadius: 6, padding: "9px 13px", marginBottom: 12, fontSize: 12, color: "#C04028", lineHeight: 1.6 }}>
-                <strong>Critical:</strong> Discharge hold is active the moment an appeal is filed. Livanta (<strong>1-888-524-9900</strong>) must be called before any discharge action. This prompt surfaces every required step and responsible party.
+                <strong>Critical:</strong> Discharge hold is active the moment an appeal is filed. Commence Health (<strong>1-877-588-1123</strong>) must be called before any discharge action. This prompt surfaces every required step and responsible party.
               </div>
             )}
             {activeTab === "integration" && dbView === "db" && (
@@ -800,17 +800,17 @@ function IMMPromptSystem() {
 
             <div style={{ background: "#1C1B19", borderRadius: 8, padding: "14px 18px", marginBottom: 20, display: "flex", gap: 24, flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Livanta BFCC-QIO · California</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#378ADD" }}>1-888-524-9900</div>
-                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>24/7 · Urgent appeals</div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Commence Health BFCC-QIO · California</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#378ADD" }}>1-877-588-1123</div>
+                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>Mon–Fri 9a–5p · 24-hr voicemail</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Fax</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#F2F0EC" }}>1-888-985-8775</div>
+                <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>TTY</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#F2F0EC" }}>1-855-887-6668</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>Website</div>
-                <div style={{ fontSize: 12, color: "#378ADD" }}>livantaqio.org</div>
+                <div style={{ fontSize: 12, color: "#378ADD" }}>commencehealthqio.cms.gov</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#555", marginBottom: 5 }}>IMM Form</div>
@@ -840,7 +840,7 @@ function IMMPromptSystem() {
       </div>
 
       <div style={{ borderTop: "1px solid #E5E2DC", padding: "14px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 11, color: "#aaa" }}>CMS §482.13(e) · California Title 22 · Livanta BFCC-QIO · HIPAA-compliant</span>
+        <span style={{ fontSize: 11, color: "#aaa" }}>CMS §482.13(e) · California Title 22 · Commence Health BFCC-QIO · HIPAA-compliant</span>
         <div style={{ display: "flex", gap: 6 }}>
           {[["system","System"],["delivery","Delivery"],["appeal","Appeal"],["integration","API"]].map(([id, label]) => (
             <button key={id} onClick={() => copy(CONTENT[id] || INTEGRATION_CODE, `f-${id}`)} style={{

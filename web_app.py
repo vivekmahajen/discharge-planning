@@ -1284,7 +1284,7 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
     system_prompt = (
         "You are a California healthcare compliance specialist. Analyze the discharge planning data "
         "provided and return a concise compliance risk report as JSON. Focus on California-specific "
-        "issues: CDPH CoPs, Medi-Cal managed care auth, Livanta QIO timelines, and the 3-day SNF rule. "
+        "issues: CDPH CoPs, Medi-Cal managed care auth, Commence Health QIO timelines, and the 3-day SNF rule. "
         "Be specific about regulatory citations. Return ONLY valid JSON — no prose, no markdown fences."
     )
 
@@ -1292,17 +1292,29 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=8000,
             temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return response.content[0].text
+        return response
 
     try:
-        raw_text = await asyncio.to_thread(_call_api)
+        response = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    raw_text = response.content[0].text
+    # A truncated response (hit the token ceiling) yields invalid JSON — surface a
+    # clear message instead of a cryptic "Unterminated string" parse error.
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        return JSONResponse(
+            {"success": False,
+             "error": "The compliance report was cut off before it finished. "
+                      "Please try again, or reduce the amount of input data.",
+             "raw": raw_text},
+            status_code=500,
+        )
 
     clean = raw_text.strip()
     if clean.startswith("```"):
@@ -1548,7 +1560,7 @@ You operate under these non-negotiable constraints:
 - NEVER include information that could identify a patient beyond what is explicitly provided
 - ALWAYS flag missing critical information rather than inventing it
 - ALWAYS use plain-language patient instructions alongside clinical terminology
-- ALWAYS include California-specific regulatory elements: CDPH CoP compliance, Livanta QIO appeal rights, Medi-Cal auth status where applicable
+- ALWAYS include California-specific regulatory elements: CDPH CoP compliance, Commence Health QIO appeal rights, Medi-Cal auth status where applicable
 - Output must be structured JSON matching the schema provided — no prose, no markdown fences, no preamble
 
 Your output will be parsed programmatically and rendered into a printable, legally defensible discharge document. Accuracy and completeness take precedence over brevity."""

@@ -62,7 +62,7 @@ class BarrierExtractionAgent:
             "- Only include barriers with ai_confidence >= 0.6\n"
             "- Do NOT invent barriers not mentioned or implied in the text\n"
             "- Do NOT include barriers that are already resolved in the text\n"
-            "- Mark California-specific barriers (Medi-Cal, Livanta, CalAIM, SNF auth) as priority 'high' minimum\n"
+            "- Mark California-specific barriers (Medi-Cal, Commence Health, CalAIM, SNF auth) as priority 'high' minimum\n"
             "- If the plan says a barrier is 'pending', 'not yet', 'needs to be', 'not scheduled', "
             "  'not arranged', 'not confirmed' — that is a barrier\n"
             "- Deduplicate: do not return the same barrier type twice\n\n"

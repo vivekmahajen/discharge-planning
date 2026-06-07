@@ -166,7 +166,7 @@ Bullet list of specific actions being taken to reduce readmission risk. For High
 | Post-acute provider list given with conflict-of-interest disclosure | ✅ / ⏳ / ❌ |
 | IMM delivered — initial notice | ✅ / ⏳ / ❌ |
 | IMM delivered — 48-hr notice | ✅ / ⏳ / ❌ |
-| Patient informed of right to appeal (Livanta QIO — CA: 1-888-815-0015) | ✅ / ⏳ / ❌ |
+| Patient informed of right to appeal (Commence Health QIO — CA: 1-877-588-1123) | ✅ / ⏳ / ❌ |
 | Discharge instructions in patient's preferred language | ✅ / ⏳ / ❌ |
 | Interpreter services documented | ✅ / ⏳ / N/A |
 | SB 1152 homeless discharge protocol (if applicable) | ✅ / ⏳ / N/A |
