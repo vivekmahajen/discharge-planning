@@ -207,3 +207,29 @@
 #pwa-update-banner {
   box-sizing: border-box;
 }
+
+/* ── Unified app header: centered brand, nav buttons on the next line ─
+   Applies to every tool page's <header> (logo + title, a .spacer, then the
+   nav links). Centering the header and turning the .spacer into a full-width
+   zero-height flex break drops all nav links onto their own centered row.
+   !important is needed because each page also defines header{} inline. */
+header {
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  text-align: center !important;
+  row-gap: 8px;
+}
+header .spacer {
+  flex: 0 0 100% !important;
+  width: 100% !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+/* Keep the nav-links group centered as a wrapping row */
+header .nav-links {
+  justify-content: center !important;
+  flex-wrap: wrap !important;
+}
+
