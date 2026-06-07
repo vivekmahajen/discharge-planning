@@ -1292,17 +1292,29 @@ async def analyze_cdph_compliance(request: Request, body: dict[str, Any] = Body(
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=8000,
             temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return response.content[0].text
+        return response
 
     try:
-        raw_text = await asyncio.to_thread(_call_api)
+        response = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    raw_text = response.content[0].text
+    # A truncated response (hit the token ceiling) yields invalid JSON — surface a
+    # clear message instead of a cryptic "Unterminated string" parse error.
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        return JSONResponse(
+            {"success": False,
+             "error": "The compliance report was cut off before it finished. "
+                      "Please try again, or reduce the amount of input data.",
+             "raw": raw_text},
+            status_code=500,
+        )
 
     clean = raw_text.strip()
     if clean.startswith("```"):
