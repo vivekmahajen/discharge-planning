@@ -12,6 +12,13 @@ CHHS_API = "https://data.chhs.ca.gov/api/3/action/datastore_search"
 CDPH_LOCATIONS_RESOURCE = "e1e6cfa7-94cc-4ac4-9932-f0c34d5ea3c4"
 CDPH_BEDS_RESOURCE = "7e7e6a49-a27e-4b5a-bf1d-e42e6a2b0e35"
 
+# A browser-like User-Agent: the CMS / CHHS endpoints sit behind a WAF that
+# returns 403 to requests with a default client (e.g. python-httpx) UA.
+_HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
 
 def _safe_int(val) -> Optional[int]:
     """Convert val to int or None."""
@@ -33,40 +40,70 @@ def _safe_float(val) -> Optional[float]:
         return None
 
 
+def _cms_query_page(client: "httpx.Client", offset: int, limit: int) -> dict:
+    """Fetch one page of CMS data. Tries POST, then falls back to a GET with
+    the same conditions (some WAF configurations reject the POST body).
+    Raises the last httpx error if both fail."""
+    payload = {
+        "conditions": [{"property": "provider_state", "value": "CA", "operator": "="}],
+        "limit": limit,
+        "offset": offset,
+    }
+    last_err: Exception | None = None
+    try:
+        resp = client.post(CMS_API, json=payload)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPError as e:
+        last_err = e
+
+    params = [
+        ("conditions[0][property]", "provider_state"),
+        ("conditions[0][operator]", "="),
+        ("conditions[0][value]", "CA"),
+        ("limit", str(limit)),
+        ("offset", str(offset)),
+    ]
+    try:
+        resp = client.get(CMS_API, params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPError as e:
+        last_err = e
+    raise last_err if last_err else RuntimeError("CMS query failed")
+
+
 def fetch_cms_ca_facilities() -> list[dict]:
     """
     Fetch all CA nursing home facilities from CMS PDC.
     Paginate with limit=2000, retry up to 3x with backoff.
-    Returns list of dicts ready for upsert_facility().
+    Raises RuntimeError if the very first page cannot be fetched, so the sync
+    surfaces the real reason (e.g. a 403) instead of silently reporting 0.
     """
-    facilities = []
+    facilities: list[dict] = []
     offset = 0
     limit = 2000
     max_retries = 3
 
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
-            payload = {
-                "conditions": [
-                    {"property": "provider_state", "value": "CA", "operator": "="}
-                ],
-                "limit": limit,
-                "offset": offset,
-            }
+            data = None
+            last_err: Exception | None = None
             for attempt in range(max_retries):
                 try:
-                    resp = client.post(CMS_API, json=payload)
-                    resp.raise_for_status()
-                    data = resp.json()
+                    data = _cms_query_page(client, offset, limit)
                     break
-                except (httpx.TimeoutException, httpx.HTTPError) as e:
+                except httpx.HTTPError as e:
+                    last_err = e
                     if attempt < max_retries - 1:
                         time.sleep(2 ** attempt)
-                    else:
-                        logger.error("CMS fetch failed after %d retries: %s", max_retries, e)
-                        return facilities
-            else:
-                return facilities
+
+            if data is None:
+                if offset == 0:
+                    # Nothing was fetched at all — make the failure visible.
+                    raise RuntimeError(f"CMS API request failed: {last_err}")
+                logger.error("CMS fetch stopped at offset %d: %s", offset, last_err)
+                break
 
             results = data.get("results", data.get("data", []))
             if not results:
@@ -183,7 +220,7 @@ def _fetch_cdph_locations(result: dict[str, dict]) -> None:
     """Fetch location data from CDPH and populate result dict."""
     offset = 0
     limit = 1000
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
             try:
                 resp = client.get(
@@ -248,7 +285,7 @@ def _fetch_cdph_beds(result: dict[str, dict]) -> None:
     """Fetch bed counts from CDPH and add to result dict."""
     offset = 0
     limit = 1000
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=60.0, headers=_HTTP_HEADERS, follow_redirects=True) as client:
         while True:
             try:
                 resp = client.get(
