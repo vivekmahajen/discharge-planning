@@ -85,6 +85,7 @@
   }).catch(() => { window.location.href = '/login'; });
 </script>
 
+<script src="/static/report-export.js"></script>
 <script type="text/babel">
 const { useState, useRef } = React;
 
@@ -410,7 +411,13 @@ function DischargeSummaryGenerator() {
           )}
 
           {summary && (
-            <>
+            <div id="dp-report">
+              <div data-export-skip style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <button onClick={() => window.ReportExport.download("Discharge-Summary-" + window.ReportExport.dateStamp() + ".html", window.ReportExport.capture(document.getElementById("dp-report"), { title: "Discharge Summary", subtitle: [ctx.attending, ctx.unit, ctx.dischargeDate].filter(Boolean).join(" · ") }))}
+                  style={{ fontSize: 11, padding: "6px 14px", background: "#1A8A6E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>⬇ Download HTML</button>
+                <button onClick={() => window.ReportExport.print(window.ReportExport.capture(document.getElementById("dp-report"), { title: "Discharge Summary", subtitle: [ctx.attending, ctx.unit, ctx.dischargeDate].filter(Boolean).join(" · "), print: true }))}
+                  style={{ fontSize: 11, padding: "6px 14px", background: "transparent", color: "#0A1628", border: "1px solid #0A1628", borderRadius: 6, cursor: "pointer" }}>🖨 Save as PDF</button>
+              </div>
               {/* Summary header */}
               <div style={{ background: "#0A1628", borderRadius: 10, padding: "14px 16px", marginBottom: 14, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
                 <div>
@@ -607,7 +614,7 @@ function DischargeSummaryGenerator() {
                   ↺ New Summary
                 </button>
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
