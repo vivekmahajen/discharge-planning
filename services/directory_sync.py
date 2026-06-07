@@ -43,18 +43,35 @@ def debug_cms_fetch() -> dict:
             return {"ok": False, "error": f"{type(e).__name__}: {e}",
                     "elapsed_ms": int((_t.time() - t0) * 1000)}
 
-    payload = {"conditions": [{"property": "provider_state", "value": "CA", "operator": "="}],
+    payload = {"conditions": [{"property": "state", "value": "CA", "operator": "="}],
                "limit": 1, "offset": 0}
     get_params = [
-        ("conditions[0][property]", "provider_state"),
+        ("conditions[0][property]", "state"),
         ("conditions[0][operator]", "="),
         ("conditions[0][value]", "CA"),
         ("limit", "1"),
     ]
+
+    def schema_probe() -> dict:
+        """Unfiltered single-row fetch to reveal the dataset's real column names."""
+        t0 = _t.time()
+        try:
+            with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as c:
+                r = c.get(CMS_API, params=[("limit", "1")])
+            data = r.json() if r.status_code == 200 else {}
+            results = data.get("results", data.get("data", []))
+            cols = sorted(results[0].keys()) if results else []
+            return {"ok": r.status_code == 200, "status": r.status_code,
+                    "elapsed_ms": int((_t.time() - t0) * 1000), "columns": cols}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}",
+                    "elapsed_ms": int((_t.time() - t0) * 1000)}
+
     return {
         "cms_api": CMS_API,
         "cms_post": probe("POST", CMS_API, json=payload),
         "cms_get": probe("GET", CMS_API, params=get_params),
+        "cms_schema": schema_probe(),
         "egress_control": probe("GET", "https://api.github.com"),
     }
 
@@ -84,7 +101,7 @@ def _cms_query_page(client: "httpx.Client", offset: int, limit: int) -> dict:
     the same conditions (some WAF configurations reject the POST body).
     Raises the last httpx error if both fail."""
     payload = {
-        "conditions": [{"property": "provider_state", "value": "CA", "operator": "="}],
+        "conditions": [{"property": "state", "value": "CA", "operator": "="}],
         "limit": limit,
         "offset": offset,
     }
@@ -97,7 +114,7 @@ def _cms_query_page(client: "httpx.Client", offset: int, limit: int) -> dict:
         last_err = e
 
     params = [
-        ("conditions[0][property]", "provider_state"),
+        ("conditions[0][property]", "state"),
         ("conditions[0][operator]", "="),
         ("conditions[0][value]", "CA"),
         ("limit", str(limit)),
@@ -162,14 +179,25 @@ def fetch_cms_ca_facilities() -> list[dict]:
     return facilities
 
 
+def _first(r: dict, *keys, default=None):
+    """Return the first non-empty value among candidate column names."""
+    for k in keys:
+        v = r.get(k)
+        if v is not None and v != "":
+            return v
+    return default
+
+
 def _map_cms_record(r: dict) -> Optional[dict]:
-    """Map a single CMS record to our schema."""
-    ccn = r.get("cms_certification_number_ccn") or r.get("ccn") or r.get("provnum")
+    """Map a single CMS record to our schema. Field names follow the current
+    CMS Provider Data Catalog datastore machine names (e.g. `state`, `zip_code`,
+    `citytown`), with older `provider_*` variants accepted as fallbacks."""
+    ccn = _first(r, "cms_certification_number_ccn", "federal_provider_number", "provnum", "ccn")
     if not ccn:
         return None
 
-    # Determine facility type
-    provider_type = str(r.get("provider_type", "") or "").lower()
+    # Determine facility type (this dataset is nursing homes; default SNF)
+    provider_type = str(_first(r, "provider_type", default="") or "").lower()
     if "rehabilitation" in provider_type or "irf" in provider_type:
         facility_type = "IRF"
     elif "long term" in provider_type or "ltach" in provider_type:
@@ -178,24 +206,24 @@ def _map_cms_record(r: dict) -> Optional[dict]:
         facility_type = "SNF"
 
     # Zero-pad zip to 5 chars
-    raw_zip = str(r.get("provider_zip_code", "") or "").strip()
+    raw_zip = str(_first(r, "zip_code", "provider_zip_code", "zip", default="") or "").strip()
     if raw_zip and raw_zip.isdigit():
         zip_code = raw_zip.zfill(5)
     else:
         zip_code = raw_zip[:5] if raw_zip else None
 
     # Boolean fields
-    medicare = str(r.get("medicare_provider_agreement", "") or "").upper() == "Y"
-    medicaid = str(r.get("medicaid_provider_agreement", "") or "").upper() == "Y"
+    medicare = str(_first(r, "medicare_provider_agreement", default="") or "").upper() == "Y"
+    medicaid = str(_first(r, "medicaid_provider_agreement", default="") or "").upper() == "Y"
 
-    sff_status = str(r.get("special_focus_status", "") or "").upper()
+    sff_status = str(_first(r, "special_focus_status", default="") or "").upper()
     is_sff = "SFF" in sff_status
     is_sff_candidate = "CANDIDATE" in sff_status
 
-    abuse = str(r.get("abuse_icon", "") or "").upper() == "Y"
+    abuse = str(_first(r, "abuse_icon", default="") or "").upper() == "Y"
 
     # Name: strip and title-case
-    name = str(r.get("provider_name", "") or "").strip()
+    name = str(_first(r, "provider_name", default="") or "").strip()
     if name:
         name = name.title()
 
@@ -203,30 +231,30 @@ def _map_cms_record(r: dict) -> Optional[dict]:
         "ccn": str(ccn).strip(),
         "name": name,
         "facility_type": facility_type,
-        "address": str(r.get("provider_address", "") or "").strip() or None,
-        "city": str(r.get("provider_city", "") or "").strip() or None,
-        "state": str(r.get("provider_state", "CA") or "CA").strip(),
+        "address": str(_first(r, "provider_address", "address", default="") or "").strip() or None,
+        "city": str(_first(r, "citytown", "city_town", "provider_city", "city", default="") or "").strip() or None,
+        "state": str(_first(r, "state", "provider_state", default="CA") or "CA").strip(),
         "zip": zip_code,
-        "phone": str(r.get("phone_number", "") or "").strip() or None,
-        "county": str(r.get("county_name", "") or "").strip() or None,
+        "phone": str(_first(r, "telephone_number", "phone_number", default="") or "").strip() or None,
+        "county": str(_first(r, "countyparish", "county_parish", "county_name", "county", default="") or "").strip() or None,
         "overall_rating": _safe_int(r.get("overall_rating")),
         "health_inspection_rating": _safe_int(r.get("health_inspection_rating")),
         "staffing_rating": _safe_int(r.get("staffing_rating")),
-        "quality_measures_rating": _safe_int(r.get("qm_rating")),
-        "certified_beds": _safe_int(r.get("number_of_certified_beds")),
-        "average_daily_census": _safe_float(r.get("average_number_of_residents_per_day")),
-        "ownership_type": str(r.get("ownership_type", "") or "").strip() or None,
+        "quality_measures_rating": _safe_int(_first(r, "qm_rating", "quality_measure_rating")),
+        "certified_beds": _safe_int(_first(r, "number_of_certified_beds", "certified_beds")),
+        "average_daily_census": _safe_float(_first(r, "average_number_of_residents_per_day")),
+        "ownership_type": str(_first(r, "ownership_type", default="") or "").strip() or None,
         "medicare_certified": medicare,
         "medicaid_certified": medicaid,
         "accepts_medi_cal": medicaid,
         "is_special_focus": is_sff,
         "is_special_focus_candidate": is_sff_candidate,
         "abuse_icon": abuse,
-        "total_fines_dollars": _safe_float(r.get("total_amount_of_fines_in_dollars")) or 0,
-        "number_of_fines": _safe_int(r.get("number_of_fines")) or 0,
-        "total_penalties": _safe_int(r.get("total_number_of_penalties")) or 0,
+        "total_fines_dollars": _safe_float(_first(r, "total_amount_of_fines_in_dollars")) or 0,
+        "number_of_fines": _safe_int(_first(r, "number_of_fines")) or 0,
+        "total_penalties": _safe_int(_first(r, "total_number_of_penalties")) or 0,
         "data_source": "CMS",
-        # lat/lon to be enriched from CDPH
+        # lat/lon enriched from CDPH or ZIP centroid in run_full_sync
         "latitude": None,
         "longitude": None,
         "cdph_facid": None,

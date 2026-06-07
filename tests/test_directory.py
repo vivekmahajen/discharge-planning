@@ -632,3 +632,46 @@ class TestDebugFetch:
             r = await authed_client.get("/api/directory/debug-fetch")
         assert r.status_code == 200
         assert r.json()["egress_control"]["status"] == 200
+
+
+class TestCmsRecordMapping:
+    def test_maps_current_cms_machine_names(self):
+        import services.directory_sync as ds
+        rec = {
+            "cms_certification_number_ccn": "055123",
+            "provider_name": "TEST SKILLED NURSING",
+            "provider_address": "100 Main St",
+            "citytown": "San Francisco",
+            "state": "CA",
+            "zip_code": "94103",
+            "telephone_number": "(415) 555-0100",
+            "countyparish": "San Francisco",
+            "overall_rating": "4",
+            "number_of_certified_beds": "99",
+            "special_focus_status": "SFF",
+        }
+        f = ds._map_cms_record(rec)
+        assert f["ccn"] == "055123"
+        assert f["name"] == "Test Skilled Nursing"
+        assert f["city"] == "San Francisco"
+        assert f["state"] == "CA"
+        assert f["zip"] == "94103"
+        assert f["phone"] == "(415) 555-0100"
+        assert f["county"] == "San Francisco"
+        assert f["overall_rating"] == 4
+        assert f["certified_beds"] == 99
+        assert f["is_special_focus"] is True
+
+    def test_still_accepts_legacy_provider_names(self):
+        import services.directory_sync as ds
+        rec = {
+            "cms_certification_number_ccn": "055124",
+            "provider_name": "Legacy SNF",
+            "provider_city": "Sacramento",
+            "provider_state": "CA",
+            "provider_zip_code": "95814",
+        }
+        f = ds._map_cms_record(rec)
+        assert f["ccn"] == "055124"
+        assert f["city"] == "Sacramento"
+        assert f["zip"] == "95814"
