@@ -233,3 +233,20 @@ header .nav-links {
   flex-wrap: wrap !important;
 }
 
+/* Clinical-safety disclaimer shown on every page that renders the app header.
+   Rendered as a full-width flex row below the nav, in bold, larger type. */
+header::after {
+  content: "Multi-Agent Clinical Decision Support · All outputs require clinician review before action";
+  order: 99;
+  flex: 0 0 100%;
+  width: 100%;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  color: inherit;
+}
+
