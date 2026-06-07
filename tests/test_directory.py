@@ -514,3 +514,62 @@ class TestManualSyncSynchronous:
         data = r.json()
         assert data["message"] == "Sync complete"
         assert data["upserted"] == 1200
+
+
+# ─── CMS fetch: WAF-resilient request + error surfacing ──────────────────────
+
+class TestCmsFetch:
+    def _client_factory(self, handler):
+        import httpx
+        original_client = httpx.Client  # capture before monkeypatch replaces it
+
+        def factory(*args, **kwargs):
+            kwargs.pop("transport", None)
+            return original_client(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+        return factory
+
+    def test_post_blocked_falls_back_to_get(self, monkeypatch):
+        import httpx
+        import services.directory_sync as ds
+
+        def handler(request):
+            if request.method == "POST":
+                return httpx.Response(403, text="Forbidden")
+            return httpx.Response(200, json={"results": [{
+                "cms_certification_number_ccn": "055123",
+                "provider_name": "Test SNF",
+                "provider_state": "CA",
+                "provider_zip_code": "94103",
+            }]})
+
+        monkeypatch.setattr(ds.httpx, "Client", self._client_factory(handler))
+        monkeypatch.setattr(ds.time, "sleep", lambda *_a: None)
+        facs = ds.fetch_cms_ca_facilities()
+        assert len(facs) == 1
+        assert facs[0]["ccn"] == "055123"
+
+    def test_total_failure_raises_with_reason(self, monkeypatch):
+        import httpx
+        import services.directory_sync as ds
+
+        def handler(request):
+            return httpx.Response(403, text="Forbidden")
+
+        monkeypatch.setattr(ds.httpx, "Client", self._client_factory(handler))
+        monkeypatch.setattr(ds.time, "sleep", lambda *_a: None)
+        with pytest.raises(RuntimeError, match="CMS API request failed"):
+            ds.fetch_cms_ca_facilities()
+
+    def test_run_full_sync_reports_error_when_cms_unreachable(self, monkeypatch):
+        import services.directory_sync as ds
+        monkeypatch.setattr(ds, "fetch_cms_ca_facilities",
+                            lambda: (_ for _ in ()).throw(RuntimeError("CMS API request failed: 403")))
+        monkeypatch.setattr("db.directory.start_sync_log", lambda t: 1)
+        captured = {}
+        monkeypatch.setattr("db.directory.finish_sync_log",
+                            lambda log_id, up, deact, status, error=None: captured.update(status=status, error=error))
+        res = ds.run_full_sync("test")
+        assert res["status"] == "error"
+        assert "CMS API request failed" in res["error"]
+        assert captured["status"] == "error"
