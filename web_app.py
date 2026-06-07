@@ -2100,7 +2100,10 @@ async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get
         from db.directory import get_sync_status as _gss
         status = await asyncio.to_thread(_gss)
         fh = status.get("data_freshness_hours", 999)
-        if fh is not None and fh < 1:
+        total = status.get("total_active_facilities", 0)
+        # Only treat data as "fresh" if a recent sync actually produced rows —
+        # otherwise a recent failed/empty sync would block recovery.
+        if total > 0 and fh is not None and fh < 1:
             return JSONResponse({"message": "Sync completed recently — no refresh needed",
                                  "data_freshness_hours": fh})
         # Run synchronously: batched upserts make a CMS-only sync fast, and a
