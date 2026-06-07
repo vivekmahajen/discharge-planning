@@ -132,13 +132,14 @@ def _cms_query_page(client: "httpx.Client", offset: int, limit: int) -> dict:
 def fetch_cms_ca_facilities() -> list[dict]:
     """
     Fetch all CA nursing home facilities from CMS PDC.
-    Paginate with limit=2000, retry up to 3x with backoff.
+    Paginate in pages of 500 (the datastore rejects larger limits with 400),
+    retrying each page a couple of times with backoff.
     Raises RuntimeError if the very first page cannot be fetched, so the sync
     surfaces the real reason (e.g. a 403) instead of silently reporting 0.
     """
     facilities: list[dict] = []
     offset = 0
-    limit = 2000
+    limit = 500  # CMS datastore caps page size; 2000 returns HTTP 400
     max_retries = 2
 
     with httpx.Client(timeout=_HTTP_TIMEOUT, headers=_HTTP_HEADERS, follow_redirects=True) as client:
