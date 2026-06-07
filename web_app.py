@@ -622,18 +622,13 @@ async def startup():
             csv_path = str(BASE_DIR / "data" / "ca_zips.csv")
             if os.path.exists(csv_path):
                 seed_zip_coordinates(csv_path)
-            # Background sync if stale
-            import threading
-            from services.directory_sync import run_full_sync as _dir_sync
-            from db.directory import get_sync_status as _get_sync_status
-            def _startup_sync():
-                try:
-                    status = _get_sync_status()
-                    if status["total_active_facilities"] == 0 or status.get("data_freshness_hours", 999) > 24:
-                        _dir_sync(triggered_by="startup")
-                except Exception as e:
-                    logging.getLogger(__name__).warning("Directory startup sync failed: %s", e)
-            threading.Thread(target=_startup_sync, daemon=True).start()
+            # NOTE: the directory data sync is NOT run here. On serverless
+            # (Vercel) the instance is frozen/torn down once a request returns,
+            # so a background thread spawned at startup is killed before the
+            # multi-second CMS sync completes. The sync runs synchronously via
+            # the Vercel Cron endpoint (/api/directory/cron-sync) and on demand
+            # via POST /api/directory/sync (which the page triggers on first
+            # load when the table is empty).
         except Exception as e:
             logging.getLogger(__name__).warning("Directory setup failed: %s", e)
 
@@ -2108,12 +2103,38 @@ async def directory_sync_trigger(request: Request, ctx: OrgContext = Depends(get
         if fh is not None and fh < 1:
             return JSONResponse({"message": "Sync completed recently — no refresh needed",
                                  "data_freshness_hours": fh})
-        import threading
+        # Run synchronously: batched upserts make a CMS-only sync fast, and a
+        # background thread would not survive a serverless invocation.
         from services.directory_sync import run_full_sync as _rfs
-        from db.directory import start_sync_log
-        log_id = await asyncio.to_thread(start_sync_log, "manual")
-        threading.Thread(target=_rfs, args=("manual",), daemon=True).start()
-        return JSONResponse({"message": "Sync started", "sync_id": log_id})
+        result = await asyncio.to_thread(_rfs, "manual")
+        message = "Sync complete" if result.get("status") == "success" else "Sync failed"
+        return JSONResponse({"message": message, **result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/directory/cron-sync")
+@limiter.limit("12/hour")
+async def directory_cron_sync(request: Request):
+    """Vercel Cron target. Runs the directory sync synchronously when data is
+    missing or stale. Protected by CRON_SECRET when configured (Vercel sends it
+    as `Authorization: Bearer <CRON_SECRET>`)."""
+    secret = os.getenv("CRON_SECRET")
+    if secret and request.headers.get("authorization", "") != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not DATABASE_URL or not _DIRECTORY_DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Directory database not available")
+    try:
+        from db.directory import get_sync_status as _gss
+        status = await asyncio.to_thread(_gss)
+        fh = status.get("data_freshness_hours")
+        total = status.get("total_active_facilities", 0)
+        if total > 0 and fh is not None and fh < 12:
+            return JSONResponse({"message": "fresh", "data_freshness_hours": fh,
+                                 "total_active_facilities": total})
+        from services.directory_sync import run_full_sync as _rfs
+        result = await asyncio.to_thread(_rfs, "cron")
+        return JSONResponse({"message": "sync complete", **result})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

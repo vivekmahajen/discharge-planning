@@ -255,6 +255,85 @@ def upsert_facility(facility_dict: dict) -> bool:
     return True
 
 
+# Column order shared by the batch upsert. Mirrors upsert_facility().
+_FACILITY_COLUMNS = [
+    "ccn", "cdph_facid", "name", "facility_type", "address", "city", "county", "state", "zip", "phone",
+    "latitude", "longitude", "overall_rating", "health_inspection_rating", "staffing_rating",
+    "quality_measures_rating", "total_beds", "certified_beds", "average_daily_census", "ownership_type",
+    "medicare_certified", "medicaid_certified", "accepts_medi_cal", "is_special_focus",
+    "is_special_focus_candidate", "abuse_icon", "total_fines_dollars", "number_of_fines", "total_penalties",
+    "licensed_snf_beds", "licensed_icf_beds", "licensed_alf_beds", "licensed_total_beds", "data_source",
+]
+
+
+def _facility_row(d: dict) -> tuple:
+    return (
+        d.get("ccn"), d.get("cdph_facid"), d.get("name", ""), d.get("facility_type", "SNF"),
+        d.get("address"), d.get("city"), d.get("county"), d.get("state", "CA"), d.get("zip"), d.get("phone"),
+        d.get("latitude"), d.get("longitude"), d.get("overall_rating"), d.get("health_inspection_rating"),
+        d.get("staffing_rating"), d.get("quality_measures_rating"), d.get("total_beds"), d.get("certified_beds"),
+        d.get("average_daily_census"), d.get("ownership_type"), d.get("medicare_certified", False),
+        d.get("medicaid_certified", False), d.get("accepts_medi_cal", False), d.get("is_special_focus", False),
+        d.get("is_special_focus_candidate", False), d.get("abuse_icon", False), d.get("total_fines_dollars", 0),
+        d.get("number_of_fines", 0), d.get("total_penalties", 0), d.get("licensed_snf_beds", 0),
+        d.get("licensed_icf_beds", 0), d.get("licensed_alf_beds", 0), d.get("licensed_total_beds", 0),
+        d.get("data_source", "CMS"),
+    )
+
+
+def upsert_facilities(facilities: list[dict], batch_size: int = 500) -> int:
+    """Batch upsert many facilities on a single connection (one round-trip per
+    batch via execute_values). Far faster than per-row upsert_facility and avoids
+    opening/leaking a connection per facility. Returns count upserted.
+    """
+    from psycopg2.extras import execute_values
+
+    rows = [_facility_row(d) for d in facilities if d.get("ccn")]
+    if not rows:
+        return 0
+
+    cols = ", ".join(_FACILITY_COLUMNS)
+    update_cols = [c for c in _FACILITY_COLUMNS if c != "ccn"]
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+    sql = (
+        f"INSERT INTO facilities ({cols}, last_synced_at, is_active, updated_at) VALUES %s "
+        f"ON CONFLICT (ccn) DO UPDATE SET {set_clause}, "
+        f"last_synced_at = NOW(), is_active = TRUE, updated_at = NOW()"
+    )
+    template = "(" + ", ".join(["%s"] * len(_FACILITY_COLUMNS)) + ", NOW(), TRUE, NOW())"
+
+    total = 0
+    conn = get_db_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for i in range(0, len(rows), batch_size):
+                    chunk = rows[i:i + batch_size]
+                    execute_values(cur, sql, chunk, template=template, page_size=batch_size)
+                    total += len(chunk)
+    finally:
+        conn.close()
+    return total
+
+
+def get_all_zip_coords() -> dict[str, tuple[float, float]]:
+    """Return {zip: (lat, lon)} for all seeded ZIP centroids — used as a
+    coordinate fallback for facilities that lack precise lat/long."""
+    out: dict[str, tuple[float, float]] = {}
+    conn = get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT zip, latitude, longitude FROM zip_coordinates")
+            for r in cur.fetchall():
+                try:
+                    out[r["zip"]] = (float(r["latitude"]), float(r["longitude"]))
+                except (TypeError, ValueError):
+                    continue
+    finally:
+        conn.close()
+    return out
+
+
 def deactivate_missing_facilities(active_ccns: list[str]) -> int:
     """Set is_active=FALSE for CCNs not in active_ccns. Returns count."""
     if not active_ccns:
