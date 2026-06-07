@@ -3739,6 +3739,43 @@ def build_multilingual_system_prompt(lang_config: dict) -> str:
         f"  - For Hmong, Mien/Iu Mien, Khmer: always set interpreter_recommended: true.\n"
         "  - List ALL cultural adaptations beyond literal translation in cultural_adaptations.\n"
         "  - when_to_call.emergency_instruction must contain '911' for US patients.\n\n"
+        "OUTPUT JSON SCHEMA -- use these EXACT keys. For every bilingual section, put the\n"
+        "ORIGINAL English in the `source_*` key and the " + lang_config['name'] + " translation in the\n"
+        "matching key. Never leave a translation key empty when a source value exists. Omit a\n"
+        "section only if the source has no such content.\n"
+        "{\n"
+        '  "meta": {\n'
+        '    "target_language_name": "' + lang_config['name'] + '",\n'
+        '    "generated_at": "<ISO 8601 timestamp>",\n'
+        '    "requires_clinician_review": false,\n'
+        '    "interpreter_recommended": false,\n'
+        '    "review_reasons": ["<reason>", ...],\n'
+        '    "cultural_adaptations": ["<adaptation>", ...]\n'
+        "  },\n"
+        '  "patient_header": { "source_greeting": "<English>", "greeting": "<translation>" },\n'
+        '  "diagnosis": { "source_content": "<English>", "content": "<translation>" },\n'
+        '  "medications": [\n'
+        '    { "name": "<generic name>", "name_display": "<name as shown to patient>",\n'
+        '      "dose": "<e.g. 25 mg>", "frequency": "<e.g. once daily>",\n'
+        '      "source_instruction": "<English instruction>", "instruction": "<translation>",\n'
+        '      "why": "<short reason, optional>" }\n'
+        "  ],\n"
+        '  "warning_signs": [\n'
+        '    { "urgency": "routine|urgent|emergent",\n'
+        '      "source_sign": "<English symptom>", "sign": "<translation>",\n'
+        '      "action_text": "<translated action, optional>" }\n'
+        "  ],\n"
+        '  "activity_restrictions": { "source_content": "<English>", "content": "<translation>" },\n'
+        '  "diet_instructions": { "source_content": "<English>", "content": "<translation>" },\n'
+        '  "wound_care": { "source_content": "<English>", "content": "<translation>" },\n'
+        '  "follow_up": { "appointments": [\n'
+        '    { "provider": "<name/specialty>", "timeframe": "<when>",\n'
+        '      "source_instruction": "<English>", "instruction": "<translation>" }\n'
+        "  ] },\n"
+        '  "when_to_call": { "er_instruction": "<translation>", "emergency_instruction": "<translation incl. 911>" },\n'
+        '  "teach_back_prompt": "<translation>",\n'
+        '  "attestation": "<translation>"\n'
+        "}\n\n"
         "Return ONLY valid JSON. No prose. No markdown fences."
     )
 

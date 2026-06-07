@@ -142,6 +142,17 @@ class TestHrrpGenerate:
 
 
 class TestMultilingualGenerate:
+    def test_system_prompt_pins_output_schema_keys(self):
+        """The prompt must specify the exact bilingual keys the UI renders, or the
+        model invents key names and the translated text shows up blank."""
+        import web_app
+        cfg = web_app.LANGUAGE_CONFIGS["es"]
+        prompt = web_app.build_multilingual_system_prompt(cfg)
+        for key in ['"source_content"', '"content"', '"source_instruction"',
+                    '"instruction"', '"source_sign"', '"sign"', '"name_display"',
+                    '"follow_up"', '"when_to_call"']:
+            assert key in prompt, f"schema key {key} missing from translation prompt"
+
     async def test_valid_request_returns_translation(self, authed_client, mock_claude):
         mock_claude.messages.create.return_value.content[0].text = json.dumps({
             "meta": {
