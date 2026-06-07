@@ -743,9 +743,10 @@
   <div class="report-panel" id="reportPanel">
     <div class="report-header">
       <h2>📄 Discharge Plan — AI Draft</h2>
-      <div class="report-actions">
+      <div class="report-actions" data-export-skip>
         <button class="btn btn-secondary" onclick="copyReport()">📋 Copy</button>
-        <button class="btn btn-secondary" onclick="window.print()">🖨️ Print / PDF</button>
+        <button class="btn btn-secondary" onclick="downloadPlanReport(false)">⬇ Download HTML</button>
+        <button class="btn btn-secondary" onclick="downloadPlanReport(true)">🖨️ Save as PDF</button>
         <button class="btn btn-primary" onclick="resetForm()">🔄 New Patient</button>
       </div>
     </div>
@@ -760,7 +761,15 @@
 
 </div><!-- /container -->
 
+<script src="/static/report-export.js"></script>
 <script>
+function downloadPlanReport(asPdf) {
+  var node = document.getElementById('reportPanel');
+  var opts = { title: "Discharge Plan — AI Draft", subtitle: "Generated " + new Date().toLocaleString(),
+    disclaimer: "DRAFT ONLY — AI-prepared discharge plan. Requires review, modification as needed, and approval by a licensed clinician before implementation.", print: asPdf };
+  var html = window.ReportExport.capture(node, opts);
+  if (asPdf) window.ReportExport.print(html); else window.ReportExport.download("Discharge-Plan-" + window.ReportExport.dateStamp() + ".html", html);
+}
 // ── Tab navigation ──────────────────────────────────────────────────────────
 const TABS = 7;
 let currentTab = 0;

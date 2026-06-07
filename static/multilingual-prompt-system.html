@@ -81,6 +81,7 @@
   }).catch(() => { window.location.href = '/login'; });
 </script>
 
+<script src="/static/report-export.js"></script>
 <script type="text/babel">
 const { useState } = React;
 
@@ -419,8 +420,14 @@ function App() {
             {loading ? <><Spinner /> Translating&hellip;</> : `Translate to ${selected.name}`}
           </button>
           {result && (
-            <button style={css.btnSec} onClick={() => window.print()} className="no-print">
-              Print bilingual document
+            <button style={css.btnSec} className="no-print"
+              onClick={() => window.ReportExport.download("Bilingual-Discharge-" + (selected.name || "") + "-" + window.ReportExport.dateStamp() + ".html", window.ReportExport.capture(document.getElementById("dp-report"), { title: "Bilingual Discharge Instructions", subtitle: (selected.name || "") + " · Generated " + new Date().toLocaleString() }))}>
+              ⬇ Download HTML
+            </button>
+          )}
+          {result && (
+            <button style={css.btnSec} onClick={() => window.ReportExport.print(window.ReportExport.capture(document.getElementById("dp-report"), { title: "Bilingual Discharge Instructions", subtitle: (selected.name || "") + " · Generated " + new Date().toLocaleString(), print: true }))} className="no-print">
+              🖨 Save as PDF
             </button>
           )}
         </div>
@@ -432,7 +439,7 @@ function App() {
         )}
       </div>
 
-      {result && <Output data={result} dir={selected.dir} />}
+      {result && <div id="dp-report"><Output data={result} dir={selected.dir} /></div>}
     </div>
   );
 }

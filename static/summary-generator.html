@@ -78,6 +78,7 @@
   }).catch(() => { window.location.href = '/login'; });
 </script>
 
+<script src="/static/report-export.js"></script>
 <script type="text/babel">
 const { useState } = React;
 
@@ -627,13 +628,17 @@ function DischargeSummaryPrompt() {
             >{tryLoading ? "Generating..." : "Generate Discharge Summary"}</button>
 
             {tryResult && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div id="dp-report">
+                <div data-export-skip style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1917" }}>Generated Summary</div>
-                  <button
-                    onClick={() => copy(JSON.stringify(tryResult, null, 2), "try-result")}
-                    style={{ background: copied === "try-result" ? "#1D9E75" : "#1A1917", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}
-                  >{copied === "try-result" ? "✓ Copied" : "Copy JSON"}</button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={() => window.ReportExport.download("Discharge-Summary-" + window.ReportExport.dateStamp() + ".html", window.ReportExport.capture(document.getElementById("dp-report"), { title: "Discharge Summary", subtitle: "Generated " + new Date().toLocaleString() }))}
+                      style={{ background: "#1A1917", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>⬇ Download HTML</button>
+                    <button onClick={() => window.ReportExport.print(window.ReportExport.capture(document.getElementById("dp-report"), { title: "Discharge Summary", subtitle: "Generated " + new Date().toLocaleString(), print: true }))}
+                      style={{ background: "transparent", color: "#555", border: "1px solid #ccc", padding: "6px 14px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>🖨 Save as PDF</button>
+                    <button onClick={() => copy(JSON.stringify(tryResult, null, 2), "try-result")}
+                      style={{ background: copied === "try-result" ? "#1D9E75" : "#1A1917", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>{copied === "try-result" ? "✓ Copied" : "Copy JSON"}</button>
+                  </div>
                 </div>
                 {tryResult.summary_metadata?.requires_physician_review && (
                   <div style={{ background: "#FAECE7", border: "1px solid #C04028", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#C04028", fontWeight: 600 }}>

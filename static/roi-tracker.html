@@ -227,6 +227,7 @@
   }
 </script>
 
+<script src="/static/report-export.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
@@ -515,9 +516,12 @@ function ROITracker() {
             {cfg.hospitalName} · {cfg.pilotMonths}-month pilot · {cfg.pilotStart} · HRRP FY2026
           </div>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          <button onClick={() => window.print()} className="no-print" style={{ fontSize:11, padding:"5px 12px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", cursor:"pointer" }}>
-            🖨 Print report
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          <button onClick={() => window.ReportExport.download("ROI-Report-" + window.ReportExport.dateStamp() + ".html", window.ReportExport.capture(document.getElementById("root"), { title: "Outcomes & ROI Report", subtitle: (cfg.hospitalName || "") + " · HRRP FY2026" }))} className="no-print" style={{ fontSize:11, padding:"5px 12px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", cursor:"pointer" }}>
+            ⬇ Download HTML
+          </button>
+          <button onClick={() => window.ReportExport.print(window.ReportExport.capture(document.getElementById("root"), { title: "Outcomes & ROI Report", subtitle: (cfg.hospitalName || "") + " · HRRP FY2026", print: true }))} className="no-print" style={{ fontSize:11, padding:"5px 12px", borderRadius:"var(--border-radius-md)", background:"rgba(255,255,255,.1)", color:"#EFF4F8", border:"0.5px solid rgba(255,255,255,.2)", cursor:"pointer" }}>
+            🖨 Save as PDF
           </button>
           <button onClick={genBrief} disabled={briefLoad} className="no-print" data-requires-network="true" style={{ fontSize:11, padding:"5px 14px", borderRadius:"var(--border-radius-md)", background:"#C8920A", color:"#1A0A00", border:"none", cursor:briefLoad?"default":"pointer", display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
             <i className={`ti ti-${briefLoad?"loader":"sparkles"}`} aria-hidden="true" style={{ fontSize:13, animation:briefLoad?"spin 1s linear infinite":"none" }}></i>

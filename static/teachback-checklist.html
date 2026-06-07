@@ -79,6 +79,7 @@
   }).catch(() => { window.location.href = '/login'; });
 </script>
 
+<script src="/static/report-export.js"></script>
 <script type="text/babel">
 const { useState, useRef } = React;
 
@@ -377,14 +378,16 @@ function TeachBackChecklist() {
           <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 3, background: "rgba(45,122,94,0.3)", color: "#6EE7B7", fontWeight: 700, letterSpacing: "0.08em" }}>LIVE TOOL</span>
         </div>
         {questions && (
-          <button onClick={() => window.print()} className="no-print" style={{
-            background: "transparent", color: "#9ABCCC", border: "1px solid #2D3F6A",
-            padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer",
-          }}>🖨 Print</button>
+          <div className="no-print" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => window.ReportExport.download("Teachback-" + window.ReportExport.dateStamp() + ".html", window.ReportExport.capture(document.getElementById("dp-report"), { title: "Teach-back Verification", subtitle: [ctx.patientInitials, ctx.destination].filter(Boolean).join(" · ") }))}
+              style={{ background: "#2D7A5E", color: "#fff", border: "none", padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>⬇ Download HTML</button>
+            <button onClick={() => window.ReportExport.print(window.ReportExport.capture(document.getElementById("dp-report"), { title: "Teach-back Verification", subtitle: [ctx.patientInitials, ctx.destination].filter(Boolean).join(" · "), print: true }))}
+              style={{ background: "transparent", color: "#9ABCCC", border: "1px solid #2D3F6A", padding: "4px 11px", borderRadius: 5, fontSize: 11, cursor: "pointer" }}>🖨 Save as PDF</button>
+          </div>
         )}
       </div>
 
-      <div style={{ display: "flex", minHeight: "calc(100vh - 96px)" }}>
+      <div id="dp-report" style={{ display: "flex", minHeight: "calc(100vh - 96px)" }}>
 
         {/* Left panel */}
         <div style={{ width: 272, flexShrink: 0, background: "#EEEADE", borderRight: "1px solid #DDD9CE", padding: "18px 16px", overflowY: "auto" }} className="no-print">
