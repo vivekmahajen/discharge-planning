@@ -330,3 +330,187 @@ class TestSyncTriggerWithDb:
         assert r.status_code == 200
         data = r.json()
         assert "sync_id" in data or "message" in data
+
+
+# ─── Batch upsert + ZIP-centroid + sync execution (serverless-safe) ───────────
+
+class _FakeCursor:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+        self.executed = []
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def execute(self, sql, params=None): self.executed.append((sql, params))
+    def fetchall(self): return self._rows
+    def fetchone(self): return self._rows[0] if self._rows else None
+
+
+class _FakeConn:
+    def __init__(self, rows=None):
+        self._cur = _FakeCursor(rows)
+        self.closed = False
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def cursor(self): return self._cur
+    def close(self): self.closed = True
+    def commit(self): pass
+
+
+class TestBatchUpsert:
+    def test_upsert_facilities_batches_and_closes(self, monkeypatch):
+        import db.directory as d
+        conn = _FakeConn()
+        monkeypatch.setattr(d, "get_db_conn", lambda: conn)
+        captured = {}
+
+        def fake_ev(cur, sql, rows, template=None, page_size=None):
+            captured["sql"] = sql
+            captured["rows"] = list(rows)
+            captured["template"] = template
+
+        monkeypatch.setattr("psycopg2.extras.execute_values", fake_ev)
+        facs = [
+            {"ccn": "055123", "name": "A", "zip": "94103", "latitude": 1.0, "longitude": 2.0},
+            {"ccn": "055124", "name": "B"},
+            {"name": "no ccn — skipped"},
+        ]
+        n = d.upsert_facilities(facs)
+        assert n == 2
+        assert conn.closed is True
+        assert "INSERT INTO facilities" in captured["sql"]
+        assert "ON CONFLICT (ccn) DO UPDATE" in captured["sql"]
+        assert len(captured["rows"]) == 2
+        # template carries the three trailing NOW()/TRUE/NOW() literals
+        assert captured["template"].endswith("NOW(), TRUE, NOW())")
+
+    def test_upsert_facilities_empty_returns_zero(self, monkeypatch):
+        import db.directory as d
+        monkeypatch.setattr(d, "get_db_conn", lambda: (_ for _ in ()).throw(AssertionError("should not connect")))
+        assert d.upsert_facilities([]) == 0
+
+    def test_get_all_zip_coords_skips_bad_rows(self, monkeypatch):
+        import db.directory as d
+        conn = _FakeConn(rows=[
+            {"zip": "94103", "latitude": 37.7, "longitude": -122.4},
+            {"zip": "90001", "latitude": 33.9, "longitude": -118.2},
+            {"zip": "bad", "latitude": None, "longitude": None},
+        ])
+        monkeypatch.setattr(d, "get_db_conn", lambda: conn)
+        out = d.get_all_zip_coords()
+        assert out["94103"] == (37.7, -122.4)
+        assert "bad" not in out
+        assert conn.closed is True
+
+
+class TestRunFullSync:
+    def test_cms_only_assigns_zip_centroids(self, monkeypatch):
+        import services.directory_sync as ds
+        cms = [
+            {"ccn": "055123", "name": "A", "zip": "94103", "latitude": None, "longitude": None},
+            {"ccn": "055124", "name": "B", "zip": "90001", "latitude": None, "longitude": None},
+            {"ccn": "055125", "name": "C", "zip": "99999", "latitude": None, "longitude": None},
+        ]
+        monkeypatch.setattr(ds, "fetch_cms_ca_facilities", lambda: [dict(x) for x in cms])
+        monkeypatch.setattr("db.directory.seed_zip_coordinates", lambda p: 0)
+        monkeypatch.setattr("db.directory.get_all_zip_coords",
+                            lambda: {"94103": (37.7, -122.4), "90001": (33.9, -118.2)})
+        captured = {}
+
+        def fake_upsert(facs, batch_size=500):
+            captured["facs"] = facs
+            return len([f for f in facs if f.get("ccn")])
+
+        monkeypatch.setattr("db.directory.upsert_facilities", fake_upsert)
+        monkeypatch.setattr("db.directory.deactivate_missing_facilities", lambda ccns: 0)
+        monkeypatch.setattr("db.directory.start_sync_log", lambda t: 1)
+        monkeypatch.setattr("db.directory.finish_sync_log", lambda *a, **k: None)
+        # CDPH should NOT be fetched when the flag is off
+        monkeypatch.delenv("DIRECTORY_ENABLE_CDPH", raising=False)
+        monkeypatch.setattr(ds, "fetch_cdph_ca_facilities",
+                            lambda: (_ for _ in ()).throw(AssertionError("CDPH must not be fetched")))
+
+        res = ds.run_full_sync("test")
+        assert res["status"] == "success"
+        assert res["upserted"] == 3
+        by_ccn = {f["ccn"]: f for f in captured["facs"]}
+        assert by_ccn["055123"]["latitude"] == 37.7
+        assert by_ccn["055124"]["longitude"] == -118.2
+        # No centroid for 99999 — stays None (won't appear in distance search)
+        assert by_ccn["055125"]["latitude"] is None
+
+    def test_cdph_failure_is_non_fatal(self, monkeypatch):
+        import services.directory_sync as ds
+        monkeypatch.setattr(ds, "fetch_cms_ca_facilities",
+                            lambda: [{"ccn": "055123", "name": "A", "zip": "94103",
+                                      "latitude": None, "longitude": None}])
+        monkeypatch.setattr("db.directory.seed_zip_coordinates", lambda p: 0)
+        monkeypatch.setattr("db.directory.get_all_zip_coords", lambda: {"94103": (37.7, -122.4)})
+        monkeypatch.setattr("db.directory.upsert_facilities", lambda facs, batch_size=500: len(facs))
+        monkeypatch.setattr("db.directory.deactivate_missing_facilities", lambda ccns: 0)
+        monkeypatch.setattr("db.directory.start_sync_log", lambda t: 1)
+        monkeypatch.setattr("db.directory.finish_sync_log", lambda *a, **k: None)
+        monkeypatch.setenv("DIRECTORY_ENABLE_CDPH", "1")
+        monkeypatch.setattr(ds, "fetch_cdph_ca_facilities",
+                            lambda: (_ for _ in ()).throw(RuntimeError("CHHS down")))
+        res = ds.run_full_sync("test")
+        assert res["status"] == "success"
+        assert res["upserted"] == 1
+
+
+class TestCronSync:
+    async def test_cron_sync_no_db_returns_503(self, client):
+        r = await client.get("/api/directory/cron-sync")
+        assert r.status_code == 503
+
+    async def test_cron_sync_requires_secret_when_set(self, db_authed_client, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        monkeypatch.setenv("CRON_SECRET", "topsecret")
+        r = await db_authed_client.get("/api/directory/cron-sync")
+        assert r.status_code == 401
+
+    async def test_cron_sync_fresh_skips(self, db_authed_client, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        monkeypatch.setenv("CRON_SECRET", "s3")
+        fresh = dict(FAKE_SYNC_STATUS, data_freshness_hours=2.0, total_active_facilities=1200)
+        with patch("db.directory.get_sync_status", return_value=fresh):
+            r = await db_authed_client.get(
+                "/api/directory/cron-sync", headers={"Authorization": "Bearer s3"})
+        assert r.status_code == 200
+        assert r.json()["message"] == "fresh"
+
+    async def test_cron_sync_stale_runs(self, db_authed_client, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        monkeypatch.delenv("CRON_SECRET", raising=False)
+        stale = dict(FAKE_SYNC_STATUS, data_freshness_hours=48.0, total_active_facilities=0)
+        with (
+            patch("db.directory.get_sync_status", return_value=stale),
+            patch("services.directory_sync.run_full_sync",
+                  return_value={"status": "success", "upserted": 1200, "deactivated": 0,
+                                "duration_seconds": 3.0}),
+        ):
+            r = await db_authed_client.get("/api/directory/cron-sync")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["message"] == "sync complete"
+        assert data["upserted"] == 1200
+
+
+class TestManualSyncSynchronous:
+    async def test_manual_sync_runs_inline_and_reports_count(self, db_authed_client, monkeypatch):
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        stale = dict(FAKE_SYNC_STATUS, data_freshness_hours=5.0)
+        with (
+            patch("db.directory.get_sync_status", return_value=stale),
+            patch("services.directory_sync.run_full_sync",
+                  return_value={"status": "success", "upserted": 1200, "deactivated": 2,
+                                "duration_seconds": 3.0}),
+        ):
+            r = await db_authed_client.post("/api/directory/sync")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["message"] == "Sync complete"
+        assert data["upserted"] == 1200

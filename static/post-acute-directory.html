@@ -630,8 +630,9 @@ async function checkSyncStatus() {
       label.textContent = total > 0 ? `${total.toLocaleString()} facilities` : 'Not yet synced';
     }
 
-    // If no facilities, start polling
+    // If no facilities, kick off a sync (once) and poll for results
     if (total === 0) {
+      ensureSyncKicked();
       startSyncPolling();
     } else {
       stopSyncPolling();
@@ -646,25 +647,66 @@ async function checkSyncStatus() {
   }
 }
 
+// Trigger the data sync once on first load when the table is empty.
+let initialSyncKicked = false;
+async function ensureSyncKicked() {
+  if (initialSyncKicked) return;
+  initialSyncKicked = true;
+  try {
+    const r = await fetch('/api/directory/sync', { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { showSyncError(data.detail || ('sync failed — HTTP ' + r.status)); return; }
+    if (data.status === 'error') { showSyncError(data.error || 'sync failed'); return; }
+    if (data.status === 'success' && data.upserted === 0) {
+      showSyncError('the CMS data source returned no facilities — it may be temporarily unavailable');
+      return;
+    }
+    // Sync ran (or wasn't needed) — refresh status immediately
+    await checkSyncStatus();
+  } catch (e) {
+    showSyncError(e.message);
+  }
+}
+
+function showSyncError(msg) {
+  stopSyncPolling();
+  const banner = document.getElementById('syncBanner');
+  banner.style.display = 'flex';
+  banner.innerHTML = '<span style="color:#b91c1c">&#9888; Could not load facility data: ' + escHtml(msg) +
+    '. Try the &ldquo;&#x21bb; Refresh Data&rdquo; button, or check back shortly.</span>';
+}
+
+let syncPollTicks = 0;
 function startSyncPolling() {
   document.getElementById('syncBanner').style.display = 'flex';
   if (syncPollInterval) return;
+  syncPollTicks = 0;
   syncPollInterval = setInterval(async () => {
-    const r = await fetch('/api/directory/sync-status');
-    if (!r.ok) return;
-    const data = await r.json();
-    if (data.total_active_facilities > 0) {
-      stopSyncPolling();
-      document.getElementById('freshnessLabel').textContent = `${data.total_active_facilities.toLocaleString()} facilities`;
-      const zip = document.getElementById('zipInput').value.trim();
-      if (zip && zip.length === 5) doSearch();
-    }
+    syncPollTicks++;
+    try {
+      const r = await fetch('/api/directory/sync-status');
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data.total_active_facilities > 0) {
+        stopSyncPolling();
+        document.getElementById('freshnessLabel').textContent = `${data.total_active_facilities.toLocaleString()} facilities`;
+        const zip = document.getElementById('zipInput').value.trim();
+        if (zip && zip.length === 5) doSearch();
+      } else if (syncPollTicks >= 36) {
+        showSyncError('sync is taking longer than expected');
+      }
+    } catch (e) { /* transient — keep polling */ }
   }, 5000);
 }
 
 function stopSyncPolling() {
-  document.getElementById('syncBanner').style.display = 'none';
   if (syncPollInterval) { clearInterval(syncPollInterval); syncPollInterval = null; }
+  // Only auto-hide the banner while it's still the spinner (success path);
+  // leave it visible if it has been replaced with an error message.
+  const banner = document.getElementById('syncBanner');
+  if (banner && banner.querySelector('.spinner')) {
+    banner.style.display = 'none';
+  }
 }
 
 async function doSearch() {
@@ -925,12 +967,17 @@ async function triggerSync() {
   btn.textContent = 'Refreshing...';
   try {
     const r = await fetch('/api/directory/sync', { method: 'POST' });
-    const data = await r.json();
-    if (data.message) {
-      showToast(data.message);
-    }
-    if (data.sync_id) {
-      startSyncPolling();
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      showToast(data.detail || ('Refresh failed — HTTP ' + r.status));
+    } else if (data.status === 'error') {
+      showToast('Refresh failed: ' + (data.error || 'unknown error'));
+    } else {
+      const n = typeof data.upserted === 'number' ? data.upserted : null;
+      showToast((data.message || 'Sync complete') + (n !== null ? ` — ${n.toLocaleString()} facilities` : ''));
+      await checkSyncStatus();
+      const zip = document.getElementById('zipInput').value.trim();
+      if (zip && zip.length === 5) doSearch();
     }
   } catch(e) {
     showToast('Refresh failed: ' + e.message);

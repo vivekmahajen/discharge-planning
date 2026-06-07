@@ -342,8 +342,8 @@ def run_full_sync(triggered_by: str = "scheduled") -> dict:
     Returns summary dict.
     """
     from db.directory import (
-        start_sync_log, finish_sync_log, upsert_facility,
-        deactivate_missing_facilities, seed_zip_coordinates, get_sync_status
+        start_sync_log, finish_sync_log, upsert_facilities,
+        deactivate_missing_facilities, seed_zip_coordinates, get_all_zip_coords,
     )
     import os
     from pathlib import Path
@@ -358,49 +358,9 @@ def run_full_sync(triggered_by: str = "scheduled") -> dict:
         cms_facilities = fetch_cms_ca_facilities()
         logger.info("CMS returned %d facilities", len(cms_facilities))
 
-        # Fetch CDPH enrichment
-        cdph_data = fetch_cdph_ca_facilities()
-        logger.info("CDPH returned %d locations", len(cdph_data))
-
-        # Build CDPH index by zip
-        cdph_by_zip: dict[str, list[dict]] = {}
-        for facid, info in cdph_data.items():
-            z = info.get("zip", "")
-            if z:
-                cdph_by_zip.setdefault(z, []).append(info)
-
-        # Upsert each facility
-        active_ccns = []
-        for facility in cms_facilities:
-            ccn = facility.get("ccn")
-            if not ccn:
-                continue
-            active_ccns.append(ccn)
-
-            # Try CDPH match
-            cdph_match = _match_cdph(facility, cdph_by_zip)
-            if cdph_match:
-                if facility.get("latitude") is None and cdph_match.get("latitude"):
-                    facility["latitude"] = cdph_match["latitude"]
-                if facility.get("longitude") is None and cdph_match.get("longitude"):
-                    facility["longitude"] = cdph_match["longitude"]
-                if not facility.get("cdph_facid"):
-                    facility["cdph_facid"] = cdph_match.get("cdph_facid")
-                for bed_field in ("licensed_snf_beds", "licensed_icf_beds", "licensed_alf_beds", "licensed_total_beds"):
-                    if cdph_match.get(bed_field):
-                        facility[bed_field] = cdph_match[bed_field]
-
-            try:
-                upsert_facility(facility)
-                upserted += 1
-            except Exception as e:
-                logger.warning("Failed to upsert facility %s: %s", ccn, e)
-
-        # Deactivate missing
-        if active_ccns:
-            deactivated = deactivate_missing_facilities(active_ccns)
-
-        # Seed zip codes if needed
+        # Ensure ZIP centroids are seeded, then load them for the coordinate
+        # fallback below. CMS records carry no lat/long, and search filters on
+        # lat/long — so without coordinates a facility never appears in results.
         data_dir = Path(__file__).parent.parent / "data"
         csv_path = str(data_dir / "ca_zips.csv")
         if os.path.exists(csv_path):
@@ -408,6 +368,61 @@ def run_full_sync(triggered_by: str = "scheduled") -> dict:
                 seed_zip_coordinates(csv_path)
             except Exception as e:
                 logger.warning("Zip seed failed: %s", e)
+        try:
+            zip_coords = get_all_zip_coords()
+        except Exception as e:
+            logger.warning("ZIP coordinate load failed: %s", e)
+            zip_coords = {}
+
+        # CDPH enrichment (precise coords + licensed-bed counts) is opt-in: the
+        # CHHS endpoint is large/slow and can exceed serverless time limits. It
+        # is never fatal — CMS data + ZIP-centroid coords stand on their own.
+        cdph_by_zip: dict[str, list[dict]] = {}
+        if os.getenv("DIRECTORY_ENABLE_CDPH", "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                cdph_data = fetch_cdph_ca_facilities()
+                logger.info("CDPH returned %d locations", len(cdph_data))
+                for _facid, info in cdph_data.items():
+                    z = info.get("zip", "")
+                    if z:
+                        cdph_by_zip.setdefault(z, []).append(info)
+            except Exception as e:
+                logger.warning("CDPH enrichment failed (continuing CMS-only): %s", e)
+
+        # Enrich + assign coordinates
+        active_ccns = []
+        for facility in cms_facilities:
+            ccn = facility.get("ccn")
+            if not ccn:
+                continue
+            active_ccns.append(ccn)
+
+            if cdph_by_zip:
+                cdph_match = _match_cdph(facility, cdph_by_zip)
+                if cdph_match:
+                    if facility.get("latitude") is None and cdph_match.get("latitude"):
+                        facility["latitude"] = cdph_match["latitude"]
+                    if facility.get("longitude") is None and cdph_match.get("longitude"):
+                        facility["longitude"] = cdph_match["longitude"]
+                    if not facility.get("cdph_facid"):
+                        facility["cdph_facid"] = cdph_match.get("cdph_facid")
+                    for bed_field in ("licensed_snf_beds", "licensed_icf_beds", "licensed_alf_beds", "licensed_total_beds"):
+                        if cdph_match.get(bed_field):
+                            facility[bed_field] = cdph_match[bed_field]
+
+            # Coordinate fallback: ZIP centroid so the facility is searchable.
+            if facility.get("latitude") is None or facility.get("longitude") is None:
+                z = (facility.get("zip") or "")[:5]
+                coord = zip_coords.get(z)
+                if coord:
+                    facility["latitude"], facility["longitude"] = coord[0], coord[1]
+
+        # Batch upsert (single connection)
+        upserted = upsert_facilities(cms_facilities)
+
+        # Deactivate missing
+        if active_ccns:
+            deactivated = deactivate_missing_facilities(active_ccns)
 
         duration = round(time.time() - start_time, 1)
         finish_sync_log(log_id, upserted, deactivated, "success")
