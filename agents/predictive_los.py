@@ -102,12 +102,16 @@ def extract_features(patient_data: dict) -> list:
     secondary = patient_data.get("secondary_diagnoses", [])
     if isinstance(secondary, str):
         secondary = [l for l in secondary.splitlines() if l.strip()]
+    elif not isinstance(secondary, (list, tuple)):
+        secondary = []
     comorbidity_count = min(8, len(secondary))
 
     ins = str(patient_data.get("primary_insurance", "")).lower()
     insurance_type = next((v for k, v in INSURANCE_MAP.items() if k in ins), 4)
 
     therapy = patient_data.get("therapy_evaluations", {})
+    if not isinstance(therapy, dict):
+        therapy = {}
     has_pt = 0 if str(therapy.get("PT", "Not evaluated")).lower() == "not evaluated" else 1
     has_ot = 0 if str(therapy.get("OT", "Not evaluated")).lower() == "not evaluated" else 1
     has_st = 0 if str(therapy.get("ST", "Not evaluated")).lower() == "not evaluated" else 1
