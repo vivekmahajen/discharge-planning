@@ -254,9 +254,10 @@ def _map_cms_record(r: dict) -> Optional[dict]:
         "number_of_fines": _safe_int(_first(r, "number_of_fines")) or 0,
         "total_penalties": _safe_int(_first(r, "total_number_of_penalties")) or 0,
         "data_source": "CMS",
-        # lat/lon enriched from CDPH or ZIP centroid in run_full_sync
-        "latitude": None,
-        "longitude": None,
+        # CMS now publishes coordinates directly; ZIP-centroid fallback in
+        # run_full_sync fills any that are missing.
+        "latitude": _safe_float(r.get("latitude")),
+        "longitude": _safe_float(r.get("longitude")),
         "cdph_facid": None,
         "licensed_snf_beds": 0,
         "licensed_icf_beds": 0,

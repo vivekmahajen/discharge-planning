@@ -675,3 +675,34 @@ class TestCmsRecordMapping:
         assert f["ccn"] == "055124"
         assert f["city"] == "Sacramento"
         assert f["zip"] == "95814"
+
+
+class TestMappingCoordsAndFreshness:
+    def test_maps_cms_latitude_longitude(self):
+        import services.directory_sync as ds
+        rec = {
+            "cms_certification_number_ccn": "055001",
+            "provider_name": "Redlands Healthcare Center",
+            "state": "CA", "zip_code": "92373", "citytown": "Redlands",
+            "latitude": "34.0556", "longitude": "-117.1825",
+        }
+        f = ds._map_cms_record(rec)
+        assert f["latitude"] == 34.0556
+        assert f["longitude"] == -117.1825
+
+    async def test_sync_trigger_fresh_but_empty_still_runs(self, db_authed_client, monkeypatch):
+        """A recent sync that produced 0 rows must NOT block a re-sync."""
+        import web_app
+        monkeypatch.setattr(web_app, "_DIRECTORY_DB_AVAILABLE", True)
+        fresh_empty = dict(FAKE_SYNC_STATUS, data_freshness_hours=0.2, total_active_facilities=0)
+        with (
+            patch("db.directory.get_sync_status", return_value=fresh_empty),
+            patch("services.directory_sync.run_full_sync",
+                  return_value={"status": "success", "upserted": 1200, "deactivated": 0,
+                                "duration_seconds": 4.0}),
+        ):
+            r = await db_authed_client.post("/api/directory/sync")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["message"] == "Sync complete"
+        assert data["upserted"] == 1200
