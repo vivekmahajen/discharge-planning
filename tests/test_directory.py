@@ -706,3 +706,41 @@ class TestMappingCoordsAndFreshness:
         data = r.json()
         assert data["message"] == "Sync complete"
         assert data["upserted"] == 1200
+
+
+class TestCmsPagination:
+    def test_paginates_in_pages_of_500(self, monkeypatch):
+        import json
+        from urllib.parse import parse_qs, urlparse
+        import httpx
+        import services.directory_sync as ds
+        original = httpx.Client
+        calls = []
+
+        def handler(request):
+            if request.method == "POST":
+                body = json.loads(request.content.decode() or "{}")
+                offset, limit = body.get("offset", 0), body.get("limit")
+            else:
+                q = parse_qs(urlparse(str(request.url)).query)
+                offset, limit = int(q.get("offset", ["0"])[0]), int(q.get("limit", ["0"])[0])
+            calls.append((offset, limit))
+            if offset == 0:
+                results = [{"cms_certification_number_ccn": f"05{i:04d}",
+                            "provider_name": "F", "state": "CA", "zip_code": "94103"}
+                           for i in range(500)]
+            else:
+                results = [{"cms_certification_number_ccn": "059999",
+                            "provider_name": "Last", "state": "CA", "zip_code": "94103"}]
+            return httpx.Response(200, json={"results": results})
+
+        def factory(*a, **k):
+            k.pop("transport", None)
+            return original(*a, transport=httpx.MockTransport(handler), **k)
+
+        monkeypatch.setattr(ds.httpx, "Client", factory)
+        monkeypatch.setattr(ds.time, "sleep", lambda *a: None)
+        facs = ds.fetch_cms_ca_facilities()
+        assert len(facs) == 501
+        assert calls[0][1] == 500          # page size is 500, not 2000
+        assert [c[0] for c in calls[:2]] == [0, 500]   # paginated by 500
