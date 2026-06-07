@@ -366,6 +366,83 @@ function HRRPFlagging() {
     finally { setBriefLoading(false); }
   }, [hrrpFlags, teamFlags, lace, financials.total]);
 
+  /* ── Briefing export (self-contained HTML; printable to PDF) ──────── */
+  const buildBriefHtml = (printMode) => {
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    const gen = new Date().toLocaleString("en-US",{ month:"short", day:"numeric", year:"numeric", hour:"2-digit", minute:"2-digit" });
+    const hrrpList = hrrpFlags.map(c => `<li>${esc(c.label)} (${esc(c.code)}) — ${fmt$(c.penalty_per_readmit)}/readmit</li>`).join("") || "<li>None</li>";
+    const teamList = teamFlags.map(e => `<li>${esc(e.label)} — bundle ${fmt$(e.bundle_low)}–${fmt$(e.bundle_high)}</li>`).join("") || "<li>None</li>";
+    const priorities = (brief.top_discharge_priorities||[]).map(p =>
+      `<div class="pri p${esc(p.priority)}"><div class="num">${esc(p.priority)}</div><div><div class="act">${esc(p.action)}</div><div class="why">${esc(p.why)}</div></div></div>`).join("");
+    const box = (label,val) => val ? `<div class="box"><div class="bl">${esc(label)}</div><div>${esc(val)}</div></div>` : "";
+    const insights = box("HRRP insight",brief.hrrp_insight) + box("TEAM insight",brief.team_insight);
+    const extra = box("California-specific",brief.california_specific) + box("FY2027 warning",brief.fy2027_warning);
+    const printScript = printMode ? ('<'+'script>window.focus();setTimeout(function(){window.print();},300);<'+'/script>') : '';
+    return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HRRP / TEAM Financial Risk Briefing</title>
+<style>
+  body{font-family:'Source Sans 3',system-ui,Arial,sans-serif;color:#1a1f2b;max-width:820px;margin:32px auto;padding:0 24px;line-height:1.5}
+  h1{font-family:Georgia,serif;font-size:21px;color:#7a1f12;margin:0 0 2px}
+  .sub{color:#6b7280;font-size:12px;margin-bottom:16px}
+  .headline{background:#FAECE7;border:1px solid #e7b3a6;border-radius:8px;padding:11px 14px;color:#7a1f12;font-weight:600;margin-bottom:16px}
+  .exp{display:flex;justify-content:space-between;align-items:center;border:2px solid #C04028;border-radius:10px;padding:12px 16px;margin-bottom:16px}
+  .exp .big{font-size:30px;font-weight:800;color:#C04028;font-family:'Source Code Pro',monospace}
+  table{border-collapse:collapse;width:100%;margin-bottom:14px;font-size:13px}
+  th,td{text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb}
+  th{color:#6b7280;font-weight:600;width:160px;text-transform:uppercase;font-size:11px;letter-spacing:.05em}
+  h2{font-family:Georgia,serif;font-size:15px;color:#7a1f12;border-bottom:1px solid #e5e7eb;padding-bottom:6px;margin:20px 0 10px}
+  ul{margin:4px 0 12px 18px;font-size:13px}
+  .box{background:#f7f8fa;border:1px solid #e5e7eb;border-radius:7px;padding:9px 12px;margin:7px 0;font-size:13px}
+  .box .bl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:3px}
+  .pri{display:flex;gap:10px;background:#f7f8fa;border-left:3px solid #C04028;border-radius:6px;padding:9px 12px;margin:7px 0}
+  .pri.p2{border-left-color:#C8920A}.pri.p3{border-left-color:#1D9E75}
+  .pri .num{width:20px;height:20px;border-radius:50%;background:#FAECE7;color:#C04028;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0}
+  .pri .act{font-weight:600;font-size:13px}.pri .why{font-size:12px;color:#4b5563}
+  .disclaimer{margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af}
+  @media print{body{margin:0}}
+</style></head>
+<body>
+  <h1>HRRP &amp; TEAM Model — Financial Risk Briefing</h1>
+  <div class="sub">CMS FY2026 · Sacramento MSA (mandatory TEAM area) · Generated ${esc(gen)}</div>
+  <div class="headline">${esc(brief.risk_headline)}</div>
+  <div class="exp"><div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280">Estimated exposure (this episode)</div>
+    <div style="font-size:12px;color:#6b7280">HRRP ${fmt$(financials.hrrpPenaltyTotal)} · TEAM ${fmt$(financials.teamExposure)}</div></div>
+    <div class="big">${fmt$(financials.total)}</div></div>
+  <table>
+    <tr><th>ICD-10 codes</th><td>${esc(dx.join(", "))}</td></tr>
+    <tr><th>LACE score</th><td>${esc(lace)}</td></tr>
+    <tr><th>Payer</th><td>${esc(payer)}</td></tr>
+    <tr><th>Est. annual hospital risk</th><td>${fmt$(financials.hospitalAnnualRisk)}</td></tr>
+  </table>
+  <h2>Flagged HRRP conditions</h2><ul>${hrrpList}</ul>
+  <h2>TEAM 2026 episodes</h2><ul>${teamList}</ul>
+  <h2>AI risk briefing</h2>
+  ${insights}
+  ${priorities ? '<h2>Top priority actions</h2>' + priorities : ''}
+  ${extra}
+  <div class="disclaimer">AI-generated financial-risk decision support — estimates only, not a guarantee of CMS penalties or payments. Verify against official CMS HRRP/TEAM data and confirm all clinical actions with the care team.</div>
+  ${printScript}
+</body></html>`;
+  };
+
+  const downloadBrief = () => {
+    const blob = new Blob([buildBriefHtml(false)], { type:"text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `HRRP-Briefing-${new Date().toISOString().slice(0,10)}.html`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const printBrief = () => {
+    const w = window.open("", "_blank");
+    if (!w) { alert("Pop-up blocked — allow pop-ups to use Save as PDF, or use Download HTML."); return; }
+    w.document.write(buildBriefHtml(true));
+    w.document.close();
+  };
+
   const hasFlaggedHRRP = hrrpFlags.length > 0;
   const hasFlaggedTEAM = teamFlags.length > 0;
 
@@ -698,6 +775,10 @@ function HRRPFlagging() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "#C04028", marginBottom: 10, padding: "8px 12px",
                     background: "#FAECE7", borderRadius: "var(--border-radius-md)", lineHeight: 1.5 }}>{brief.risk_headline}</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                    <button onClick={downloadBrief} style={{ fontSize: 11, padding: "6px 14px", background: "#7a1f12", border: "none", borderRadius: 6, cursor: "pointer", color: "#fff", fontWeight: 600 }}>⬇ Download HTML</button>
+                    <button onClick={printBrief} style={{ fontSize: 11, padding: "6px 14px", background: "transparent", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6, cursor: "pointer", color: "var(--color-text-secondary)" }}>🖨 Save as PDF</button>
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                     {[["HRRP insight", brief.hrrp_insight, "#C04028", "#FAECE7"],
                       ["TEAM insight",  brief.team_insight,  "#854F0B", "#FAEEDA"]].map(([l, v, c, bg]) => (
