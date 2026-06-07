@@ -265,14 +265,14 @@ function CDPHComplianceChecklist() {
   const updateAuth = (id,k,v) => setAuthItems(prev=>prev.map(a=>a.id===id?{...a,[k]:v}:a));
   const addAuth    = () => setAuthItems(p=>[...p,{ id:Date.now()+"", service:"", status:"not_init", authNum:"", expiry:"", requested:"" }]);
 
-  const [livanta, setCommence Health] = useState({
+  const [livanta, setLivanta] = useState({
     immDate:"2026-05-14", immTime:"10:30", immSigned:true,
     redelivDate:"2026-05-17", redelivTime:"09:15", redelivSigned:true,
     appealFiled:false, appealDate:"", appealTime:"",
     livantaCalled:false, livantaCallTime:"", livantaCaseNum:"",
     determination:"", determinationDate:"",
   });
-  const setL = (k,v) => setCommence Health(p=>({...p,[k]:v}));
+  const setL = (k,v) => setLivanta(p=>({...p,[k]:v}));
 
   const [snf, setSnf] = useState({
     admitStatus:"inpatient", admitDate:"2026-05-14",
