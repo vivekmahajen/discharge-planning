@@ -45,6 +45,16 @@ class TestConfigStatus:
         assert "athenaid" not in blob
         assert "supersecretvalue" not in blob
 
+    def test_epic_defaults_to_smart_v1(self, monkeypatch):
+        monkeypatch.delenv("EPIC_SMART_VERSION", raising=False)
+        st = {e["name"]: e for e in config_status()}
+        assert st["epic"]["smart_version"] == "v1"
+
+    def test_epic_smart_version_override(self, monkeypatch):
+        monkeypatch.setenv("EPIC_SMART_VERSION", "v2")
+        st = {e["name"]: e for e in config_status()}
+        assert st["epic"]["smart_version"] == "v2"
+
 
 class TestStatusEndpoint:
     async def test_requires_auth(self, client):
