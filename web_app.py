@@ -527,7 +527,39 @@ def _ensure_table() -> None:  # pragma: no cover
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            _ensure_audit_log_schema(cur)
         conn.commit()
+
+
+def _ensure_audit_log_schema(cur) -> None:
+    """Create/repair the audit_log table so it matches what write_audit_log()
+    inserts. Older deployments have a drifted schema (missing organization_id /
+    user_email / mrn), which made every audited request log a DB error and
+    write no audit row. ADD COLUMN IF NOT EXISTS backfills those in place."""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id              BIGSERIAL PRIMARY KEY,
+            organization_id TEXT,
+            user_email      TEXT,
+            endpoint        TEXT,
+            method          TEXT,
+            status          INT,
+            ip              TEXT,
+            mrn             TEXT,
+            ts              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    for col, coltype in (
+        ("organization_id", "TEXT"),
+        ("user_email", "TEXT"),
+        ("endpoint", "TEXT"),
+        ("method", "TEXT"),
+        ("status", "INT"),
+        ("ip", "TEXT"),
+        ("mrn", "TEXT"),
+        ("ts", "TIMESTAMPTZ"),
+    ):
+        cur.execute(f"ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS {col} {coltype}")
 
 
 # File-based fallback for local dev
