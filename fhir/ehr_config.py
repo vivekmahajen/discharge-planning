@@ -59,7 +59,7 @@ def _epic_oauth_root(fhir_base: str) -> str:
 def _build_registry() -> dict[str, EHRConfig]:
     epic_fhir_base = os.getenv(
         "FHIR_BASE_URL_EPIC",
-        "https://fhir.epic.com/interconnect-ambu-oauth/api/FHIR/R4",
+        "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
     )
     _epic_root = _epic_oauth_root(epic_fhir_base)
 
@@ -134,7 +134,7 @@ def list_ehr_display() -> list[dict]:
 # Host fragments that indicate a vendor sandbox/test endpoint (not production).
 _SANDBOX_HINTS = (
     "fhir.epic.com",
-    "interconnect-ambu-oauth",
+    "interconnect-fhir-oauth",
     "fhir-ehr-code.cerner.com",
     "preview.platform.athenahealth.com",
     "sandbox",
