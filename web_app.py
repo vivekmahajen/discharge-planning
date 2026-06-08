@@ -3336,9 +3336,12 @@ async def fhir_authorize(  # pragma: no cover
         "redirect_uri": FHIR_REDIRECT_URI,
         "scope": " ".join(scopes),
         "state": state,
-        "aud": fhir_base,
     }
+    # `aud` is a SMART v2 parameter. Epic's SMART v1 standalone authorize does
+    # not expect it and rejects the request ("something went wrong trying to
+    # authorize the client") when it's present, so only send it for v2/PKCE.
     if use_pkce:
+        params["aud"] = fhir_base
         params["code_challenge"] = code_challenge
         params["code_challenge_method"] = "S256"
     if launch:
