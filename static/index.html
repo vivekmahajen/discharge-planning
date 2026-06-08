@@ -388,6 +388,20 @@
 
   <div class="form-card">
 
+    <!-- Import from EHR (SMART on FHIR) — shown only when an EHR is configured -->
+    <div id="ehr-panel" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-weight:600;color:#1e3a8a;">&#128279; Import from EHR</span>
+        <select id="ehr-select" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;"></select>
+        <button type="button" id="ehr-connect-btn" onclick="connectEhr()" style="background:#1a56db;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:.85rem;cursor:pointer;font-weight:600;">Connect</button>
+        <span id="ehr-status" style="font-size:.8rem;color:#64748b;"></span>
+      </div>
+      <div id="ehr-patient-row" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
+        <input type="text" id="ehr-patient-id" placeholder="FHIR Patient ID" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;min-width:220px;" />
+        <button type="button" onclick="loadFhirPatient(document.getElementById('ehr-patient-id').value.trim())" style="background:#0f766e;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:.85rem;cursor:pointer;font-weight:600;">Load patient</button>
+      </div>
+    </div>
+
     <!-- Section 1: Demographics -->
     <div class="tab-panel active" id="tab-0">
       <div class="section-title">Patient Demographics</div>
@@ -1129,9 +1143,52 @@ function resetForm() {
   goTab(0);
 }
 
+// ── EHR connect panel ────────────────────────────────────────────────────────
+function connectEhr() {
+  const sel = document.getElementById('ehr-select');
+  const ehr = (sel && sel.value) || 'epic';
+  window.location.href = '/api/fhir/authorize?ehr=' + encodeURIComponent(ehr);
+}
+
+async function initEhrPanel() {
+  const panel = document.getElementById('ehr-panel');
+  if (!panel) return;
+  const sel = document.getElementById('ehr-select');
+  const statusEl = document.getElementById('ehr-status');
+  // 1) Which EHRs are configured on this server?
+  try {
+    const r = await fetch('/api/fhir/status');
+    if (!r.ok) return;                          // 401/503 → leave panel hidden
+    const data = await r.json();
+    const configured = (data.ehrs || []).filter(e => e.configured);
+    if (configured.length === 0) return;        // nothing to connect → keep hidden
+    sel.innerHTML = configured.map(e =>
+      `<option value="${e.name}">${e.display_name}${e.is_sandbox_default ? ' (sandbox)' : ''}</option>`
+    ).join('');
+    panel.style.display = '';
+  } catch (_) { return; }
+  // 2) Already connected? Reveal the patient-id row.
+  try {
+    const s = await fetch('/api/fhir/session');
+    if (s.ok) {
+      const j = await s.json();
+      if (j.active) {
+        statusEl.textContent = '✓ Connected' + (j.ehr ? ' to ' + j.ehr : '');
+        statusEl.style.color = '#16a34a';
+        document.getElementById('ehr-patient-row').style.display = 'flex';
+        const pid = document.getElementById('ehr-patient-id');
+        if (j.patient_id && pid) pid.value = j.patient_id;
+      }
+    }
+  } catch (_) {}
+}
+initEhrPanel();
+
 // ── FHIR auto-populate ───────────────────────────────────────────────────────
 async function loadFhirPatient(patientId) {
   const errEl = document.getElementById('errorMsg');
+  if (!patientId) { errEl.style.color = ''; errEl.textContent = 'Enter a FHIR Patient ID.'; return; }
+  errEl.style.color = '';
   errEl.textContent = 'Loading patient data from EHR…';
   try {
     const res = await fetch(`/api/fhir/patient/${encodeURIComponent(patientId)}`);
