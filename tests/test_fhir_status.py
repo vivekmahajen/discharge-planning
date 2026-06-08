@@ -69,3 +69,18 @@ class TestStatusEndpoint:
         assert "redirect_uri" in data
         assert len(data["ehrs"]) == 3
         assert all("configured" in e and "fhir_base_url" in e for e in data["ehrs"])
+
+
+class TestEpicScopeOverride:
+    def test_default_scopes_used_without_env(self, monkeypatch):
+        import fhir.ehr_config as cfg
+        monkeypatch.delenv("FHIR_SCOPES_EPIC", raising=False)
+        c = cfg.get_ehr_config("epic")
+        assert "patient/Patient.read" in c.scopes
+        assert "patient/CareTeam.read" in c.scopes
+
+    def test_env_overrides_epic_scopes(self, monkeypatch):
+        import fhir.ehr_config as cfg
+        monkeypatch.setenv("FHIR_SCOPES_EPIC", "openid patient/Patient.read")
+        c = cfg.get_ehr_config("epic")
+        assert c.scopes == ["openid", "patient/Patient.read"]
