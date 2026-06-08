@@ -25,6 +25,15 @@ FHIR_SCOPES_PHASE1 = [
     "openid",
 ]
 
+
+def _scopes_from_env(var: str, default: list[str]) -> list[str]:
+    """Allow overriding the requested scopes via a space-separated env var.
+    Epic rejects the whole authorize request if any requested scope maps to an
+    API the app isn't registered for, so this lets us match scopes to the app
+    (e.g. FHIR_SCOPES_EPIC='openid patient/Patient.read') without a code change."""
+    raw = (os.getenv(var) or "").strip()
+    return raw.split() if raw else list(default)
+
 # athenahealth uses the same standalone scope set.
 FHIR_SCOPES_ATHENA = FHIR_SCOPES_PHASE1[:]
 
@@ -71,7 +80,7 @@ def _build_registry() -> dict[str, EHRConfig]:
             client_id=os.getenv("FHIR_CLIENT_ID_EPIC", ""),
             client_secret=None,
             is_public_client=True,
-            scopes=FHIR_SCOPES_PHASE1,
+            scopes=_scopes_from_env("FHIR_SCOPES_EPIC", FHIR_SCOPES_PHASE1),
             # Epic's app registration exposes SMART v1 for these sandbox/standalone
             # patient apps (v2 cannot be enabled), so match it: no PKCE. Override
             # with EPIC_SMART_VERSION=v2 if a given Epic app supports v2.
