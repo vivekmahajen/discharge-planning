@@ -129,3 +129,36 @@ def list_ehr_display() -> list[dict]:
         {"name": k, "display_name": v.display_name}
         for k, v in _build_registry().items()
     ]
+
+
+# Host fragments that indicate a vendor sandbox/test endpoint (not production).
+_SANDBOX_HINTS = (
+    "fhir.epic.com",
+    "interconnect-ambu-oauth",
+    "fhir-ehr-code.cerner.com",
+    "preview.platform.athenahealth.com",
+    "sandbox",
+)
+
+
+def config_status() -> list[dict]:
+    """Safe, read-only view of EHR configuration for diagnostics. Reports only
+    booleans + resolved (non-secret) URLs — never client_id/secret values."""
+    out = []
+    for _name, c in _build_registry().items():
+        base = c.fhir_base_url or ""
+        configured = bool(c.client_id) and (c.is_public_client or bool(c.client_secret))
+        out.append({
+            "name": c.name,
+            "display_name": c.display_name,
+            "configured": configured,
+            "client_id_set": bool(c.client_id),
+            "requires_client_secret": not c.is_public_client,
+            "client_secret_set": bool(c.client_secret),
+            "fhir_base_url": base,
+            "auth_endpoint": c.auth_endpoint_override or "(SMART discovery / URL-derived)",
+            "token_endpoint": c.token_endpoint_override or "(SMART discovery / URL-derived)",
+            "smart_version": c.smart_version,
+            "is_sandbox_default": any(h in base for h in _SANDBOX_HINTS),
+        })
+    return out

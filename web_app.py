@@ -3223,6 +3223,24 @@ async def list_fhir_ehrs(request: Request):  # pragma: no cover
     return JSONResponse({"ehrs": list_ehr_display()})
 
 
+@app.get("/api/fhir/status")
+async def fhir_config_status(request: Request):
+    """Read-only EHR configuration diagnostic. Reports, per EHR, whether
+    credentials are present and the resolved (non-secret) base/auth/token URLs,
+    so an operator can confirm the live config at a glance. No secrets exposed."""
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
+    if not get_current_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    from fhir.ehr_config import config_status
+    return JSONResponse({
+        "fhir_loaded": _FHIR_IMPORT_ERROR is None,
+        "app_url": APP_URL,
+        "redirect_uri": FHIR_REDIRECT_URI,
+        "ehrs": config_status(),
+    })
+
+
 @app.get("/api/fhir/authorize")
 async def fhir_authorize(  # pragma: no cover
     request: Request,
