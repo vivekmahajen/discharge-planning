@@ -72,7 +72,10 @@ def _build_registry() -> dict[str, EHRConfig]:
             client_secret=None,
             is_public_client=True,
             scopes=FHIR_SCOPES_PHASE1,
-            smart_version="v2",
+            # Epic's app registration exposes SMART v1 for these sandbox/standalone
+            # patient apps (v2 cannot be enabled), so match it: no PKCE. Override
+            # with EPIC_SMART_VERSION=v2 if a given Epic app supports v2.
+            smart_version=os.getenv("EPIC_SMART_VERSION", "v1"),
             # Derive from URL pattern — avoids SMART discovery which Epic blocks
             # server-side. Override with EPIC_AUTH_ENDPOINT for non-standard instances.
             auth_endpoint_override=os.getenv(
