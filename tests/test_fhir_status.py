@@ -11,7 +11,7 @@ class TestConfigStatus:
                   "FHIR_CLIENT_ID_ATHENA", "FHIR_CLIENT_SECRET_ATHENA"):
             monkeypatch.delenv(v, raising=False)
         st = {e["name"]: e for e in config_status()}
-        assert set(st) == {"epic", "cerner", "athena"}
+        assert set(st) == {"epic", "epic_provider", "cerner", "athena"}
         assert st["epic"]["configured"] is False
         assert st["epic"]["client_id_set"] is False
         assert st["epic"]["is_sandbox_default"] is True
@@ -67,7 +67,7 @@ class TestStatusEndpoint:
         data = r.json()
         assert data["fhir_loaded"] is True
         assert "redirect_uri" in data
-        assert len(data["ehrs"]) == 3
+        assert len(data["ehrs"]) == 4
         assert all("configured" in e and "fhir_base_url" in e for e in data["ehrs"])
 
 

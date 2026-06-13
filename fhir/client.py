@@ -8,6 +8,7 @@ Implements exponential backoff for 429 / 5xx per spec section 7.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 from typing import Optional
 
@@ -125,6 +126,79 @@ class FHIRClient:
                 continue
 
         raise last_exc or FHIRServerError(f"Max retries exceeded for {path}")
+
+    async def _post(self, path: str, body: dict) -> dict:
+        """Single FHIR POST (resource create). Returns the created resource (or a
+        minimal dict with the Location for 201-with-empty-body). NOT retried — a
+        write that times out mid-flight must not be silently duplicated."""
+        url = self.fhir_base + path
+        headers = {**self._headers, "Content-Type": "application/fhir+json"}
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                resp = await http.post(url, headers=headers, json=body)
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise FHIRNetworkError(str(exc))
+
+        if resp.status_code in (200, 201):
+            location = resp.headers.get("Location") or resp.headers.get("Content-Location") or ""
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"resourceType": body.get("resourceType")}
+            if location and "id" not in data:
+                data["location"] = location
+                data.setdefault("id", location.rstrip("/").split("/")[-1].split("?")[0])
+            return data
+        if resp.status_code == 401:
+            raise FHIRAuthError("Token expired or invalid")
+        if resp.status_code == 403:
+            rt = path.lstrip("/").split("?")[0].split("/")[0]
+            raise FHIRForbiddenError(
+                f"This EHR has not granted write access to {rt}. The app needs the "
+                f"{rt}.Write scope approved and a provider (Clinicians) registration."
+            )
+        detail = ""
+        try:
+            detail = (resp.text or "")[:300]
+        except Exception:
+            pass
+        raise FHIRServerError(f"EHR returned {resp.status_code} creating {path}: {detail}")
+
+    async def create_communication(
+        self,
+        *,
+        patient_id: str,
+        message: str,
+        category_text: str = "Discharge plan",
+        recipients: Optional[list[str]] = None,
+        sender_display: Optional[str] = None,
+    ) -> dict:
+        """Create an R4 Communication (a message to the care team) for a patient.
+
+        `recipients` is a list of FHIR references (e.g. ["CareTeam/abc", "Practitioner/xyz"]).
+        Requires a session whose token carries Communication.Write (provider app).
+        """
+        resource: dict = {
+            "resourceType": "Communication",
+            "status": "completed",
+            "category": [{
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/communication-category",
+                    "code": "notification",
+                    "display": "Notification",
+                }],
+                "text": category_text,
+            }],
+            "subject": {"reference": f"Patient/{patient_id}"},
+            "sent": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "payload": [{"contentString": message}],
+        }
+        if recipients:
+            resource["recipient"] = [{"reference": r} for r in recipients]
+        if sender_display:
+            resource["sender"] = {"display": sender_display}
+        logger.info("FHIR Communication create: ehr=%s subject=Patient/<redacted>", self.ehr)
+        return await self._post("/Communication", resource)
 
     async def fetch_patient_bundle(self, patient_id: str) -> PatientBundle:
         """Fetch all Phase 1 FHIR resources in parallel and return a normalized bundle.

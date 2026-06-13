@@ -37,6 +37,16 @@ def _scopes_from_env(var: str, default: list[str]) -> list[str]:
 # athenahealth uses the same standalone scope set.
 FHIR_SCOPES_ATHENA = FHIR_SCOPES_PHASE1[:]
 
+# Provider (clinician) write app — used for writing back to the EHR (e.g. posting a
+# Communication to the care team). Uses user/* scopes incl. Communication.Write.
+# Override with FHIR_SCOPES_EPIC_PROVIDER.
+FHIR_SCOPES_EPIC_PROVIDER = [
+    "openid",
+    "user/Patient.read",
+    "user/Communication.read",
+    "user/Communication.write",
+]
+
 
 @dataclass
 class EHRConfig:
@@ -93,6 +103,21 @@ def _build_registry() -> dict[str, EHRConfig]:
             token_endpoint_override=os.getenv(
                 "EPIC_TOKEN_ENDPOINT", f"{_epic_root}/oauth2/token"
             ),
+        ),
+        # Provider/clinician Epic app for write-back (Communication to care team).
+        # Separate registration from the patient read app: Clinicians audience,
+        # provider standalone launch, user/* scopes incl. Communication.Write.
+        "epic_provider": EHRConfig(
+            name="epic_provider",
+            display_name="Epic (provider write-back)",
+            fhir_base_url=epic_fhir_base,
+            client_id=os.getenv("FHIR_CLIENT_ID_EPIC_PROVIDER", ""),
+            client_secret=os.getenv("FHIR_CLIENT_SECRET_EPIC_PROVIDER"),
+            is_public_client=os.getenv("FHIR_CLIENT_SECRET_EPIC_PROVIDER") is None,
+            scopes=_scopes_from_env("FHIR_SCOPES_EPIC_PROVIDER", FHIR_SCOPES_EPIC_PROVIDER),
+            smart_version=os.getenv("EPIC_PROVIDER_SMART_VERSION", "v1"),
+            auth_endpoint_override=os.getenv("EPIC_AUTH_ENDPOINT", f"{_epic_root}/oauth2/authorize"),
+            token_endpoint_override=os.getenv("EPIC_TOKEN_ENDPOINT", f"{_epic_root}/oauth2/token"),
         ),
         "cerner": EHRConfig(
             name="cerner",
