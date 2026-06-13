@@ -3707,6 +3707,66 @@ async def fhir_send_communication(request: Request, patient_id: str,
     return response
 
 
+@app.post("/api/fhir/patient/{patient_id}/document")
+@limiter.limit("30/hour")
+async def fhir_write_document(request: Request, patient_id: str,
+                             body: dict[str, Any] = Body(default={})):  # pragma: no cover
+    """Write the discharge plan back to the EHR as a DocumentReference (a clinical
+    note). Requires an active FHIR session whose token carries DocumentReference.Write
+    (e.g. the epic_provider app). Explicit clinician action; filed as a draft."""
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    content = (body.get("content") or body.get("message") or "").strip()
+    if not content:
+        return JSONResponse({"error": "content is required"}, status_code=400)
+
+    session, new_cookie = await _get_valid_fhir_session(request)
+    if not session:
+        return JSONResponse(
+            {"error": "No active FHIR session. Connect an EHR with write access first."},
+            status_code=401,
+        )
+    session_patient = session.get("patient_id")
+    if session_patient and session_patient != patient_id:
+        return JSONResponse(
+            {"error": "Patient ID does not match FHIR session context."}, status_code=403,
+        )
+
+    fhir_client = FHIRClient(
+        fhir_base=session["fhir_base"],
+        access_token=session["access_token"],
+        ehr=session.get("ehr", ""),
+    )
+    title = (body.get("title") or "Discharge Plan (DRAFT — clinician review required)").strip()
+
+    _fhir_audit_logger.info("FHIR DocumentReference write: ehr=%s user=%s", session.get("ehr"), user)
+    try:
+        created = await fhir_client.create_document_reference(
+            patient_id=patient_id, content=content, title=title,
+        )
+    except FHIRAuthError:
+        return JSONResponse(
+            {"error": "FHIR access token expired. Please re-authenticate with your EHR."},
+            status_code=401,
+        )
+    except FHIRForbiddenError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    except Exception as exc:
+        _fhir_audit_logger.error(
+            "FHIR DocumentReference write error: ehr=%s user=%s error=%s",
+            session.get("ehr"), user, type(exc).__name__,
+        )
+        return JSONResponse({"error": f"EHR write failed: {exc}"}, status_code=502)
+
+    response = JSONResponse({"success": True, "id": created.get("id"), "resource": created})
+    _apply_refreshed_cookie(response, new_cookie)
+    return response
+
+
 @app.post("/api/fhir/patient/{patient_id}/plan")
 async def generate_plan_from_fhir(request: Request, patient_id: str):  # pragma: no cover
     """Fetch FHIR data for a patient and stream a discharge plan.

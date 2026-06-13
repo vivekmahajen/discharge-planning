@@ -37,15 +37,11 @@ def _scopes_from_env(var: str, default: list[str]) -> list[str]:
 # athenahealth uses the same standalone scope set.
 FHIR_SCOPES_ATHENA = FHIR_SCOPES_PHASE1[:]
 
-# Provider (clinician) write app — used for writing back to the EHR (e.g. posting a
-# Communication to the care team). Uses user/* scopes incl. Communication.Write.
-# Override with FHIR_SCOPES_EPIC_PROVIDER.
-FHIR_SCOPES_EPIC_PROVIDER = [
-    "openid",
-    "user/Patient.read",
-    "user/Communication.read",
-    "user/Communication.write",
-]
+# Write-back app — reads the patient AND writes the discharge plan back to the
+# chart as a DocumentReference (a clinical note). DocumentReference.Create is
+# available under a Patients-audience Epic app, so this uses patient/* scopes plus
+# patient/DocumentReference.write. Override with FHIR_SCOPES_EPIC_PROVIDER.
+FHIR_SCOPES_EPIC_PROVIDER = FHIR_SCOPES_PHASE1 + ["patient/DocumentReference.write"]
 
 
 @dataclass
@@ -104,12 +100,12 @@ def _build_registry() -> dict[str, EHRConfig]:
                 "EPIC_TOKEN_ENDPOINT", f"{_epic_root}/oauth2/token"
             ),
         ),
-        # Provider/clinician Epic app for write-back (Communication to care team).
-        # Separate registration from the patient read app: Clinicians audience,
-        # provider standalone launch, user/* scopes incl. Communication.Write.
+        # Write-back Epic app (Patients audience) that also reads: patient/* reads
+        # plus patient/DocumentReference.write to file the plan as a clinical note.
+        # Separate registration so the read-only "epic" app stays unchanged.
         "epic_provider": EHRConfig(
             name="epic_provider",
-            display_name="Epic (provider write-back)",
+            display_name="Epic (write-back)",
             fhir_base_url=epic_fhir_base,
             client_id=os.getenv("FHIR_CLIENT_ID_EPIC_PROVIDER", ""),
             client_secret=os.getenv("FHIR_CLIENT_SECRET_EPIC_PROVIDER"),

@@ -8,6 +8,7 @@ Implements exponential backoff for 429 / 5xx per spec section 7.
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import logging
 from typing import Optional
@@ -199,6 +200,43 @@ class FHIRClient:
             resource["sender"] = {"display": sender_display}
         logger.info("FHIR Communication create: ehr=%s subject=Patient/<redacted>", self.ehr)
         return await self._post("/Communication", resource)
+
+    async def create_document_reference(
+        self,
+        *,
+        patient_id: str,
+        content: str,
+        title: str = "Discharge Plan (DRAFT — clinician review required)",
+        content_type: str = "text/plain",
+        loinc_code: str = "18842-5",
+        loinc_display: str = "Discharge summary",
+        encounter_ref: Optional[str] = None,
+    ) -> dict:
+        """Create an R4 DocumentReference (a clinical note/document) on the chart.
+
+        The plan text is base64‑encoded into content[].attachment.data, marked
+        docStatus=preliminary (a draft for clinician review). Requires a session
+        whose token carries DocumentReference.Write.
+        """
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        resource: dict = {
+            "resourceType": "DocumentReference",
+            "status": "current",
+            "docStatus": "preliminary",
+            "type": {
+                "coding": [{"system": "http://loinc.org", "code": loinc_code, "display": loinc_display}],
+                "text": title,
+            },
+            "subject": {"reference": f"Patient/{patient_id}"},
+            "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "content": [{
+                "attachment": {"contentType": content_type, "data": encoded, "title": title},
+            }],
+        }
+        if encounter_ref:
+            resource["context"] = {"encounter": [{"reference": encounter_ref}]}
+        logger.info("FHIR DocumentReference create: ehr=%s subject=Patient/<redacted>", self.ehr)
+        return await self._post("/DocumentReference", resource)
 
     async def fetch_patient_bundle(self, patient_id: str) -> PatientBundle:
         """Fetch all Phase 1 FHIR resources in parallel and return a normalized bundle.
