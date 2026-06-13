@@ -786,18 +786,18 @@ function downloadPlanReport(asPdf) {
   if (asPdf) window.ReportExport.print(html); else window.ReportExport.download("Discharge-Plan-" + window.ReportExport.dateStamp() + ".html", html);
 }
 
-// ── Write the plan back to the EHR as a Communication to the care team ─────────
+// ── Write the plan back to the EHR as a DocumentReference (clinical note) ──────
 async function sendPlanToEhr() {
   const planText = (document.getElementById('reportBody')?.innerText || '').trim();
   if (!planText) { alert('Generate a discharge plan first.'); return; }
-  // Requires an active provider FHIR session (write scope).
+  // Requires an active FHIR session with DocumentReference write access.
   let session;
   try {
     const s = await fetch('/api/fhir/session');
     session = s.ok ? await s.json() : {};
   } catch (_) { session = {}; }
   if (!session.active) {
-    alert('Connect a provider EHR first: use "Import from EHR" → "Epic (provider write-back)" so the session has write access, then try again.');
+    alert('Connect the EHR with write access first: "Import from EHR" → "Epic (write-back)", then try again.');
     return;
   }
   let patientId = session.patient_id;
@@ -805,20 +805,20 @@ async function sendPlanToEhr() {
     patientId = (prompt('FHIR Patient ID to file this note under:') || '').trim();
     if (!patientId) return;
   }
-  if (!confirm('Send this discharge plan to the care team in the EHR as a DRAFT note for clinician review?')) return;
-  const message = 'DRAFT — AI-prepared discharge plan. Requires clinician review before action.\n\n' + planText;
+  if (!confirm('File this discharge plan to the EHR chart as a DRAFT clinical note for clinician review?')) return;
+  const content = 'DRAFT — AI-prepared discharge plan. Requires clinician review before action.\n\n' + planText;
   try {
-    const r = await fetch('/api/fhir/patient/' + encodeURIComponent(patientId) + '/communication', {
+    const r = await fetch('/api/fhir/patient/' + encodeURIComponent(patientId) + '/document', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message, category_text: 'Discharge plan (DRAFT — review required)' }),
+      body: JSON.stringify({ content: content, title: 'Discharge Plan (DRAFT — review required)' }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.success === false) {
       alert('Send to EHR failed: ' + (data.error || ('HTTP ' + r.status)));
       return;
     }
-    alert('✓ Sent to care team in the EHR' + (data.id ? ' (Communication ' + data.id + ')' : '') + '.');
+    alert('✓ Filed to the EHR chart as a draft note' + (data.id ? ' (DocumentReference ' + data.id + ')' : '') + '.');
   } catch (e) {
     alert('Send to EHR failed: ' + e.message);
   }

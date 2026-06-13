@@ -45,11 +45,38 @@ class TestCommunicationBuilder:
         assert "recipient" not in captured["body"]
 
 
+class TestDocumentReferenceBuilder:
+    async def test_builds_r4_document_reference_and_posts(self):
+        c = FHIRClient(fhir_base="https://x/api/FHIR/R4", access_token="t", ehr="epic_provider")
+        captured = {}
+
+        async def fake_post(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {"id": "doc456"}
+
+        c._post = fake_post  # type: ignore[assignment]
+        res = await c.create_document_reference(patient_id="P1", content="Plan text here")
+        assert res["id"] == "doc456"
+        assert captured["path"] == "/DocumentReference"
+        b = captured["body"]
+        assert b["resourceType"] == "DocumentReference"
+        assert b["status"] == "current"
+        assert b["docStatus"] == "preliminary"  # draft for review
+        assert b["subject"]["reference"] == "Patient/P1"
+        import base64
+        decoded = base64.b64decode(b["content"][0]["attachment"]["data"]).decode()
+        assert decoded == "Plan text here"
+        assert b["content"][0]["attachment"]["contentType"] == "text/plain"
+
+
 class TestProviderConfig:
     def test_epic_provider_has_write_scope(self, monkeypatch):
         monkeypatch.delenv("FHIR_SCOPES_EPIC_PROVIDER", raising=False)
         c = get_ehr_config("epic_provider")
-        assert "user/Communication.write" in c.scopes
+        assert "patient/DocumentReference.write" in c.scopes
+        # also reads the patient bundle
+        assert "patient/Patient.read" in c.scopes
         assert c.display_name.startswith("Epic")
 
     def test_provider_scopes_overridable(self, monkeypatch):
@@ -70,6 +97,10 @@ class TestProviderConfig:
 
 
 class TestWriteEndpointAuth:
-    async def test_requires_auth(self, client):
+    async def test_communication_requires_auth(self, client):
         r = await client.post("/api/fhir/patient/P1/communication", json={"message": "hi"})
+        assert r.status_code == 401
+
+    async def test_document_requires_auth(self, client):
+        r = await client.post("/api/fhir/patient/P1/document", json={"content": "hi"})
         assert r.status_code == 401
