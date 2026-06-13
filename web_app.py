@@ -3639,6 +3639,74 @@ async def get_fhir_patient_bundle(request: Request, patient_id: str):  # pragma:
     return response
 
 
+@app.post("/api/fhir/patient/{patient_id}/communication")
+@limiter.limit("30/hour")
+async def fhir_send_communication(request: Request, patient_id: str,
+                                  body: dict[str, Any] = Body(default={})):  # pragma: no cover
+    """Write a Communication (a note to the care team) back to the EHR for a patient.
+
+    Requires an active FHIR session whose token carries Communication.Write — i.e.
+    the provider/clinician app (ehr=epic_provider). This is an explicit clinician
+    action: the message is written as a clearly-labeled draft for review."""
+    if _FHIR_IMPORT_ERROR:
+        return _fhir_unavailable()
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    message = (body.get("message") or "").strip()
+    if not message:
+        return JSONResponse({"error": "message is required"}, status_code=400)
+
+    session, new_cookie = await _get_valid_fhir_session(request)
+    if not session:
+        return JSONResponse(
+            {"error": "No active FHIR session. Connect a provider EHR app first."},
+            status_code=401,
+        )
+    # If the session is patient-scoped, it must match the target patient.
+    session_patient = session.get("patient_id")
+    if session_patient and session_patient != patient_id:
+        return JSONResponse(
+            {"error": "Patient ID does not match FHIR session context."}, status_code=403,
+        )
+
+    fhir_client = FHIRClient(
+        fhir_base=session["fhir_base"],
+        access_token=session["access_token"],
+        ehr=session.get("ehr", ""),
+    )
+    recipients = body.get("recipients") or None
+    category_text = (body.get("category_text") or "Discharge plan").strip()
+    sender_display = body.get("sender_display") or user
+
+    _fhir_audit_logger.info(
+        "FHIR Communication write: ehr=%s user=%s", session.get("ehr"), user
+    )
+    try:
+        created = await fhir_client.create_communication(
+            patient_id=patient_id, message=message, category_text=category_text,
+            recipients=recipients, sender_display=sender_display,
+        )
+    except FHIRAuthError:
+        return JSONResponse(
+            {"error": "FHIR access token expired. Please re-authenticate with your EHR."},
+            status_code=401,
+        )
+    except FHIRForbiddenError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    except Exception as exc:
+        _fhir_audit_logger.error(
+            "FHIR Communication write error: ehr=%s user=%s error=%s",
+            session.get("ehr"), user, type(exc).__name__,
+        )
+        return JSONResponse({"error": f"EHR write failed: {exc}"}, status_code=502)
+
+    response = JSONResponse({"success": True, "id": created.get("id"), "resource": created})
+    _apply_refreshed_cookie(response, new_cookie)
+    return response
+
+
 @app.post("/api/fhir/patient/{patient_id}/plan")
 async def generate_plan_from_fhir(request: Request, patient_id: str):  # pragma: no cover
     """Fetch FHIR data for a patient and stream a discharge plan.
