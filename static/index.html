@@ -344,7 +344,14 @@
 </head>
 <body>
 
-<header>
+<header style="position:relative">
+  <div class="patient-picker no-print" style="position:absolute;top:8px;right:14px;display:flex;align-items:center;gap:6px;z-index:5">
+    <label for="patientPicker" style="font-size:.72rem;color:#dbeafe;font-weight:600">Load patient</label>
+    <select id="patientPicker" onchange="onPatientPicked(this.value)" title="Load a data-rich demo patient"
+            style="font-size:.78rem;padding:4px 8px;border-radius:6px;border:1px solid #cbd5e1;max-width:300px;background:#fff;color:#1e293b;cursor:pointer">
+      <option value="">Select a demo patient…</option>
+    </select>
+  </div>
   <div class="logo">🏥</div>
   <div>
     <h1>Discharge Planning AI</h1>
@@ -875,46 +882,78 @@ function collectFormData() {
 }
 
 // ── Load sample patient ──────────────────────────────────────────────────────
+function applySamplePatient(d) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+  set('patient_name', d.patient_name);
+  set('age', d.age);
+  set('gender', d.gender);
+  set('mrn', d.mrn);
+  set('admission_date', d.admission_date);
+  set('expected_discharge_date', d.expected_discharge_date);
+  set('attending_physician', d.attending_physician);
+  set('primary_diagnosis', d.primary_diagnosis);
+  set('secondary_diagnoses', d.secondary_diagnoses);
+  set('additional_clinical_notes', d.additional_clinical_notes);
+  set('primary_insurance', d.primary_insurance);
+  set('secondary_insurance', d.secondary_insurance);
+  set('medicare_part_a', d.medicare_part_a);
+  set('snf_days_used', d.snf_days_used);
+  set('admission_medications', d.admission_medications);
+  set('inpatient_medications', d.inpatient_medications);
+  set('discharge_medications', d.discharge_medications);
+  set('pt_evaluation', d.pt_evaluation);
+  set('ot_evaluation', d.ot_evaluation);
+  set('st_evaluation', d.st_evaluation);
+  set('living_situation', d.living_situation);
+  set('caregiver', d.caregiver);
+  set('primary_language', d.primary_language);
+  set('transportation', d.transportation);
+  set('housing_type', d.housing_type);
+  set('bedroom_location', d.bedroom_location);
+  set('patient_family_preference', d.patient_family_preference);
+  set('physician_goals', d.physician_goals);
+  set('additional_notes', d.additional_notes);
+  goTab(0);
+}
+
 async function loadSample() {
   try {
     const res = await fetch('/api/sample-patient');
     if (!res.ok) throw new Error('Failed to load sample');
-    const d = await res.json();
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
-    set('patient_name', d.patient_name);
-    set('age', d.age);
-    set('gender', d.gender);
-    set('mrn', d.mrn);
-    set('admission_date', d.admission_date);
-    set('expected_discharge_date', d.expected_discharge_date);
-    set('attending_physician', d.attending_physician);
-    set('primary_diagnosis', d.primary_diagnosis);
-    set('secondary_diagnoses', d.secondary_diagnoses);
-    set('additional_clinical_notes', d.additional_clinical_notes);
-    set('primary_insurance', d.primary_insurance);
-    set('secondary_insurance', d.secondary_insurance);
-    set('medicare_part_a', d.medicare_part_a);
-    set('snf_days_used', d.snf_days_used);
-    set('admission_medications', d.admission_medications);
-    set('inpatient_medications', d.inpatient_medications);
-    set('discharge_medications', d.discharge_medications);
-    set('pt_evaluation', d.pt_evaluation);
-    set('ot_evaluation', d.ot_evaluation);
-    set('st_evaluation', d.st_evaluation);
-    set('living_situation', d.living_situation);
-    set('caregiver', d.caregiver);
-    set('primary_language', d.primary_language);
-    set('transportation', d.transportation);
-    set('housing_type', d.housing_type);
-    set('bedroom_location', d.bedroom_location);
-    set('patient_family_preference', d.patient_family_preference);
-    set('physician_goals', d.physician_goals);
-    set('additional_notes', d.additional_notes);
-    goTab(0);
+    applySamplePatient(await res.json());
   } catch (e) {
     alert('Could not load sample patient: ' + e.message);
   }
 }
+
+// ── Top-right "Load patient" picker — 100 data-rich demo patients ─────────────
+async function onPatientPicked(id) {
+  if (!id) return;
+  try {
+    const res = await fetch('/api/sample-patient/' + encodeURIComponent(id));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    applySamplePatient(await res.json());
+  } catch (e) {
+    alert('Could not load patient: ' + e.message);
+  }
+}
+
+async function initPatientPicker() {
+  const sel = document.getElementById('patientPicker');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/sample-patients');
+    if (!res.ok) return;
+    const data = await res.json();
+    (data.patients || []).forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.label;
+      sel.appendChild(o);
+    });
+  } catch (_) { /* picker keeps just the placeholder */ }
+}
+initPatientPicker();
 
 // ── Set agent card status ────────────────────────────────────────────────────
 function setStatus(agent, status, label) {

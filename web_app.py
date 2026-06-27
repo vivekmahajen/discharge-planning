@@ -918,6 +918,27 @@ async def get_sample_patient(request: Request,
     return JSONResponse(dict(SAMPLE_PATIENT_WEB))
 
 
+@app.get("/api/sample-patients")
+@limiter.limit("120/hour")
+async def list_sample_patients_endpoint(request: Request,
+                                        ctx: OrgContext = Depends(get_current_org)):
+    """Lightweight list of the 100 synthetic demo patients for the picker dropdown."""
+    from sample_patients import list_sample_patients
+    return JSONResponse({"patients": list_sample_patients()})
+
+
+@app.get("/api/sample-patient/{pid}")
+@limiter.limit("120/hour")
+async def get_sample_patient_by_id(request: Request, pid: str,
+                                   ctx: OrgContext = Depends(get_current_org)):
+    """Full form-shaped data for one synthetic demo patient (by id, e.g. '042')."""
+    from sample_patients import get_sample_patient as _get
+    patient = _get(pid)
+    if not patient:
+        return JSONResponse({"error": "Sample patient not found"}, status_code=404)
+    return JSONResponse(patient)
+
+
 async def stream_plan(patient_data: dict):
     """Generate SSE events as each specialist agent runs, then the coordinator."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
