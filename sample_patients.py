@@ -794,6 +794,8 @@ def _form_data(idx: int, sc: dict, clin: dict, demo: dict) -> dict:
         "attending_physician": demo["attending"],
         "primary_diagnosis": sc["primary"], "secondary_diagnoses": "\n".join(sc["secondary"]),
         "additional_clinical_notes": sc["notes"],
+        "patient_first_name": demo["first"], "patient_last_name": demo["last"],
+        "date_of_birth": demo["dob"], "insurance_member_id": demo["member_id"],
         "primary_insurance": demo["pri_ins"], "secondary_insurance": demo["sec_ins"],
         "medicare_part_a": demo["part_a"], "snf_days_used": str(demo["snf_used"]),
         "admission_medications": "\n".join(sc["adm_meds"]),
@@ -833,7 +835,9 @@ def _rich_record(idx: int) -> dict:
     dual = ("dual" in pri_ins.lower()) or ("Medi-Cal" in (sec_ins or ""))
 
     demo = {
-        "name": f"{first} {last}", "age": age, "gender": gender,
+        "name": f"{first} {last}", "first": first, "last": last, "dob": dob.isoformat(),
+        "member_id": f"SYN-{900000 + idx}",
+        "age": age, "gender": gender,
         "mrn": f"SYN-{200000 + idx}", "adm": adm.isoformat(), "disc": disc.isoformat(),
         "attending": f"Dr. {_LAST[(idx * 5) % len(_LAST)]}, MD — {sc['specialty']}",
         "pri_ins": pri_ins, "sec_ins": sec_ins, "part_a": part_a, "snf_used": snf_used,

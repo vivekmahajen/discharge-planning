@@ -1013,6 +1013,12 @@ function applySamplePatient(d) {
   set('primary_diagnosis', d.primary_diagnosis);
   set('secondary_diagnoses', d.secondary_diagnoses);
   set('additional_clinical_notes', d.additional_clinical_notes);
+  // Insurance / eligibility identity fields (fall back to splitting the full name)
+  const _nm = (d.patient_name || '').trim();
+  set('patient_first_name', d.patient_first_name || _nm.split(' ')[0]);
+  set('patient_last_name', d.patient_last_name || _nm.split(' ').slice(1).join(' '));
+  set('date_of_birth', d.date_of_birth);
+  set('insurance_member_id', d.insurance_member_id);
   set('primary_insurance', d.primary_insurance);
   set('secondary_insurance', d.secondary_insurance);
   set('medicare_part_a', d.medicare_part_a);
