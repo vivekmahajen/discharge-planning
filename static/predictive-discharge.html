@@ -242,6 +242,8 @@
   <div class="card">
     <div class="card-title">🔢 Patient Intake Data</div>
 
+    <div id="patientPickerMount" style="margin-bottom:14px"></div>
+
     <div class="form-grid">
       <div class="field">
         <label>Patient Age</label>
@@ -436,23 +438,31 @@ function daysBetween(a, b) {
 
 // ── Load sample patient ───────────────────────────────────────────────────────
 
+// Fill the intake fields from a flat patient record. Shared by the sample
+// button and the searchable patient picker (window.applyPatientData).
+function applyPatientData(d) {
+  if (!d) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('age', d.age || '');
+  set('admission_date', d.admission_date || '');
+  set('primary_diagnosis', d.primary_diagnosis || '');
+  set('primary_insurance', d.primary_insurance || '');
+  set('secondary_diagnoses',
+    Array.isArray(d.secondary_diagnoses) ? d.secondary_diagnoses.join('\n') : (d.secondary_diagnoses || ''));
+  set('living_situation', d.living_situation || '');
+  set('caregiver', d.caregiver ? 'Yes' : 'None');
+  set('snf_days_used', d.snf_days_used || 0);
+  set('patient_family_preference', d.patient_family_preference || '');
+  set('pt_evaluation', d.pt_evaluation || 'Not evaluated');
+  set('ot_evaluation', d.ot_evaluation || 'Not evaluated');
+  set('st_evaluation', d.st_evaluation || 'Not evaluated');
+}
+window.applyPatientData = applyPatientData;
+
 async function loadSample() {
   try {
     const r = await fetch('/api/sample-patient');
-    const d = await r.json();
-    document.getElementById('age').value = d.age || '';
-    document.getElementById('admission_date').value = d.admission_date || '';
-    document.getElementById('primary_diagnosis').value = d.primary_diagnosis || '';
-    document.getElementById('primary_insurance').value = d.primary_insurance || '';
-    document.getElementById('secondary_diagnoses').value =
-      Array.isArray(d.secondary_diagnoses) ? d.secondary_diagnoses.join('\n') : (d.secondary_diagnoses || '');
-    document.getElementById('living_situation').value = d.living_situation || '';
-    document.getElementById('caregiver').value = d.caregiver ? 'Yes' : 'None';
-    document.getElementById('snf_days_used').value = d.snf_days_used || 0;
-    document.getElementById('patient_family_preference').value = d.patient_family_preference || '';
-    document.getElementById('pt_evaluation').value = d.pt_evaluation || 'Not evaluated';
-    document.getElementById('ot_evaluation').value = d.ot_evaluation || 'Not evaluated';
-    document.getElementById('st_evaluation').value = d.st_evaluation || 'Not evaluated';
+    applyPatientData(await r.json());
   } catch (e) {
     alert('Could not load sample patient: ' + e.message);
   }
@@ -605,6 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admission_date').value = new Date().toISOString().slice(0, 10);
 });
 </script>
+  <script src="/static/patient-select.js"></script>
   <script src="/static/pwa.js" defer></script>
 </body>
 </html>
