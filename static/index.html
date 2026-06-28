@@ -358,6 +358,62 @@
   .cx-high     { background: #fee2e2; color: #b91c1c; }
   .cx-moderate { background: #fef3c7; color: #92400e; }
   .cx-low      { background: #dcfce7; color: #166534; }
+
+  /* ── Dynamic Patient Snapshot ─────────────────────────────────────────── */
+  .snapshot {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .snapshot-head { display: flex; align-items: center; gap: 10px; }
+  .snapshot-head h2 { margin: 0; font-size: 1.05rem; color: #0f172a; }
+  .snapshot-syn {
+    font-size: .64rem; font-weight: 700; color: #92400e; background: #fef3c7;
+    border: 1px solid #fde68a; border-radius: 999px; padding: 1px 8px;
+  }
+  .snapshot-head .spacer { flex: 1; }
+  .snapshot-toggle {
+    background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px;
+    padding: 3px 12px; font-size: .76rem; cursor: pointer; color: #334155; font-weight: 600;
+  }
+  .snapshot-toggle:hover { background: #e2e8f0; }
+  .snapshot-disclaimer { font-size: .72rem; color: #64748b; margin: 4px 0 12px; font-style: italic; }
+  .snapshot-body {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .snap-section {
+    border: 1px solid #eef2f7; border-radius: 10px; padding: 12px 14px; background: #fafbfc;
+  }
+  .snap-section > h3 {
+    margin: 0 0 8px; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #475569; display: flex; align-items: center; gap: 6px;
+  }
+  .snap-section.snap-wide { grid-column: 1 / -1; }
+  .snap-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: .82rem; }
+  .snap-kv dt { color: #64748b; }
+  .snap-kv dd { margin: 0; color: #0f172a; font-weight: 600; }
+  .snap-list { margin: 0; padding-left: 18px; font-size: .82rem; color: #0f172a; }
+  .snap-list li { margin: 2px 0; }
+  .snap-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .snap-badge {
+    font-size: .72rem; font-weight: 600; border-radius: 999px; padding: 2px 9px;
+    background: #eef2ff; color: #3730a3; border: 1px solid #e0e7ff;
+  }
+  .snap-badge.warn { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+  .snap-badge.danger { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
+  .snap-badge.ok { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+  .snap-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  .snap-table th, .snap-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eef2f7; }
+  .snap-table th { color: #64748b; font-weight: 600; font-size: .72rem; text-transform: uppercase; }
+  .snap-flag-H { color: #b91c1c; font-weight: 700; }
+  .snap-flag-L { color: #b45309; font-weight: 700; }
+  .snap-spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 22px; vertical-align: middle; }
+  .snap-spark span { width: 6px; background: #93c5fd; border-radius: 1px 1px 0 0; display: inline-block; }
+  .snap-trend-row { display: flex; align-items: center; gap: 10px; font-size: .8rem; margin: 3px 0; }
+  .snap-trend-row .snap-trend-label { width: 64px; color: #64748b; }
+  .snap-empty { font-size: .8rem; color: #94a3b8; font-style: italic; }
+  .snap-subhead { margin: 8px 0 3px; font-size: .72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; }
+  .snap-sub { font-size: .74rem; color: #64748b; }
 </style>
 </head>
 <body>
@@ -410,6 +466,19 @@
   <div class="sample-row">
     <button class="btn-sample" onclick="loadSample()">⚡ Load Sample Patient</button>
   </div>
+
+  <!-- Dynamic Patient Snapshot — schema-driven, render-by-presence (read-only) -->
+  <section id="snapshotPanel" class="snapshot no-print" hidden aria-labelledby="snapshotTitle">
+    <div class="snapshot-head">
+      <h2 id="snapshotTitle">Patient Snapshot</h2>
+      <span class="snapshot-syn" title="100% synthetic — no real PHI">🧪 Synthetic / demo data</span>
+      <div class="spacer"></div>
+      <button type="button" class="snapshot-toggle" id="snapshotToggle"
+              aria-expanded="true" aria-controls="snapshotBody" onclick="toggleSnapshot()">Hide</button>
+    </div>
+    <p id="snapshotDisclaimer" class="snapshot-disclaimer"></p>
+    <div id="snapshotBody" class="snapshot-body" aria-live="polite"></div>
+  </section>
 
   <!-- Tab bar -->
   <div class="tab-bar" id="tabBar">
@@ -1100,6 +1169,318 @@ async function initPatientPicker() {
   } catch (_) {}
 }
 initPatientPicker();
+
+// ── Dynamic Patient Snapshot — schema-driven, render-by-presence ──────────────
+// Labels live in metadata (the registry + i18n table), never hard-coded in the
+// generic renderers, so a richer patient simply shows more — no code change.
+
+const SNAP_I18N = {
+  en: {
+    Snapshot: 'Patient Snapshot',
+    demographics: 'Demographics', encounter: 'Encounter', problem_list: 'Problem List',
+    medications: 'Medications', reconciliation: 'Medication Reconciliation',
+    allergies: 'Allergies', vitals: 'Vitals & Trend', labs: 'Labs',
+    functional_status: 'Functional Status', sdoh: 'Social Determinants',
+    payer: 'Payer & Coverage', discharge: 'Discharge Plan', risk: 'Readmission Risk',
+    tcm: 'Transitional Care (TCM)', preferences: 'Preferences',
+    // field labels
+    name: 'Name', dob: 'DOB', age: 'Age', sex: 'Sex', preferred_language: 'Language',
+    interpreter_needed: 'Interpreter', mrn: 'MRN', code_status: 'Code Status',
+    race_ethnicity: 'Race / Ethnicity', admitting_dx: 'Admitting Dx', unit: 'Unit',
+    attending: 'Attending', admit_date: 'Admitted', los_days: 'LOS (days)',
+    expected_discharge_date: 'Expected D/C', type: 'Type',
+    home: 'Home meds', inpatient: 'Inpatient meds', discharge_meds: 'Discharge meds',
+    mobility: 'Mobility', fall_risk: 'Fall risk', cognition: 'Cognition', adls: 'ADLs',
+    housing: 'Housing', lives_with: 'Lives with', primary_caregiver: 'Caregiver',
+    transportation: 'Transport', health_literacy: 'Health literacy',
+    calaim_ecm_eligible: 'CalAIM ECM eligible',
+    primary: 'Primary', secondary: 'Secondary', payer_short: 'Plan', dual_eligible: 'Dual-eligible',
+    member_id: 'Member ID', prior_auth: 'Prior auth', disposition: 'Disposition',
+    readiness: 'Readiness', dme_needs: 'DME needs', follow_up: 'Follow-up', barriers: 'Barriers',
+    readmission_lace: 'LACE score', readmission_band: 'Risk band', complexity: 'Complexity',
+    eligible: 'Eligible', cpt: 'CPT', rationale: 'Rationale', goals_of_care: 'Goals of care',
+    language_for_education: 'Education language',
+    yes: 'Yes', no: 'No', none: 'None', nkda: 'No known drug allergies (NKDA)',
+    new: 'New', continue: 'Continue', stop: 'Stop',
+    admission: 'Admission', midpoint: 'Midpoint', current: 'Current', empty: 'No data available',
+  },
+};
+function _snapLang() {
+  const l = (window.appLang || document.documentElement.lang || 'en').slice(0, 2);
+  return SNAP_I18N[l] ? l : 'en';
+}
+function snapT(key) {
+  const L = SNAP_I18N[_snapLang()] || SNAP_I18N.en;
+  return (key in L) ? L[key] : (SNAP_I18N.en[key] || key);
+}
+
+// Tiny DOM builder (textContent-only — no innerHTML, no XSS).
+function _el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    if (k === 'class') e.className = attrs[k];
+    else if (k === 'text') e.textContent = attrs[k];
+    else if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  }
+  (children || []).forEach(c => { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+  return e;
+}
+function _isEmpty(v) {
+  return v == null || v === '' ||
+    (Array.isArray(v) && v.length === 0) ||
+    (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+}
+
+// Generic key/value renderer driven by a field-metadata list: [[key, fmt?], …].
+function _kvFields(obj, fields) {
+  const dl = _el('dl', { class: 'snap-kv' });
+  let any = false;
+  fields.forEach(([key, fmt]) => {
+    let v = obj ? obj[key] : undefined;
+    if (typeof v === 'boolean') v = v ? snapT('yes') : snapT('no');
+    if (fmt && v != null && v !== '') v = fmt(obj[key]);
+    if (_isEmpty(v)) return;
+    any = true;
+    dl.appendChild(_el('dt', { text: snapT(key) }));
+    dl.appendChild(_el('dd', { text: String(v) }));
+  });
+  return any ? dl : null;
+}
+function _list(items, fmt) {
+  if (!items || !items.length) return null;
+  const ul = _el('ul', { class: 'snap-list' });
+  items.forEach(it => ul.appendChild(_el('li', { text: fmt ? fmt(it) : String(it) })));
+  return ul;
+}
+function _badges(items, clsFor) {
+  if (!items || !items.length) return null;
+  const wrap = _el('div', { class: 'snap-badges' });
+  items.forEach(it => wrap.appendChild(_el('span', { class: 'snap-badge ' + (clsFor ? clsFor(it) : ''), text: String(it) })));
+  return wrap;
+}
+function _table(headers, rows) {
+  if (!rows || !rows.length) return null;
+  const t = _el('table', { class: 'snap-table' });
+  const thead = _el('thead'); const htr = _el('tr');
+  headers.forEach(h => htr.appendChild(_el('th', { text: h })));
+  thead.appendChild(htr); t.appendChild(thead);
+  const tb = _el('tbody');
+  rows.forEach(cells => {
+    const tr = _el('tr');
+    cells.forEach(c => tr.appendChild(c && c.node ? _el('td', null, [c.node]) : _el('td', { text: c == null ? '' : String(c) })));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  return t;
+}
+// Sparkline from an array of numbers.
+function _sparkline(values) {
+  const nums = values.filter(v => typeof v === 'number' && !isNaN(v));
+  if (nums.length < 2) return null;
+  const min = Math.min(...nums), max = Math.max(...nums), span = (max - min) || 1;
+  const wrap = _el('span', { class: 'snap-spark', role: 'img',
+    'aria-label': 'trend ' + nums.join(', ') });
+  nums.forEach(v => {
+    const h = 4 + Math.round(((v - min) / span) * 16);
+    const bar = _el('span'); bar.style.height = h + 'px'; wrap.appendChild(bar);
+  });
+  return wrap;
+}
+
+// ── Section renderers (each returns an element, or null to skip the section) ──
+function _renderProblems(pl) {
+  const rows = pl.map(p => {
+    const lbl = _el('span', null, [p.label || '']);
+    if (p.primary) { lbl.appendChild(document.createTextNode(' ')); lbl.appendChild(_el('span', { class: 'snap-badge ok', text: snapT('primary') })); }
+    return [p.icd10 || '—', { node: lbl }, p.status || ''];
+  });
+  return _table(['ICD-10', 'Problem', 'Status'], rows);
+}
+function _renderMeds(m) {
+  const box = _el('div');
+  [['discharge', 'discharge_meds'], ['home', 'home'], ['inpatient', 'inpatient']].forEach(([k, lblKey]) => {
+    if (m[k] && m[k].length) {
+      box.appendChild(_el('h4', { class: 'snap-subhead', text: snapT(lblKey) }));
+      box.appendChild(_list(m[k]));
+    }
+  });
+  return box.childNodes.length ? box : null;
+}
+function _renderReconciliation(m) {
+  if (!m.reconciliation || !m.reconciliation.length) return null;
+  const cls = { new: 'snap-badge ok', continue: 'snap-badge', stop: 'snap-badge danger' };
+  const rows = m.reconciliation.map(r => {
+    const b = _el('span', { class: cls[r.action] || 'snap-badge', text: snapT(r.action) || r.action });
+    return [r.med, { node: b }, r.reason || ''];
+  });
+  return _table(['Medication', 'Action', 'Reason'], rows);
+}
+function _renderAllergies(a) {
+  if (!a || !a.length) return _el('p', { class: 'snap-empty', text: snapT('nkda') });
+  return _badges(a.map(x => x.substance + (x.reaction ? ' — ' + x.reaction : '')), () => 'danger');
+}
+function _renderVitals(v) {
+  const box = _el('div');
+  if (v.latest) {
+    box.appendChild(_kvFields(v.latest, [
+      ['bp', x => x + ' mmHg'], ['hr', x => x + ' bpm'], ['rr'], ['spo2', x => x + '%'],
+      ['temp', x => x + '°F'], ['weight_kg', x => x + ' kg'],
+    ]) || _el('span'));
+  }
+  if (v.trend && v.trend.length >= 2) {
+    const metrics = [['hr', 'HR'], ['spo2', 'SpO₂']];
+    metrics.forEach(([key, label]) => {
+      const spark = _sparkline(v.trend.map(t => t[key]));
+      if (spark) {
+        const row = _el('div', { class: 'snap-trend-row' }, [
+          _el('span', { class: 'snap-trend-label', text: label }), spark,
+          _el('span', { class: 'snap-sub', text: v.trend.map(t => t[key]).join(' → ') }),
+        ]);
+        box.appendChild(row);
+      }
+    });
+  }
+  return box.childNodes.length ? box : null;
+}
+function _renderLabs(labs) {
+  const rows = labs.map(l => {
+    const flag = l.flag ? _el('span', { class: 'snap-flag-' + l.flag, text: l.flag }) : null;
+    return [l.test, (l.value + (l.unit ? ' ' + l.unit : '')), { node: flag || _el('span') }];
+  });
+  return _table(['Test', 'Value', 'Flag'], rows);
+}
+function _renderSdoh(s) {
+  const box = _el('div');
+  const kv = _kvFields(s, [
+    ['housing'], ['lives_with'], ['primary_caregiver'], ['transportation'], ['health_literacy'],
+  ]);
+  if (kv) box.appendChild(kv);
+  if (s.calaim_ecm_eligible) box.appendChild(_el('span', { class: 'snap-badge ok', text: snapT('calaim_ecm_eligible') }));
+  return box.childNodes.length ? box : null;
+}
+function _renderPayer(p) {
+  const box = _el('div');
+  const kv = _kvFields(p, [['primary'], ['secondary'], ['payer_short'], ['member_id']]);
+  if (kv) box.appendChild(kv);
+  const tags = [];
+  if (p.dual_eligible) tags.push(_el('span', { class: 'snap-badge warn', text: snapT('dual_eligible') }));
+  if (tags.length) { const w = _el('div', { class: 'snap-badges' }); tags.forEach(t => w.appendChild(t)); box.appendChild(w); }
+  if (p.prior_auth && p.prior_auth.length) {
+    box.appendChild(_el('h4', { class: 'snap-subhead', text: snapT('prior_auth') }));
+    box.appendChild(_list(p.prior_auth, pa => pa.service + ' — ' + pa.status));
+  }
+  return box.childNodes.length ? box : null;
+}
+function _renderDischarge(d) {
+  const box = _el('div');
+  if (d.disposition) box.appendChild(_el('span', { class: 'snap-badge', text: d.disposition }));
+  const kv = _kvFields(d, [['readiness']]);
+  if (kv) box.appendChild(kv);
+  if (d.dme_needs && d.dme_needs.length) {
+    box.appendChild(_el('h4', { class: 'snap-subhead', text: snapT('dme_needs') }));
+    box.appendChild(_list(d.dme_needs));
+  }
+  if (d.follow_up && d.follow_up.length) {
+    box.appendChild(_el('h4', { class: 'snap-subhead', text: snapT('follow_up') }));
+    box.appendChild(_list(d.follow_up, f => f.with + ' — ' + f.when));
+  }
+  if (d.barriers && d.barriers.length) {
+    box.appendChild(_el('h4', { class: 'snap-subhead', text: snapT('barriers') }));
+    box.appendChild(_badges(d.barriers, () => 'warn'));
+  }
+  return box.childNodes.length ? box : null;
+}
+function _renderRisk(r) {
+  const box = _el('div', { class: 'snap-badges' });
+  if (r.readmission_lace != null) box.appendChild(_el('span', { class: 'snap-badge', text: snapT('readmission_lace') + ': ' + r.readmission_lace }));
+  if (r.readmission_band) box.appendChild(_el('span', { class: 'snap-badge ' + (r.readmission_band === 'high' ? 'danger' : r.readmission_band === 'medium' ? 'warn' : 'ok'), text: r.readmission_band }));
+  if (r.complexity) box.appendChild(_el('span', { class: 'snap-badge ' + (r.complexity === 'high' ? 'danger' : r.complexity === 'moderate' ? 'warn' : 'ok'), text: r.complexity }));
+  return box.childNodes.length ? box : null;
+}
+function _renderTcm(t) {
+  const box = _el('div');
+  const elig = _el('span', { class: 'snap-badge ' + (t.eligible ? 'ok' : ''), text: snapT('eligible') + ': ' + (t.eligible ? snapT('yes') : snapT('no')) });
+  box.appendChild(elig);
+  const kv = _kvFields(t, [['cpt'], ['complexity'], ['rationale']]);
+  if (kv) box.appendChild(kv);
+  return box;
+}
+
+// Registry — order + presence rule + which renderer. Generic renderers above
+// read the data; this metadata decides *whether* and *how* each section shows.
+const SNAPSHOT_REGISTRY = [
+  { id: 'demographics', icon: '👤', get: r => r.demographics, render: d => _kvFields(d, [
+      ['name'], ['dob'], ['age'], ['sex'], ['preferred_language'], ['interpreter_needed'],
+      ['mrn'], ['code_status'], ['race_ethnicity'] ]) },
+  { id: 'encounter', icon: '🏥', get: r => r.encounter, render: d => _kvFields(d, [
+      ['type'], ['admitting_dx'], ['unit'], ['attending'], ['admit_date'], ['los_days'],
+      ['expected_discharge_date'] ]) },
+  { id: 'problem_list', icon: '📋', wide: true, get: r => r.problem_list, render: _renderProblems },
+  { id: 'medications', icon: '💊', wide: true, get: r => r.medications, render: _renderMeds },
+  { id: 'reconciliation', icon: '🔁', wide: true, get: r => r.medications, render: _renderReconciliation },
+  { id: 'allergies', icon: '⚠️', get: r => r.allergies, present: () => true, render: _renderAllergies },
+  { id: 'vitals', icon: '❤️', get: r => r.vitals, render: _renderVitals },
+  { id: 'labs', icon: '🧪', get: r => r.labs, render: _renderLabs },
+  { id: 'functional_status', icon: '🚶', get: r => r.functional_status, render: d => _kvFields(d, [
+      ['mobility'], ['fall_risk'], ['cognition'], ['adls'] ]) },
+  { id: 'sdoh', icon: '🏘️', get: r => r.sdoh, render: _renderSdoh },
+  { id: 'payer', icon: '💳', get: r => r.payer, render: _renderPayer },
+  { id: 'discharge', icon: '🚪', wide: true, get: r => r.discharge, render: _renderDischarge },
+  { id: 'risk', icon: '📈', get: r => r.risk, render: _renderRisk },
+  { id: 'tcm', icon: '📑', get: r => r.tcm, render: _renderTcm },
+  { id: 'preferences', icon: '🗣️', get: r => r.preferences, render: d => _kvFields(d, [
+      ['goals_of_care'], ['language_for_education'] ]) },
+];
+
+function renderSnapshot(rec) {
+  const panel = document.getElementById('snapshotPanel');
+  const body = document.getElementById('snapshotBody');
+  const disc = document.getElementById('snapshotDisclaimer');
+  if (!panel || !body) return;
+  body.textContent = '';
+  if (!rec) { panel.hidden = true; return; }
+  disc.textContent = rec.disclaimer || '';
+  const frag = document.createDocumentFragment();
+  SNAPSHOT_REGISTRY.forEach(spec => {
+    const data = spec.get(rec);
+    const present = spec.present ? spec.present(data) : !_isEmpty(data);
+    if (!present) return;                          // render-by-presence
+    let content;
+    try { content = spec.render(data, rec); } catch (_) { content = null; }
+    if (!content) return;
+    const blank = content.childNodes && content.childNodes.length === 0 && !((content.textContent || '').trim());
+    if (blank) return;                            // graceful sparsity
+    const sec = _el('section', { class: 'snap-section' + (spec.wide ? ' snap-wide' : '') });
+    sec.appendChild(_el('h3', null, [spec.icon ? spec.icon + ' ' : '', snapT(spec.id)]));
+    sec.appendChild(content);
+    frag.appendChild(sec);
+  });
+  if (!frag.childNodes.length) frag.appendChild(_el('p', { class: 'snap-empty', text: snapT('empty') }));
+  body.appendChild(frag);
+  panel.hidden = false;
+}
+
+function toggleSnapshot() {
+  const body = document.getElementById('snapshotBody');
+  const btn = document.getElementById('snapshotToggle');
+  if (!body || !btn) return;
+  const hide = btn.getAttribute('aria-expanded') === 'true';
+  body.style.display = hide ? 'none' : '';
+  btn.setAttribute('aria-expanded', hide ? 'false' : 'true');
+  btn.textContent = hide ? 'Show' : 'Hide';
+}
+
+// Fetch + render the rich record whenever a patient becomes active.
+async function loadSnapshot(id) {
+  try {
+    const res = await fetch('/api/sample-record/' + encodeURIComponent(id));
+    if (!res.ok) return;
+    renderSnapshot(await res.json());
+  } catch (_) { /* snapshot is best-effort */ }
+}
+document.addEventListener('patient:selected', (e) => {
+  if (e.detail && e.detail.id) loadSnapshot(e.detail.id);
+});
 
 // ── Set agent card status ────────────────────────────────────────────────────
 function setStatus(agent, status, label) {
