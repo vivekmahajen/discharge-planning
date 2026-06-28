@@ -4,7 +4,8 @@ import sample_patients as sp
 _FORM_FIELDS = [
     "patient_name", "age", "gender", "mrn", "admission_date", "expected_discharge_date",
     "attending_physician", "primary_diagnosis", "secondary_diagnoses",
-    "additional_clinical_notes", "primary_insurance", "secondary_insurance",
+    "additional_clinical_notes", "patient_first_name", "patient_last_name",
+    "date_of_birth", "insurance_member_id", "primary_insurance", "secondary_insurance",
     "medicare_part_a", "snf_days_used", "admission_medications", "inpatient_medications",
     "discharge_medications", "pt_evaluation", "ot_evaluation", "st_evaluation",
     "living_situation", "caregiver", "primary_language", "transportation",

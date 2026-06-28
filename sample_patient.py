@@ -340,6 +340,10 @@ SAMPLE_PATIENT_WEB: dict = {
     "additional_clinical_notes": SAMPLE_PATIENT["clinical_notes"],
 
     # Section 3 — Insurance
+    "patient_first_name": SAMPLE_PATIENT["patient_name"].split(" ", 1)[0],
+    "patient_last_name": SAMPLE_PATIENT["patient_name"].split(" ", 1)[-1],
+    "date_of_birth": SAMPLE_PATIENT["date_of_birth"],
+    "insurance_member_id": SAMPLE_PATIENT["insurance"]["primary"]["member_id"],
     "primary_insurance": SAMPLE_PATIENT["insurance"]["primary"]["payer_name"],
     "secondary_insurance": (
         SAMPLE_PATIENT["insurance"]["secondary"]["payer_name"]
