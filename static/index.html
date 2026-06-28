@@ -340,17 +340,46 @@
   .alert strong { font-weight: 700; }
 
   .error-msg { color: #dc2626; font-size: .85rem; margin-top: 10px; font-weight: 600; }
+
+  /* Searchable patient combobox */
+  #patientListbox li {
+    padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    font-size: .76rem; line-height: 1.3; display: flex; align-items: center; gap: 6px;
+  }
+  #patientListbox li[aria-selected="true"], #patientListbox li:hover { background: #eff6ff; }
+  #patientListbox li .pl-main { flex: 1; min-width: 0; }
+  #patientListbox li .pl-name { font-weight: 700; color: #1e293b; }
+  #patientListbox li .pl-sub  { color: #64748b; font-size: .7rem; }
+  #patientListbox li .pl-none { color: #94a3b8; font-style: italic; padding: 8px; }
+  .cx-badge {
+    flex: 0 0 auto; font-size: .62rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .03em; border-radius: 999px; padding: 1px 7px; white-space: nowrap;
+  }
+  .cx-high     { background: #fee2e2; color: #b91c1c; }
+  .cx-moderate { background: #fef3c7; color: #92400e; }
+  .cx-low      { background: #dcfce7; color: #166534; }
 </style>
 </head>
 <body>
 
 <header style="position:relative">
-  <div class="patient-picker no-print" style="position:absolute;top:8px;right:14px;display:flex;align-items:center;gap:6px;z-index:5">
-    <label for="patientPicker" style="font-size:.72rem;color:#dbeafe;font-weight:600">Load patient</label>
-    <select id="patientPicker" onchange="onPatientPicked(this.value)" title="Load a data-rich demo patient"
-            style="font-size:.78rem;padding:4px 8px;border-radius:6px;border:1px solid #cbd5e1;max-width:300px;background:#fff;color:#1e293b;cursor:pointer">
-      <option value="">Select a demo patient…</option>
-    </select>
+  <div class="patient-picker no-print" style="position:absolute;top:8px;right:14px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;z-index:20">
+    <div style="display:flex;align-items:center;gap:6px">
+      <label for="patientSearch" style="font-size:.72rem;color:#dbeafe;font-weight:600">Load patient</label>
+      <div class="combo" id="patientCombo" style="position:relative">
+        <input id="patientSearch" type="text" role="combobox" autocomplete="off"
+               aria-expanded="false" aria-controls="patientListbox" aria-autocomplete="list"
+               aria-label="Search 100 synthetic demo patients by name, diagnosis, disposition, or payer"
+               placeholder="Search demo patients…"
+               style="font-size:.78rem;padding:4px 8px;border-radius:6px;border:1px solid #cbd5e1;width:300px;background:#fff;color:#1e293b" />
+        <ul id="patientListbox" role="listbox" aria-label="Demo patients" hidden
+            style="position:absolute;top:calc(100% + 2px);right:0;width:380px;max-height:320px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.18);color:#1e293b"></ul>
+      </div>
+    </div>
+    <span id="demoDataIndicator" title="All 100 patients are 100% synthetic — no real PHI"
+          style="font-size:.66rem;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:999px;padding:1px 8px">
+      🧪 Synthetic / demo data
+    </span>
   </div>
   <div class="logo">🏥</div>
   <div>
@@ -926,32 +955,149 @@ async function loadSample() {
   }
 }
 
-// ── Top-right "Load patient" picker — 100 data-rich demo patients ─────────────
-async function onPatientPicked(id) {
+// ── Top-right searchable patient combobox — 100 data-rich demo patients ───────
+// Sets an app-wide "active patient" and loads the rich record into the form.
+window.activePatientId = null;
+let _allPatients = [];      // [{id,name,age,gender,dx_short,disposition,payer_short,complexity,language,label}]
+let _filtered = [];         // current filtered view
+let _activeIdx = -1;        // highlighted option index (keyboard nav)
+
+function _patientHaystack(p) {
+  return [p.name, p.dx_short, p.disposition, p.payer_short, p.language, p.id]
+    .filter(Boolean).join(' ').toLowerCase();
+}
+
+function _renderPatientList() {
+  const box = document.getElementById('patientListbox');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!_filtered.length) {
+    const li = document.createElement('li');
+    li.className = '';
+    li.innerHTML = '<span class="pl-none">No matching demo patients</span>';
+    box.appendChild(li);
+    return;
+  }
+  _filtered.forEach((p, i) => {
+    const li = document.createElement('li');
+    li.id = 'patient-opt-' + p.id;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', i === _activeIdx ? 'true' : 'false');
+    li.dataset.id = p.id;
+    const cx = (p.complexity || '').toLowerCase();
+    li.innerHTML =
+      '<span class="pl-main"><span class="pl-name">' + _esc(p.name) +
+      '</span> <span class="pl-sub">· ' + _esc(p.age) + _esc((p.gender || '?')[0]) +
+      ' · ' + _esc(p.dx_short) + '</span><br><span class="pl-sub">' +
+      _esc(p.disposition) + ' · ' + _esc(p.payer_short) + '</span></span>' +
+      '<span class="cx-badge cx-' + _esc(cx) + '">' + _esc(p.complexity || '') + '</span>';
+    li.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectPatient(p.id); });
+    box.appendChild(li);
+  });
+}
+
+function _esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function _openList(show) {
+  const box = document.getElementById('patientListbox');
+  const inp = document.getElementById('patientSearch');
+  if (!box || !inp) return;
+  box.hidden = !show;
+  inp.setAttribute('aria-expanded', show ? 'true' : 'false');
+  if (!show) { _activeIdx = -1; inp.removeAttribute('aria-activedescendant'); }
+}
+
+function _filterPatients(q) {
+  const term = (q || '').trim().toLowerCase();
+  _filtered = term ? _allPatients.filter(p => _patientHaystack(p).includes(term))
+                   : _allPatients.slice();
+  _activeIdx = _filtered.length ? 0 : -1;
+  _renderPatientList();
+  _syncActiveDescendant();
+}
+
+function _syncActiveDescendant() {
+  const inp = document.getElementById('patientSearch');
+  const opts = document.querySelectorAll('#patientListbox li[role="option"]');
+  opts.forEach((li, i) => li.setAttribute('aria-selected', i === _activeIdx ? 'true' : 'false'));
+  if (inp && _activeIdx >= 0 && _filtered[_activeIdx]) {
+    inp.setAttribute('aria-activedescendant', 'patient-opt-' + _filtered[_activeIdx].id);
+    const el = document.getElementById('patient-opt-' + _filtered[_activeIdx].id);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+// Selecting a patient sets the app-wide active patient and re-drives the form.
+async function selectPatient(id, opts) {
+  opts = opts || {};
   if (!id) return;
   try {
     const res = await fetch('/api/sample-patient/' + encodeURIComponent(id));
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    applySamplePatient(await res.json());
+    const data = await res.json();
+    applySamplePatient(data);
+    window.activePatientId = id;
+    const meta = _allPatients.find(p => p.id === id);
+    const inp = document.getElementById('patientSearch');
+    if (inp && meta) inp.value = meta.name;
+    _openList(false);
+    // Reflect the active patient in the URL (deep-link) without reloading.
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('patient', id);
+      history.replaceState(null, '', u);
+    } catch (_) {}
+    // Broadcast app-wide so other panels (Snapshot, pipeline) can react.
+    document.dispatchEvent(new CustomEvent('patient:selected', { detail: { id, data, meta } }));
   } catch (e) {
-    alert('Could not load patient: ' + e.message);
+    if (!opts.silent) alert('Could not load patient: ' + e.message);
+  }
+}
+
+function _onSearchKey(e) {
+  const box = document.getElementById('patientListbox');
+  const open = box && !box.hidden;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (!open) { _openList(true); }
+    if (_filtered.length) { _activeIdx = (_activeIdx + 1) % _filtered.length; _syncActiveDescendant(); }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (_filtered.length) { _activeIdx = (_activeIdx - 1 + _filtered.length) % _filtered.length; _syncActiveDescendant(); }
+  } else if (e.key === 'Enter') {
+    if (open && _activeIdx >= 0 && _filtered[_activeIdx]) { e.preventDefault(); selectPatient(_filtered[_activeIdx].id); }
+  } else if (e.key === 'Escape') {
+    _openList(false);
   }
 }
 
 async function initPatientPicker() {
-  const sel = document.getElementById('patientPicker');
-  if (!sel) return;
+  const inp = document.getElementById('patientSearch');
+  if (!inp) return;
   try {
     const res = await fetch('/api/sample-patients');
     if (!res.ok) return;
     const data = await res.json();
-    (data.patients || []).forEach(p => {
-      const o = document.createElement('option');
-      o.value = p.id;
-      o.textContent = p.label;
-      sel.appendChild(o);
-    });
-  } catch (_) { /* picker keeps just the placeholder */ }
+    _allPatients = data.patients || [];
+  } catch (_) { return; }
+
+  _filterPatients('');
+  inp.addEventListener('input', () => { _filterPatients(inp.value); _openList(true); });
+  inp.addEventListener('focus', () => { _filterPatients(inp.value); _openList(true); });
+  inp.addEventListener('keydown', _onSearchKey);
+  document.addEventListener('click', (e) => {
+    const combo = document.getElementById('patientCombo');
+    if (combo && !combo.contains(e.target)) _openList(false);
+  });
+
+  // Deep-link: ?patient=007 loads that patient on page load.
+  try {
+    const want = new URL(window.location.href).searchParams.get('patient');
+    if (want && _allPatients.some(p => p.id === want)) selectPatient(want, { silent: true });
+  } catch (_) {}
 }
 initPatientPicker();
 

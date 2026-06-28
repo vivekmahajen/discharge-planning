@@ -939,6 +939,18 @@ async def get_sample_patient_by_id(request: Request, pid: str,
     return JSONResponse(patient)
 
 
+@app.get("/api/sample-record/{pid}")
+@limiter.limit("120/hour")
+async def get_sample_record_by_id(request: Request, pid: str,
+                                  ctx: OrgContext = Depends(get_current_org)):
+    """Full rich nested record for one synthetic demo patient (Patient Snapshot panel)."""
+    from sample_patients import get_sample_record as _get
+    record = _get(pid)
+    if not record:
+        return JSONResponse({"error": "Sample patient not found"}, status_code=404)
+    return JSONResponse(record)
+
+
 async def stream_plan(patient_data: dict):
     """Generate SSE events as each specialist agent runs, then the coordinator."""
     api_key = os.getenv("ANTHROPIC_API_KEY")

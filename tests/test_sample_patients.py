@@ -117,3 +117,22 @@ class TestSamplePatientEndpoints:
     async def test_get_missing_404(self, authed_client):
         r = await authed_client.get("/api/sample-patient/999")
         assert r.status_code == 404
+
+    async def test_get_rich_record(self, authed_client):
+        r = await authed_client.get("/api/sample-record/007")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["id"] == "007"
+        assert d["synthetic"] is True
+        assert d["disclaimer"]
+        assert d["demographics"]["mrn"].startswith("SYN-")
+        for s in ("problem_list", "medications", "labs", "tcm", "discharge"):
+            assert s in d
+
+    async def test_get_rich_record_missing_404(self, authed_client):
+        r = await authed_client.get("/api/sample-record/999")
+        assert r.status_code == 404
+
+    async def test_rich_record_requires_auth(self, client):
+        r = await client.get("/api/sample-record/007")
+        assert r.status_code in (401, 403)
