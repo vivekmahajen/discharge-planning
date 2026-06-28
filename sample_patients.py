@@ -12,6 +12,7 @@ Planner's 7 tabs consume), so the same form-population path works unchanged.
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Optional
 
 # ── Demographic pools ─────────────────────────────────────────────────────────
@@ -491,93 +492,506 @@ _SCENARIOS = [
     },
 ]
 
+# ── Per-scenario structured clinical specifics (aligned to _SCENARIOS order) ────
+# Adds the discharge-relevant structured data the rich record + Snapshot panel use:
+# disposition, complexity, LACE/risk band, TCM eligibility, ICD-10, labs, vitals,
+# allergy, functional status, DME, and follow-ups. Kept coherent with the scenario.
+_CLIN = [
+    {  # 0 CHF
+        "dx_short": "CHF exacerbation (HFrEF)", "disposition": "Home with home health",
+        "complexity": "high", "lace": 13, "risk_band": "high",
+        "primary_icd10": "I50.21", "secondary_icd10": ["E11.9", "I10", "N18.3", "I48.91", "E78.5"],
+        "labs": [{"test": "BNP", "value": "420", "unit": "pg/mL", "flag": "H"},
+                 {"test": "Creatinine", "value": "1.8", "unit": "mg/dL", "flag": "H"},
+                 {"test": "Potassium", "value": "3.9", "unit": "mEq/L", "flag": ""},
+                 {"test": "HbA1c", "value": "7.9", "unit": "%", "flag": "H"}],
+        "vitals": {"bp": "118/72", "hr": 74, "rr": 16, "spo2": 96, "temp": 98.4, "weight_kg": 94},
+        "allergy": "Sulfa — rash", "functional": {"mobility": "Ambulates 150 ft w/ rolling walker, CGA",
+            "fall_risk": "Moderate", "cognition": "Intact", "adls": "Modified independent"},
+        "dme": ["Rolling walker", "Bedside commode", "Bathroom scale (daily weights)"],
+        "follow_up": [{"with": "Cardiology", "when": "within 7 days"},
+                      {"with": "PCP", "when": "within 5 days"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 1 COPD
+        "dx_short": "COPD exacerbation w/ resp failure", "disposition": "Home with home health + home O2",
+        "complexity": "high", "lace": 12, "risk_band": "high",
+        "primary_icd10": "J44.1", "secondary_icd10": ["F17.210", "I27.81", "G47.33", "E66.9"],
+        "labs": [{"test": "pCO2", "value": "58", "unit": "mmHg", "flag": "H"},
+                 {"test": "pH", "value": "7.34", "unit": "", "flag": "L"},
+                 {"test": "SpO2 (RA)", "value": "87", "unit": "%", "flag": "L"}],
+        "vitals": {"bp": "132/80", "hr": 92, "rr": 22, "spo2": 90, "temp": 98.6, "weight_kg": 54},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates 100 ft w/ O2, desats to 86% on exertion",
+            "fall_risk": "Moderate", "cognition": "Intact", "adls": "Modified independent"},
+        "dme": ["Home oxygen 2L concentrator + portable", "Rolling walker", "Pulse oximeter"],
+        "follow_up": [{"with": "Pulmonology", "when": "within 1 week"},
+                      {"with": "Pulmonary rehab intake", "when": "within 2 weeks"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 2 Stroke
+        "dx_short": "Acute ischemic stroke (L MCA)", "disposition": "Inpatient rehab (IRF)",
+        "complexity": "high", "lace": 14, "risk_band": "high",
+        "primary_icd10": "I63.512", "secondary_icd10": ["I10", "I48.91", "E78.5", "E11.9", "R13.10"],
+        "labs": [{"test": "LDL", "value": "142", "unit": "mg/dL", "flag": "H"},
+                 {"test": "HbA1c", "value": "7.2", "unit": "%", "flag": "H"},
+                 {"test": "INR", "value": "1.1", "unit": "", "flag": ""}],
+        "vitals": {"bp": "150/88", "hr": 78, "rr": 18, "spo2": 97, "temp": 98.2, "weight_kg": 80},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates 50 ft w/ hemi-walker + 1 assist",
+            "fall_risk": "High", "cognition": "Expressive aphasia; alert", "adls": "Max assist (R hemiparesis)"},
+        "dme": ["Hemi-walker", "Wheelchair", "Ankle-foot orthosis (pending)"],
+        "follow_up": [{"with": "Neurology / Stroke clinic", "when": "within 2 weeks"},
+                      {"with": "Anticoagulation clinic", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 3 Hip ORIF
+        "dx_short": "Hip fracture s/p ORIF", "disposition": "Skilled nursing facility (SNF)",
+        "complexity": "moderate", "lace": 11, "risk_band": "medium",
+        "primary_icd10": "S72.141A", "secondary_icd10": ["M81.0", "I10", "G31.84", "E55.9", "Z91.81"],
+        "labs": [{"test": "Hemoglobin", "value": "9.8", "unit": "g/dL", "flag": "L"},
+                 {"test": "Vitamin D", "value": "18", "unit": "ng/mL", "flag": "L"},
+                 {"test": "Calcium", "value": "8.9", "unit": "mg/dL", "flag": ""}],
+        "vitals": {"bp": "128/76", "hr": 82, "rr": 16, "spo2": 97, "temp": 98.7, "weight_kg": 68},
+        "allergy": "Codeine — nausea", "functional": {"mobility": "Transfers min assist; 75 ft w/ FWW; stairs not cleared",
+            "fall_risk": "High", "cognition": "Mild impairment", "adls": "Assist w/ lower-body dressing/bathing"},
+        "dme": ["Front-wheel walker", "Raised toilet seat", "Tub transfer bench"],
+        "follow_up": [{"with": "Orthopedic surgery", "when": "in 2 weeks"},
+                      {"with": "PCP", "when": "within 1 week of SNF discharge"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 4 Sepsis / PNA
+        "dx_short": "Sepsis from pneumonia", "disposition": "Home with home health",
+        "complexity": "moderate", "lace": 11, "risk_band": "medium",
+        "primary_icd10": "A41.9", "secondary_icd10": ["J18.9", "E11.65", "N17.9", "I10"],
+        "labs": [{"test": "WBC", "value": "8.2", "unit": "10^3/uL", "flag": ""},
+                 {"test": "Lactate", "value": "1.4", "unit": "mmol/L", "flag": ""},
+                 {"test": "Creatinine", "value": "1.4", "unit": "mg/dL", "flag": "H"},
+                 {"test": "HbA1c", "value": "9.4", "unit": "%", "flag": "H"}],
+        "vitals": {"bp": "124/74", "hr": 84, "rr": 18, "spo2": 95, "temp": 99.1, "weight_kg": 88},
+        "allergy": "Penicillin — hives", "functional": {"mobility": "Ambulates 200 ft w/ walker, supervision",
+            "fall_risk": "Moderate", "cognition": "Intact", "adls": "Modified independent"},
+        "dme": ["Rolling walker", "Glucometer"],
+        "follow_up": [{"with": "PCP", "when": "within 5-7 days"},
+                      {"with": "Diabetes educator", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 5 CABG
+        "dx_short": "s/p CABG x3 (NSTEMI)", "disposition": "Home with home health",
+        "complexity": "moderate", "lace": 10, "risk_band": "medium",
+        "primary_icd10": "I25.10", "secondary_icd10": ["I21.4", "I10", "E78.5", "E11.9"],
+        "labs": [{"test": "Troponin", "value": "0.06", "unit": "ng/mL", "flag": ""},
+                 {"test": "Hemoglobin", "value": "10.2", "unit": "g/dL", "flag": "L"},
+                 {"test": "LDL", "value": "96", "unit": "mg/dL", "flag": "H"}],
+        "vitals": {"bp": "122/70", "hr": 76, "rr": 16, "spo2": 96, "temp": 98.5, "weight_kg": 85},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates 250 ft independent; sternal precautions",
+            "fall_risk": "Low", "cognition": "Intact", "adls": "Independent within sternal precautions"},
+        "dme": ["Front-wheel walker (transition)", "Incentive spirometer", "Heart pillow"],
+        "follow_up": [{"with": "Cardiothoracic surgery", "when": "in 1-2 weeks"},
+                      {"with": "Cardiac rehab intake", "when": "within 2 weeks"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 6 ESRD / HD
+        "dx_short": "ESRD, new hemodialysis", "disposition": "Home with outpatient dialysis",
+        "complexity": "high", "lace": 13, "risk_band": "high",
+        "primary_icd10": "N18.6", "secondary_icd10": ["E11.22", "I12.0", "D63.1", "N25.81", "E87.5"],
+        "labs": [{"test": "Creatinine", "value": "6.8", "unit": "mg/dL", "flag": "H"},
+                 {"test": "Potassium", "value": "5.1", "unit": "mEq/L", "flag": "H"},
+                 {"test": "Hemoglobin", "value": "9.1", "unit": "g/dL", "flag": "L"},
+                 {"test": "Phosphorus", "value": "5.6", "unit": "mg/dL", "flag": "H"}],
+        "vitals": {"bp": "146/86", "hr": 80, "rr": 16, "spo2": 97, "temp": 98.3, "weight_kg": 78},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates independent; fatigued post-dialysis",
+            "fall_risk": "Low", "cognition": "Intact", "adls": "Independent"},
+        "dme": ["None — needs dialysis transport"],
+        "follow_up": [{"with": "Nephrology", "when": "within 1 week"},
+                      {"with": "Vascular access surgery (fistula)", "when": "within 2 weeks"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 7 GI bleed
+        "dx_short": "Upper GI bleed (gastric ulcer)", "disposition": "Home (self-care)",
+        "complexity": "moderate", "lace": 9, "risk_band": "medium",
+        "primary_icd10": "K25.4", "secondary_icd10": ["B96.81", "I25.10", "K74.60", "D50.9"],
+        "labs": [{"test": "Hemoglobin", "value": "8.6", "unit": "g/dL", "flag": "L"},
+                 {"test": "Platelets", "value": "118", "unit": "10^3/uL", "flag": "L"},
+                 {"test": "INR", "value": "1.3", "unit": "", "flag": ""}],
+        "vitals": {"bp": "118/72", "hr": 88, "rr": 16, "spo2": 98, "temp": 98.2, "weight_kg": 72},
+        "allergy": "NKDA", "functional": {"mobility": "Independent", "fall_risk": "Low",
+            "cognition": "Intact", "adls": "Independent"},
+        "dme": [],
+        "follow_up": [{"with": "Gastroenterology (repeat EGD)", "when": "in 8 weeks"},
+                      {"with": "PCP (CBC recheck)", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 8 DKA
+        "dx_short": "DKA, new insulin requirement", "disposition": "Home (self-care)",
+        "complexity": "moderate", "lace": 9, "risk_band": "medium",
+        "primary_icd10": "E11.10", "secondary_icd10": ["E78.1", "E66.9", "I10", "F32.9"],
+        "labs": [{"test": "Glucose", "value": "142", "unit": "mg/dL", "flag": "H"},
+                 {"test": "Anion gap", "value": "10", "unit": "", "flag": ""},
+                 {"test": "Bicarbonate", "value": "24", "unit": "mEq/L", "flag": ""},
+                 {"test": "HbA1c", "value": "11.2", "unit": "%", "flag": "H"}],
+        "vitals": {"bp": "126/78", "hr": 84, "rr": 16, "spo2": 99, "temp": 98.4, "weight_kg": 102},
+        "allergy": "NKDA", "functional": {"mobility": "Independent", "fall_risk": "Low",
+            "cognition": "Intact", "adls": "Independent"},
+        "dme": ["Glucometer + test strips", "Sharps container"],
+        "follow_up": [{"with": "Endocrinology", "when": "within 1 week"},
+                      {"with": "Certified diabetes educator", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 9 Diabetic foot
+        "dx_short": "Diabetic foot cellulitis + abscess", "disposition": "Home with home health (wound care)",
+        "complexity": "high", "lace": 12, "risk_band": "high",
+        "primary_icd10": "L03.115", "secondary_icd10": ["E11.621", "I73.9", "E11.42", "L97.509"],
+        "labs": [{"test": "WBC", "value": "11.4", "unit": "10^3/uL", "flag": "H"},
+                 {"test": "HbA1c", "value": "10.1", "unit": "%", "flag": "H"},
+                 {"test": "ESR", "value": "62", "unit": "mm/hr", "flag": "H"}],
+        "vitals": {"bp": "134/82", "hr": 88, "rr": 16, "spo2": 97, "temp": 99.0, "weight_kg": 96},
+        "allergy": "NKDA", "functional": {"mobility": "Non-weight-bearing affected foot; walker CGA",
+            "fall_risk": "High", "cognition": "Intact", "adls": "Modified independent"},
+        "dme": ["Wound vac (NPWT)", "Knee scooter", "Offloading boot"],
+        "follow_up": [{"with": "Vascular surgery", "when": "within 1 week"},
+                      {"with": "Podiatry", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 10 Oncology
+        "dx_short": "Metastatic colon cancer (bowel obstruction)", "disposition": "Home with home health + palliative",
+        "complexity": "high", "lace": 13, "risk_band": "high",
+        "primary_icd10": "C18.9", "secondary_icd10": ["C78.5", "I82.409", "D63.0", "G89.3", "R63.6"],
+        "labs": [{"test": "Hemoglobin", "value": "9.4", "unit": "g/dL", "flag": "L"},
+                 {"test": "Albumin", "value": "2.8", "unit": "g/dL", "flag": "L"},
+                 {"test": "CEA", "value": "84", "unit": "ng/mL", "flag": "H"}],
+        "vitals": {"bp": "112/68", "hr": 90, "rr": 18, "spo2": 96, "temp": 98.4, "weight_kg": 58},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates 100 ft supervision; fatigue-limited",
+            "fall_risk": "Moderate", "cognition": "Intact", "adls": "Modified independent"},
+        "dme": ["Rolling walker", "Bedside commode", "Hospital bed (pending)"],
+        "follow_up": [{"with": "Oncology", "when": "within 1 week"},
+                      {"with": "Outpatient palliative care", "when": "within 1 week"}],
+        "goals_of_care": "Full code (revisiting; leaning comfort-focused)",
+    },
+    {  # 11 COVID resp failure
+        "dx_short": "COVID-19 resp failure, post-extubation", "disposition": "Skilled nursing facility (SNF)",
+        "complexity": "high", "lace": 14, "risk_band": "high",
+        "primary_icd10": "U07.1", "secondary_icd10": ["J96.01", "G72.81", "R13.10", "E11.65", "L89.152"],
+        "labs": [{"test": "SpO2 (3L)", "value": "94", "unit": "%", "flag": ""},
+                 {"test": "Glucose", "value": "168", "unit": "mg/dL", "flag": "H"},
+                 {"test": "Albumin", "value": "2.6", "unit": "g/dL", "flag": "L"}],
+        "vitals": {"bp": "120/72", "hr": 96, "rr": 22, "spo2": 93, "temp": 98.8, "weight_kg": 70},
+        "allergy": "NKDA", "functional": {"mobility": "25 ft w/ walker + 2 assist; severe deconditioning",
+            "fall_risk": "High", "cognition": "Resolving delirium", "adls": "Dependent for most ADLs"},
+        "dme": ["Home oxygen 3L", "Wheelchair", "Hospital bed", "Sacral wound supplies"],
+        "follow_up": [{"with": "Pulmonology", "when": "within 1-2 weeks"},
+                      {"with": "Wound care", "when": "at SNF"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 12 AUD / cirrhosis
+        "dx_short": "Alcohol withdrawal + alcoholic hepatitis", "disposition": "Medical respite / shelter",
+        "complexity": "high", "lace": 12, "risk_band": "high",
+        "primary_icd10": "F10.231", "secondary_icd10": ["K70.30", "E51.11", "F32.9", "I10", "D69.6"],
+        "labs": [{"test": "AST", "value": "188", "unit": "U/L", "flag": "H"},
+                 {"test": "ALT", "value": "92", "unit": "U/L", "flag": "H"},
+                 {"test": "Platelets", "value": "96", "unit": "10^3/uL", "flag": "L"},
+                 {"test": "INR", "value": "1.6", "unit": "", "flag": "H"}],
+        "vitals": {"bp": "138/86", "hr": 98, "rr": 18, "spo2": 98, "temp": 98.6, "weight_kg": 64},
+        "allergy": "NKDA", "functional": {"mobility": "Ambulates independent; mild gait unsteadiness",
+            "fall_risk": "Moderate", "cognition": "Intact (CIWA resolved)", "adls": "Independent"},
+        "dme": [],
+        "follow_up": [{"with": "Hepatology", "when": "within 2 weeks"},
+                      {"with": "Substance-use IOP intake", "when": "within 1 week"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 13 BKA
+        "dx_short": "s/p right below-knee amputation", "disposition": "Skilled nursing facility (SNF)",
+        "complexity": "high", "lace": 13, "risk_band": "high",
+        "primary_icd10": "Z89.511", "secondary_icd10": ["E11.52", "I73.9", "I25.10", "N18.3", "G54.6"],
+        "labs": [{"test": "Hemoglobin", "value": "10.0", "unit": "g/dL", "flag": "L"},
+                 {"test": "HbA1c", "value": "8.6", "unit": "%", "flag": "H"},
+                 {"test": "Creatinine", "value": "1.5", "unit": "mg/dL", "flag": "H"}],
+        "vitals": {"bp": "130/78", "hr": 82, "rr": 16, "spo2": 97, "temp": 98.5, "weight_kg": 90},
+        "allergy": "NKDA", "functional": {"mobility": "Transfers min assist; wheelchair-level; pre-prosthetic training",
+            "fall_risk": "High", "cognition": "Intact", "adls": "Modified independent UE"},
+        "dme": ["Wheelchair", "Slide board", "Residual-limb shrinker"],
+        "follow_up": [{"with": "Vascular surgery", "when": "within 1-2 weeks"},
+                      {"with": "Prosthetics", "when": "after residual-limb healing"}],
+        "goals_of_care": "Full code",
+    },
+    {  # 14 Geriatric urosepsis / dementia
+        "dx_short": "Urosepsis + delirium on dementia", "disposition": "Home with home health (caregiver support)",
+        "complexity": "high", "lace": 12, "risk_band": "high",
+        "primary_icd10": "A41.9", "secondary_icd10": ["G30.9", "N39.0", "R62.7", "Z91.14", "Z91.81"],
+        "labs": [{"test": "WBC", "value": "9.0", "unit": "10^3/uL", "flag": ""},
+                 {"test": "Sodium", "value": "133", "unit": "mEq/L", "flag": "L"},
+                 {"test": "Albumin", "value": "3.0", "unit": "g/dL", "flag": "L"}],
+        "vitals": {"bp": "122/70", "hr": 80, "rr": 16, "spo2": 97, "temp": 98.4, "weight_kg": 52},
+        "allergy": "NKDA", "functional": {"mobility": "100 ft w/ rolling walker + supervision",
+            "fall_risk": "High", "cognition": "Moderate dementia; delirium improving", "adls": "Needs cueing"},
+        "dme": ["Rolling walker", "Bedside commode", "Shower chair"],
+        "follow_up": [{"with": "Geriatrics / PCP", "when": "within 1 week"},
+                      {"with": "Adult day program intake", "when": "within 2 weeks"}],
+        "goals_of_care": "DNR/DNI (per family + advance directive)",
+    },
+    {  # 15 Postpartum preeclampsia
+        "dx_short": "Postpartum preeclampsia (severe features)", "disposition": "Home (self-care)",
+        "complexity": "moderate", "lace": 8, "risk_band": "medium",
+        "primary_icd10": "O14.13", "secondary_icd10": ["O13.9", "O90.81", "O82", "F41.9"],
+        "labs": [{"test": "Platelets", "value": "128", "unit": "10^3/uL", "flag": "L"},
+                 {"test": "AST", "value": "44", "unit": "U/L", "flag": "H"},
+                 {"test": "Hemoglobin", "value": "10.4", "unit": "g/dL", "flag": "L"}],
+        "vitals": {"bp": "148/94", "hr": 84, "rr": 16, "spo2": 99, "temp": 98.6, "weight_kg": 74},
+        "allergy": "NKDA", "functional": {"mobility": "Independent", "fall_risk": "Low",
+            "cognition": "Intact", "adls": "Independent"},
+        "dme": ["Home blood-pressure cuff"],
+        "follow_up": [{"with": "Obstetrics (BP check)", "when": "in 3-5 days"},
+                      {"with": "PCP", "when": "within 2 weeks"}],
+        "goals_of_care": "Full code",
+    },
+]
+
 _BASE_DATE = datetime.date(2026, 5, 1)
+_SYN_DISCLAIMER = "Synthetic data for development/demo only — not a real person."
 
 
-def _patient(idx: int) -> dict:
+def _reconcile(adm_meds: list, dis_meds: list) -> list:
+    """Approximate med reconciliation from admission vs discharge lists (by drug name)."""
+    def name(m):
+        return m.split()[0].lower().strip("(,")
+    adm = {name(m): m for m in adm_meds}
+    dis_names = {name(m) for m in dis_meds}
+    rec = []
+    for m in dis_meds:
+        n = name(m)
+        if "(new" in m.lower() or n not in adm:
+            rec.append({"med": m, "action": "new", "reason": "Started this admission"})
+        else:
+            rec.append({"med": m, "action": "continue", "reason": "Home medication continued"})
+    for n, m in adm.items():
+        if n not in dis_names:
+            rec.append({"med": m, "action": "stop", "reason": "Discontinued / not on discharge list"})
+    return rec
+
+
+def _vital_trend(v: dict) -> list:
+    """Synthesize a 3-point trend (admission → midpoint → current) deterministically."""
+    try:
+        sys_bp = int(str(v["bp"]).split("/")[0]); dia_bp = int(str(v["bp"]).split("/")[1])
+    except Exception:
+        sys_bp, dia_bp = 130, 80
+    pts = []
+    for i, lbl in enumerate(["admission", "midpoint", "current"]):
+        f = (2 - i)  # worse at admission
+        pts.append({
+            "label": lbl,
+            "bp": f"{sys_bp + f * 8}/{dia_bp + f * 4}",
+            "hr": v["hr"] + f * 6,
+            "spo2": max(85, v["spo2"] - f * 2),
+            "temp": round(v["temp"] + f * 0.5, 1),
+        })
+    return pts
+
+
+def _form_data(idx: int, sc: dict, clin: dict, demo: dict) -> dict:
+    """The flat SAMPLE_PATIENT_WEB-shaped fields the Planner form + agents consume."""
+    return {
+        "patient_name": demo["name"], "age": str(demo["age"]), "gender": demo["gender"],
+        "mrn": demo["mrn"], "admission_date": demo["adm"], "expected_discharge_date": demo["disc"],
+        "attending_physician": demo["attending"],
+        "primary_diagnosis": sc["primary"], "secondary_diagnoses": "\n".join(sc["secondary"]),
+        "additional_clinical_notes": sc["notes"],
+        "primary_insurance": demo["pri_ins"], "secondary_insurance": demo["sec_ins"],
+        "medicare_part_a": demo["part_a"], "snf_days_used": str(demo["snf_used"]),
+        "admission_medications": "\n".join(sc["adm_meds"]),
+        "inpatient_medications": "\n".join(sc["inp_meds"]),
+        "discharge_medications": "\n".join(sc["dis_meds"]),
+        "pt_evaluation": sc["pt"], "ot_evaluation": sc["ot"], "st_evaluation": sc["st"],
+        "living_situation": demo["living"], "caregiver": demo["caregiver"],
+        "primary_language": demo["lang_note"], "transportation": demo["transport"],
+        "housing_type": demo["housing"], "bedroom_location": demo["bedroom"],
+        "patient_family_preference": (
+            f"Patient ({demo['lang']} preferred) and family discussed disposition: {clin['disposition']}."
+        ),
+        "physician_goals": sc["goals"],
+        "additional_notes": (
+            f"Primary language: {demo['lang_note']}. Insurance: {demo['pri_ins']}"
+            + (f"; secondary: {demo['sec_ins']}" if demo["sec_ins"] and demo["sec_ins"] != "None" else "")
+            + f". Disposition: {clin['disposition']}. Complexity: {clin['complexity']}. "
+            + _SYN_DISCLAIMER
+        ),
+    }
+
+
+def _rich_record(idx: int) -> dict:
     sc = _SCENARIOS[idx % len(_SCENARIOS)]
+    clin = _CLIN[idx % len(_CLIN)]
     female = (idx % 2 == 0)
     first = (_FIRST_F if female else _FIRST_M)[(idx * 7) % 20]
     last = _LAST[(idx * 3) % len(_LAST)]
-    name = f"{first} {last}"
     gender = "Female" if female else "Male"
-    age = 52 + ((idx * 5) % 44)  # 52–95
+    age = 52 + ((idx * 5) % 44)
     dob = datetime.date(_BASE_DATE.year - age, 1 + (idx % 12), 1 + (idx % 27))
     adm = _BASE_DATE + datetime.timedelta(days=(idx * 2) % 30)
     disc = adm + datetime.timedelta(days=sc["los"])
     lang, lang_note = _LANGS[idx % len(_LANGS)]
     pri_ins, sec_ins, part_a, snf_used = _INSURANCE[idx % len(_INSURANCE)]
+    payer_short = pri_ins.split("—")[0].split("(")[0].strip()
+    dual = ("dual" in pri_ins.lower()) or ("Medi-Cal" in (sec_ins or ""))
+
+    demo = {
+        "name": f"{first} {last}", "age": age, "gender": gender,
+        "mrn": f"SYN-{200000 + idx}", "adm": adm.isoformat(), "disc": disc.isoformat(),
+        "attending": f"Dr. {_LAST[(idx * 5) % len(_LAST)]}, MD — {sc['specialty']}",
+        "pri_ins": pri_ins, "sec_ins": sec_ins, "part_a": part_a, "snf_used": snf_used,
+        "lang": lang, "lang_note": lang_note, "living": _LIVING[(idx * 3) % len(_LIVING)],
+        "caregiver": _CAREGIVER[(idx * 7) % len(_CAREGIVER)], "transport": _TRANSPORT[(idx * 5) % len(_TRANSPORT)],
+        "housing": _HOUSING[(idx * 3) % len(_HOUSING)], "bedroom": _BEDROOM[(idx * 2) % len(_BEDROOM)],
+    }
+
+    form = _form_data(idx, sc, clin, demo)
+    interpreter = "interpreter" in lang_note.lower()
+
+    # Problem list: primary + secondaries (icd10 paired where available)
+    problems = [{"icd10": clin["primary_icd10"], "label": sc["primary"], "status": "active", "primary": True}]
+    for i, label in enumerate(sc["secondary"]):
+        code = clin["secondary_icd10"][i] if i < len(clin["secondary_icd10"]) else ""
+        problems.append({"icd10": code, "label": label, "status": "active", "primary": False})
+
+    tcm_eligible = clin["disposition"].lower().startswith(("home", "medical respite"))
+    tcm_cpt = "99496" if clin["complexity"] == "high" else "99495"
 
     return {
         "id": f"{idx + 1:03d}",
-        # Section 1 — Demographics
-        "patient_name": name,
-        "age": str(age),
-        "gender": gender,
-        "mrn": f"SP-{2026000 + idx}",
-        "admission_date": adm.isoformat(),
-        "expected_discharge_date": disc.isoformat(),
-        "attending_physician": f"Dr. {_LAST[(idx * 5) % len(_LAST)]}, MD — {sc['specialty']}",
-        # Section 2 — Diagnoses
-        "primary_diagnosis": sc["primary"],
-        "secondary_diagnoses": "\n".join(sc["secondary"]),
-        "additional_clinical_notes": sc["notes"],
-        # Section 3 — Insurance
-        "primary_insurance": pri_ins,
-        "secondary_insurance": sec_ins,
-        "medicare_part_a": part_a,
-        "snf_days_used": str(snf_used),
-        # Section 4 — Medications
-        "admission_medications": "\n".join(sc["adm_meds"]),
-        "inpatient_medications": "\n".join(sc["inp_meds"]),
-        "discharge_medications": "\n".join(sc["dis_meds"]),
-        # Section 5 — Therapy
-        "pt_evaluation": sc["pt"],
-        "ot_evaluation": sc["ot"],
-        "st_evaluation": sc["st"],
-        # Section 6 — Social history
-        "living_situation": _LIVING[(idx * 3) % len(_LIVING)],
-        "caregiver": _CAREGIVER[(idx * 7) % len(_CAREGIVER)],
-        "primary_language": lang_note,
-        "transportation": _TRANSPORT[(idx * 5) % len(_TRANSPORT)],
-        "housing_type": _HOUSING[(idx * 3) % len(_HOUSING)],
-        "bedroom_location": _BEDROOM[(idx * 2) % len(_BEDROOM)],
-        # Section 7 — Goals
-        "patient_family_preference": (
-            f"Patient ({lang} preferred) and family discussed disposition. " + sc["goals"].split(";")[0] + "."
-        ),
-        "physician_goals": sc["goals"],
-        "additional_notes": (
-            f"Primary language: {lang_note}. Insurance: {pri_ins}"
-            + (f"; secondary: {sec_ins}" if sec_ins and sec_ins != "None" else "")
-            + ". All data synthetic — demonstration only."
-        ),
+        "synthetic": True,
+        "disclaimer": _SYN_DISCLAIMER,
+        "form_data": form,                # flat fields for the Planner form + agents
+        "demographics": {
+            "name": demo["name"], "dob": dob.isoformat(), "age": age, "sex": gender,
+            "preferred_language": lang, "interpreter_needed": interpreter,
+            "mrn": demo["mrn"], "code_status": clin["goals_of_care"],
+            "race_ethnicity": "Synthetic — not specified",
+        },
+        "encounter": {
+            "type": "inpatient", "admit_date": adm.isoformat(), "los_days": sc["los"],
+            "admitting_dx": clin["dx_short"], "attending": demo["attending"],
+            "unit": sc["specialty"], "expected_discharge_date": disc.isoformat(),
+        },
+        "problem_list": problems,
+        "medications": {
+            "home": sc["adm_meds"], "inpatient": sc["inp_meds"], "discharge": sc["dis_meds"],
+            "reconciliation": _reconcile(sc["adm_meds"], sc["dis_meds"]),
+        },
+        "allergies": ([] if clin["allergy"] == "NKDA"
+                      else [{"substance": clin["allergy"].split("—")[0].strip(),
+                             "reaction": (clin["allergy"].split("—")[1].strip() if "—" in clin["allergy"] else ""),
+                             "severity": "moderate"}]),
+        "vitals": {"latest": clin["vitals"], "trend": _vital_trend(clin["vitals"])},
+        "labs": clin["labs"],
+        "functional_status": clin["functional"],
+        "sdoh": {
+            "housing": demo["housing"], "lives_with": demo["living"],
+            "primary_caregiver": demo["caregiver"], "transportation": demo["transport"],
+            "health_literacy": ("Limited" if interpreter else "Adequate"),
+            "calaim_ecm_eligible": ("Medi-Cal" in pri_ins or dual),
+        },
+        "payer": {
+            "primary": pri_ins, "secondary": sec_ins, "payer_short": payer_short,
+            "dual_eligible": dual, "member_id": f"SYN-{900000 + idx}",
+            "prior_auth": ([{"service": "SNF admission", "status": "pending"}]
+                           if "SNF" in clin["disposition"] or "rehab" in clin["disposition"].lower() else []),
+        },
+        "discharge": {
+            "disposition": clin["disposition"], "readiness": "Pending post-acute setup",
+            "dme_needs": clin["dme"], "follow_up": clin["follow_up"],
+            "barriers": ([] if demo["caregiver"].startswith(("Daughter", "Spouse", "Son"))
+                         else ["Caregiver/support limited"]),
+        },
+        "risk": {
+            "readmission_lace": clin["lace"], "readmission_band": clin["risk_band"],
+            "complexity": clin["complexity"],
+        },
+        "tcm": {
+            "eligible": tcm_eligible, "complexity": clin["complexity"],
+            "cpt": (tcm_cpt if tcm_eligible else None),
+            "rationale": ("Discharged to community; follow-up within TCM window"
+                          if tcm_eligible else "Not eligible — discharged to an institutional setting"),
+        },
+        "preferences": {"goals_of_care": clin["goals_of_care"], "language_for_education": lang},
     }
 
 
-# Build the 100 patients once at import.
-SAMPLE_PATIENTS: list[dict] = [_patient(i) for i in range(100)]
+# Build the 100 rich records once at import; derive the flat list for back-compat.
+RICH_PATIENTS: list[dict] = [_rich_record(i) for i in range(100)]
+_BY_ID_RICH: dict[str, dict] = {r["id"]: r for r in RICH_PATIENTS}
+SAMPLE_PATIENTS: list[dict] = [{**r["form_data"], "id": r["id"]} for r in RICH_PATIENTS]
 _BY_ID: dict[str, dict] = {p["id"]: p for p in SAMPLE_PATIENTS}
 
 
 def list_sample_patients() -> list[dict]:
-    """Lightweight list for the picker dropdown: id + label + short fields."""
+    """Lightweight list for the picker dropdown: id, name, demo + label fields."""
     out = []
-    for p in SAMPLE_PATIENTS:
-        dx_short = p["primary_diagnosis"].split("—")[0].split("(")[0].strip()
-        if len(dx_short) > 60:
-            dx_short = dx_short[:57] + "…"
+    for r in RICH_PATIENTS:
+        clin = r["risk"]
         out.append({
-            "id": p["id"],
-            "name": p["patient_name"],
-            "age": p["age"],
-            "gender": p["gender"],
-            "dx_short": dx_short,
-            "label": f"{p['id']} · {p['patient_name']} ({p['age']}{p['gender'][0]}) · {dx_short}",
+            "id": r["id"],
+            "name": r["demographics"]["name"],
+            "age": r["demographics"]["age"],
+            "gender": r["demographics"]["sex"],
+            "dx_short": r["encounter"]["admitting_dx"],
+            "disposition": r["discharge"]["disposition"],
+            "payer_short": r["payer"]["payer_short"],
+            "complexity": clin["complexity"],
+            "language": r["demographics"]["preferred_language"],
+            "label": (f"{r['id']} · {r['demographics']['name']} "
+                      f"({r['demographics']['age']}{r['demographics']['sex'][0]}) · "
+                      f"{r['encounter']['admitting_dx']} · {r['discharge']['disposition']} · "
+                      f"{r['payer']['payer_short']}"),
         })
     return out
 
 
 def get_sample_patient(pid: str) -> Optional[dict]:
-    """Full form-shaped patient by id (e.g. '001'). Returns None if not found."""
+    """Flat form-shaped patient by id (e.g. '001'). Returns None if not found."""
     return _BY_ID.get(str(pid).zfill(3))
+
+
+def get_sample_record(pid: str) -> Optional[dict]:
+    """Full rich nested record by id (for the Patient Snapshot panel)."""
+    return _BY_ID_RICH.get(str(pid).zfill(3))
+
+
+def validate_coherence(record: dict) -> list[str]:
+    """Return a list of coherence issues for a rich record (empty == coherent).
+    Pragmatic checks — meant to catch contradictions, not enforce exhaustive realism."""
+    issues: list[str] = []
+    pid = record.get("id", "?")
+    disp = record["discharge"]["disposition"].lower()
+    func = record["functional_status"]
+
+    # 1. Allergy must not appear in active (discharge) meds.
+    dis_meds = " ".join(record["medications"]["discharge"]).lower()
+    for a in record["allergies"]:
+        sub = a["substance"].lower()
+        if sub and sub in dis_meds:
+            issues.append(f"{pid}: allergy '{a['substance']}' appears in discharge meds")
+
+    # 2. Dependent/severe functional status should not discharge to plain self-care.
+    #    Use a word boundary so "independent"/"modified independent" never matches.
+    adls = str(func.get("adls", "")).lower()
+    dependent = re.search(r"\bdependent\b", adls) is not None
+    if (dependent or "max assist" in adls) and "self-care" in disp:
+        issues.append(f"{pid}: dependent ADLs but disposition is home self-care")
+
+    # 3. TCM eligibility must follow disposition (community vs institutional).
+    tcm = record["tcm"]
+    institutional = any(k in disp for k in ("snf", "skilled nursing", "irf", "inpatient rehab", "ltach"))
+    if tcm["eligible"] and institutional:
+        issues.append(f"{pid}: TCM marked eligible but disposition is institutional")
+    if (not tcm["eligible"]) and ("home" in disp) and ("hospice" not in disp):
+        issues.append(f"{pid}: discharged home but TCM not eligible")
+
+    # 4. Must have a primary problem and at least one discharge med (data richness).
+    if not any(p.get("primary") for p in record["problem_list"]):
+        issues.append(f"{pid}: no primary problem")
+    if not record["medications"]["discharge"]:
+        issues.append(f"{pid}: no discharge medications")
+
+    # 5. Labs present for richness.
+    if not record["labs"]:
+        issues.append(f"{pid}: no labs")
+
+    return issues
