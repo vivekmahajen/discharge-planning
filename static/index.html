@@ -376,6 +376,15 @@
     padding: 3px 12px; font-size: .76rem; cursor: pointer; color: #334155; font-weight: 600;
   }
   .snapshot-toggle:hover { background: #e2e8f0; }
+  .snapshot-gen {
+    background: #1a56db; color: #fff; border: none; border-radius: 6px;
+    padding: 4px 12px; font-size: .76rem; cursor: pointer; font-weight: 700;
+  }
+  .snapshot-gen:hover { background: #1e40af; }
+  .snapshot-gen:disabled { background: #93c5fd; cursor: default; }
+  .snapshot-autorun { font-size: .72rem; color: #475569; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .snapshot-lang-wrap { font-size: .8rem; display: flex; align-items: center; gap: 4px; color: #475569; }
+  .snapshot-lang-wrap select { font-size: .74rem; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; }
   .snapshot-disclaimer { font-size: .72rem; color: #64748b; margin: 4px 0 12px; font-style: italic; }
   .snapshot-body {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -468,11 +477,23 @@
   </div>
 
   <!-- Dynamic Patient Snapshot — schema-driven, render-by-presence (read-only) -->
-  <section id="snapshotPanel" class="snapshot no-print" hidden aria-labelledby="snapshotTitle">
+  <section id="snapshotPanel" class="snapshot no-print" hidden aria-labelledby="snapshotTitle" aria-busy="false">
     <div class="snapshot-head">
       <h2 id="snapshotTitle">Patient Snapshot</h2>
       <span class="snapshot-syn" title="100% synthetic — no real PHI">🧪 Synthetic / demo data</span>
       <div class="spacer"></div>
+      <button type="button" class="snapshot-gen" id="snapshotGenBtn" onclick="generatePlanFromSnapshot()"
+              title="Run the 6-agent discharge pipeline for this patient">🤖 Generate plan</button>
+      <label class="snapshot-autorun" title="Automatically run the pipeline whenever you pick a patient">
+        <input type="checkbox" id="snapshotAutorun" onchange="setAutorun(this.checked)" /> Auto-run on select
+      </label>
+      <label class="snapshot-lang-wrap" for="snapshotLang">🌐
+        <select id="snapshotLang" aria-label="Snapshot display language" onchange="setSnapshotLang(this.value)">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="zh">中文</option>
+        </select>
+      </label>
       <button type="button" class="snapshot-toggle" id="snapshotToggle"
               aria-expanded="true" aria-controls="snapshotBody" onclick="toggleSnapshot()">Hide</button>
     </div>
@@ -1203,10 +1224,69 @@ const SNAP_I18N = {
     yes: 'Yes', no: 'No', none: 'None', nkda: 'No known drug allergies (NKDA)',
     new: 'New', continue: 'Continue', stop: 'Stop',
     admission: 'Admission', midpoint: 'Midpoint', current: 'Current', empty: 'No data available',
+    show: 'Show', hide: 'Hide',
+  },
+  es: {
+    Snapshot: 'Resumen del paciente',
+    demographics: 'Datos demográficos', encounter: 'Episodio', problem_list: 'Lista de problemas',
+    medications: 'Medicamentos', reconciliation: 'Conciliación de medicamentos',
+    allergies: 'Alergias', vitals: 'Signos vitales y tendencia', labs: 'Laboratorios',
+    functional_status: 'Estado funcional', sdoh: 'Determinantes sociales',
+    payer: 'Pagador y cobertura', discharge: 'Plan de alta', risk: 'Riesgo de reingreso',
+    tcm: 'Cuidado de transición (TCM)', preferences: 'Preferencias',
+    name: 'Nombre', dob: 'F. nac.', age: 'Edad', sex: 'Sexo', preferred_language: 'Idioma',
+    interpreter_needed: 'Intérprete', mrn: 'NHC', code_status: 'Estado de reanimación',
+    race_ethnicity: 'Raza / Etnia', admitting_dx: 'Dx de ingreso', unit: 'Unidad',
+    attending: 'Médico tratante', admit_date: 'Ingreso', los_days: 'Estancia (días)',
+    expected_discharge_date: 'Alta prevista', type: 'Tipo',
+    home: 'Medicación domiciliaria', inpatient: 'Medicación hospitalaria', discharge_meds: 'Medicación al alta',
+    mobility: 'Movilidad', fall_risk: 'Riesgo de caídas', cognition: 'Cognición', adls: 'AVD',
+    housing: 'Vivienda', lives_with: 'Convive con', primary_caregiver: 'Cuidador',
+    transportation: 'Transporte', health_literacy: 'Alfabetización en salud',
+    calaim_ecm_eligible: 'Elegible para CalAIM ECM',
+    primary: 'Principal', secondary: 'Secundario', payer_short: 'Plan', dual_eligible: 'Doble elegibilidad',
+    member_id: 'N.º de afiliado', prior_auth: 'Autorización previa', disposition: 'Destino',
+    readiness: 'Preparación', dme_needs: 'Equipo médico (DME)', follow_up: 'Seguimiento', barriers: 'Barreras',
+    readmission_lace: 'Puntuación LACE', readmission_band: 'Nivel de riesgo', complexity: 'Complejidad',
+    eligible: 'Elegible', cpt: 'CPT', rationale: 'Justificación', goals_of_care: 'Objetivos de atención',
+    language_for_education: 'Idioma de educación',
+    yes: 'Sí', no: 'No', none: 'Ninguno', nkda: 'Sin alergias medicamentosas conocidas (NKDA)',
+    new: 'Nuevo', continue: 'Continuar', stop: 'Suspender',
+    admission: 'Ingreso', midpoint: 'Punto medio', current: 'Actual', empty: 'Sin datos disponibles',
+    show: 'Mostrar', hide: 'Ocultar',
+  },
+  zh: {
+    Snapshot: '患者概览',
+    demographics: '人口统计', encounter: '就诊', problem_list: '问题列表',
+    medications: '用药', reconciliation: '用药核对',
+    allergies: '过敏', vitals: '生命体征与趋势', labs: '化验',
+    functional_status: '功能状态', sdoh: '社会决定因素',
+    payer: '付款方与保险', discharge: '出院计划', risk: '再入院风险',
+    tcm: '过渡期照护 (TCM)', preferences: '偏好',
+    name: '姓名', dob: '出生日期', age: '年龄', sex: '性别', preferred_language: '语言',
+    interpreter_needed: '需要翻译', mrn: '病历号', code_status: '抢救状态',
+    race_ethnicity: '种族 / 民族', admitting_dx: '入院诊断', unit: '科室',
+    attending: '主治医师', admit_date: '入院', los_days: '住院天数',
+    expected_discharge_date: '预计出院', type: '类型',
+    home: '家庭用药', inpatient: '住院用药', discharge_meds: '出院用药',
+    mobility: '活动能力', fall_risk: '跌倒风险', cognition: '认知', adls: '日常生活活动',
+    housing: '住房', lives_with: '同住', primary_caregiver: '照护者',
+    transportation: '交通', health_literacy: '健康素养',
+    calaim_ecm_eligible: '符合 CalAIM ECM 资格',
+    primary: '主要', secondary: '次要', payer_short: '计划', dual_eligible: '双重资格',
+    member_id: '会员号', prior_auth: '事前授权', disposition: '去向',
+    readiness: '准备情况', dme_needs: '医疗器械需求', follow_up: '随访', barriers: '障碍',
+    readmission_lace: 'LACE 评分', readmission_band: '风险等级', complexity: '复杂度',
+    eligible: '符合资格', cpt: 'CPT', rationale: '理由', goals_of_care: '照护目标',
+    language_for_education: '宣教语言',
+    yes: '是', no: '否', none: '无', nkda: '无已知药物过敏 (NKDA)',
+    new: '新增', continue: '继续', stop: '停用',
+    admission: '入院', midpoint: '中期', current: '当前', empty: '无可用数据',
+    show: '展开', hide: '收起',
   },
 };
 function _snapLang() {
-  const l = (window.appLang || document.documentElement.lang || 'en').slice(0, 2);
+  const l = (window._snapLangPref || window.appLang || document.documentElement.lang || 'en').slice(0, 2);
   return SNAP_I18N[l] ? l : 'en';
 }
 function snapT(key) {
@@ -1432,13 +1512,23 @@ const SNAPSHOT_REGISTRY = [
       ['goals_of_care'], ['language_for_education'] ]) },
 ];
 
+let _lastRecord = null;   // cache so language switches re-render without refetch
+
 function renderSnapshot(rec) {
   const panel = document.getElementById('snapshotPanel');
   const body = document.getElementById('snapshotBody');
   const disc = document.getElementById('snapshotDisclaimer');
   if (!panel || !body) return;
+  if (rec) _lastRecord = rec; else rec = _lastRecord;
   body.textContent = '';
   if (!rec) { panel.hidden = true; return; }
+  // Localize the static chrome too (title + toggle), and tag the panel language.
+  const lang = _snapLang();
+  panel.setAttribute('lang', lang);
+  const titleEl = document.getElementById('snapshotTitle');
+  if (titleEl) titleEl.textContent = snapT('Snapshot');
+  const tgl = document.getElementById('snapshotToggle');
+  if (tgl) tgl.textContent = (tgl.getAttribute('aria-expanded') === 'false') ? snapT('show') : snapT('hide');
   disc.textContent = rec.disclaimer || '';
   const frag = document.createDocumentFragment();
   SNAPSHOT_REGISTRY.forEach(spec => {
@@ -1467,20 +1557,60 @@ function toggleSnapshot() {
   const hide = btn.getAttribute('aria-expanded') === 'true';
   body.style.display = hide ? 'none' : '';
   btn.setAttribute('aria-expanded', hide ? 'false' : 'true');
-  btn.textContent = hide ? 'Show' : 'Hide';
+  btn.textContent = hide ? snapT('show') : snapT('hide');
+}
+
+// Snapshot display language — persisted; re-renders the cached record in place.
+function setSnapshotLang(lang) {
+  window._snapLangPref = lang;
+  try { localStorage.setItem('snapshotLang', lang); } catch (_) {}
+  if (_lastRecord) renderSnapshot(_lastRecord);
+}
+
+// Auto-run preference — when on, picking a patient runs the pipeline immediately.
+function setAutorun(on) {
+  window._snapAutorun = !!on;
+  try { localStorage.setItem('snapshotAutorun', on ? '1' : '0'); } catch (_) {}
+}
+
+// Run the 6-agent pipeline for the active patient (form is already populated).
+function generatePlanFromSnapshot() {
+  if (typeof generatePlan === 'function') generatePlan();
+  const p = document.getElementById('snapshotPanel');
+  if (p) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Fetch + render the rich record whenever a patient becomes active.
 async function loadSnapshot(id) {
+  const panel = document.getElementById('snapshotPanel');
+  if (panel) panel.setAttribute('aria-busy', 'true');
   try {
     const res = await fetch('/api/sample-record/' + encodeURIComponent(id));
     if (!res.ok) return;
     renderSnapshot(await res.json());
   } catch (_) { /* snapshot is best-effort */ }
+  finally { if (panel) panel.setAttribute('aria-busy', 'false'); }
 }
+
 document.addEventListener('patient:selected', (e) => {
-  if (e.detail && e.detail.id) loadSnapshot(e.detail.id);
+  if (!e.detail || !e.detail.id) return;
+  loadSnapshot(e.detail.id);
+  // Re-drive the full pipeline on selection when auto-run is enabled.
+  if (window._snapAutorun && typeof generatePlan === 'function') {
+    setTimeout(() => generatePlan(), 0);
+  }
 });
+
+// Restore snapshot preferences (language + auto-run) on load.
+(function initSnapshotPrefs() {
+  try {
+    const lang = localStorage.getItem('snapshotLang');
+    if (lang) { window._snapLangPref = lang; const sel = document.getElementById('snapshotLang'); if (sel) sel.value = lang; }
+    const ar = localStorage.getItem('snapshotAutorun') === '1';
+    window._snapAutorun = ar;
+    const cb = document.getElementById('snapshotAutorun'); if (cb) cb.checked = ar;
+  } catch (_) {}
+})();
 
 // ── Set agent card status ────────────────────────────────────────────────────
 function setStatus(agent, status, label) {
