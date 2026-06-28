@@ -42,6 +42,61 @@ class TestSamplePatientsModule:
         assert sp.get_sample_patient("999") is None
 
 
+class TestRichRecords:
+    def test_exactly_100_rich_records(self):
+        assert len(sp.RICH_PATIENTS) == 100
+        ids = [r["id"] for r in sp.RICH_PATIENTS]
+        assert len(set(ids)) == 100
+
+    def test_every_record_is_synthetic_with_disclaimer(self):
+        for r in sp.RICH_PATIENTS:
+            assert r["synthetic"] is True
+            assert r["disclaimer"]
+            # No real-looking PHI prefixes — MRN/member id must use SYN-.
+            assert r["demographics"]["mrn"].startswith("SYN-")
+            assert r["payer"]["member_id"].startswith("SYN-")
+
+    def test_records_have_all_nested_sections(self):
+        sections = [
+            "demographics", "encounter", "problem_list", "medications", "allergies",
+            "vitals", "labs", "functional_status", "sdoh", "payer", "discharge",
+            "risk", "tcm", "preferences",
+        ]
+        for r in sp.RICH_PATIENTS:
+            for s in sections:
+                assert s in r, f"{r['id']} missing section {s}"
+            # medication sub-lists + reconciliation
+            meds = r["medications"]
+            assert meds["discharge"] and meds["reconciliation"]
+            assert r["labs"]
+            assert any(p.get("primary") for p in r["problem_list"])
+
+    def test_all_records_are_coherent(self):
+        problems = []
+        for r in sp.RICH_PATIENTS:
+            problems += sp.validate_coherence(r)
+        assert problems == [], f"coherence issues: {problems[:10]}"
+
+    def test_validator_catches_injected_contradictions(self):
+        import copy
+        r = copy.deepcopy(sp.RICH_PATIENTS[0])
+        # Inject an allergy that is also a discharge med.
+        r["medications"]["discharge"] = ["Penicillin 500 mg PO BID"]
+        r["allergies"] = [{"substance": "Penicillin", "reaction": "hives", "severity": "severe"}]
+        assert any("allergy" in i for i in sp.validate_coherence(r))
+
+    def test_get_sample_record(self):
+        rec = sp.get_sample_record("007")
+        assert rec and rec["id"] == "007"
+        assert sp.get_sample_record("7")["id"] == "007"  # zero-pads
+        assert sp.get_sample_record("999") is None
+
+    def test_list_includes_picker_fields(self):
+        for x in sp.list_sample_patients():
+            for f in ("dx_short", "disposition", "payer_short", "complexity", "language"):
+                assert x[f], f"{x['id']} missing {f}"
+
+
 class TestSamplePatientEndpoints:
     async def test_list_requires_auth(self, client):
         r = await client.get("/api/sample-patients")
