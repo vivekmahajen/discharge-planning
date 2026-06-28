@@ -98,6 +98,56 @@ class TestRichRecords:
                 assert x[f], f"{x['id']} missing {f}"
 
 
+class TestToolArtifacts:
+    def test_artifacts_built_for_all_patients(self):
+        for r in sp.RICH_PATIENTS:
+            a = sp.build_tool_artifacts(r)
+            assert a["clinical_note"] and a["discharge_plan"] and a["context"]
+            plan = a["discharge_plan"]
+            for k in ("diagnosis", "medications", "warning_signs", "follow_up",
+                      "activity_restrictions", "diet_instructions", "when_to_call"):
+                assert k in plan, f"{r['id']} plan missing {k}"
+            assert plan["medications"], f"{r['id']} has no parsed meds"
+
+    def test_clinical_note_is_synthetic_and_rich(self):
+        a = sp.build_tool_artifacts(sp.get_sample_record("001"))
+        note = a["clinical_note"]
+        assert "SYNTHETIC" in note
+        assert "SYN-" in note            # synthetic MRN
+        assert "DISCHARGE MEDICATIONS" in note
+
+    def test_context_keys_for_tools(self):
+        c = sp.build_tool_artifacts(sp.get_sample_record("001"))["context"]
+        # keys consumed by the summary + teach-back tools
+        for k in ("admissionDate", "dischargeDate", "attending", "unit", "payer",
+                  "language", "laceScore", "diagnosis", "medications", "warningsSigns",
+                  "followUp", "activity", "diet", "destination", "patientInitials",
+                  "mrn", "dob"):
+            assert k in c, f"context missing {k}"
+
+    def test_med_parse_splits_name_and_why(self):
+        m = sp._parse_med("Furosemide 40 mg PO daily (NEW — increased)")
+        assert m["name"] == "Furosemide"
+        assert "40 mg" in m["dose"]
+        assert "daily" in m["frequency"]
+        assert "NEW" in m["why"]
+
+    async def test_artifacts_endpoint(self, authed_client):
+        r = await authed_client.get("/api/sample-patient/007/artifacts")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["clinical_note"] and d["discharge_plan"]["medications"]
+        assert d["context"]["diagnosis"]
+
+    async def test_artifacts_endpoint_404(self, authed_client):
+        r = await authed_client.get("/api/sample-patient/999/artifacts")
+        assert r.status_code == 404
+
+    async def test_artifacts_requires_auth(self, client):
+        r = await client.get("/api/sample-patient/007/artifacts")
+        assert r.status_code in (401, 403)
+
+
 class TestSamplePatientEndpoints:
     async def test_list_requires_auth(self, client):
         r = await client.get("/api/sample-patients")

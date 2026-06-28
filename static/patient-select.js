@@ -166,7 +166,7 @@
 
   function init() {
     var mount = document.getElementById(MOUNT_ID);
-    if (!mount) return;
+    if (!mount) { waitForMount(); return; }
     injectStyles();
     build(mount);
     fetch("/api/sample-patients")
@@ -188,6 +188,17 @@
         } catch (e) {}
       })
       .catch(function () { /* picker is best-effort */ });
+  }
+
+  // The mount may be rendered late (e.g. by a Babel/React app that runs after
+  // this script). Poll briefly for it before giving up.
+  function waitForMount() {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+      if (document.getElementById(MOUNT_ID)) { clearInterval(timer); init(); }
+      else if (tries > 40) { clearInterval(timer); }   // ~6s
+    }, 150);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

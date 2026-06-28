@@ -73,6 +73,8 @@
   <a href="/api/auth/logout">Sign Out</a>
 </header>
 
+<div id="patientPickerMount" style="max-width:1100px;margin:14px auto 0;padding:0 16px"></div>
+
 <div id="root"></div>
 
 <script>
@@ -338,6 +340,18 @@ function App() {
   const [result, setResult]   = useState(null);
   const [error, setError]     = useState("");
 
+  // Let the synthetic-patient picker drop a generated discharge plan in here.
+  React.useEffect(() => {
+    window.applyPatientData = function (d) {
+      if (!d || !d.id) return;
+      fetch("/api/sample-patient/" + encodeURIComponent(d.id) + "/artifacts")
+        .then(r => r.ok ? r.json() : null)
+        .then(a => { if (a && a.discharge_plan) { setUseSample(false); setPlanText(JSON.stringify(a.discharge_plan, null, 2)); } })
+        .catch(() => {});
+    };
+    return () => { delete window.applyPatientData; };
+  }, []);
+
   const selected = LANGUAGES.find(l => l.code === lang) || LANGUAGES[0];
 
   const generate = async () => {
@@ -446,6 +460,7 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
+  <script src="/static/patient-select.js"></script>
   <script src="/static/pwa.js" defer></script>
 </body>
 </html>

@@ -71,6 +71,8 @@
   <a href="/api/auth/logout">Sign Out</a>
 </header>
 
+<div id="patientPickerMount" style="max-width:1100px;margin:14px auto 0;padding:0 16px"></div>
+
 <div id="root"></div>
 
 <script>
@@ -325,6 +327,37 @@ function TeachBackChecklist() {
     destination: "home",
   });
   const [useDemoSummary, setUseDemoSummary] = useState(true);
+
+  // Synthetic-patient picker → fill the teach-back context for this tool.
+  React.useEffect(() => {
+    window.applyPatientData = function (d) {
+      if (!d || !d.id) return;
+      fetch("/api/sample-patient/" + encodeURIComponent(d.id) + "/artifacts")
+        .then(r => r.ok ? r.json() : null)
+        .then(a => {
+          if (!a || !a.context) return;
+          const c = a.context;
+          setUseDemoSummary(false);
+          setCtx(prev => ({
+            ...prev,
+            patientInitials: c.patientInitials || prev.patientInitials,
+            mrn: c.mrn || prev.mrn,
+            dob: c.dob || prev.dob,
+            laceScore: c.laceScore || prev.laceScore,
+            language: c.language || prev.language,
+            diagnosis: c.diagnosis || prev.diagnosis,
+            medications: c.medications || prev.medications,
+            warningsSigns: c.warningsSigns || prev.warningsSigns,
+            followUp: c.followUp || prev.followUp,
+            activity: c.activity || prev.activity,
+            diet: c.diet || prev.diet,
+            destination: c.destination || prev.destination,
+          }));
+        })
+        .catch(() => {});
+    };
+    return () => { delete window.applyPatientData; };
+  }, []);
   const [questions,      setQuestions]      = useState(null);
   const [patientSummary, setPatientSummary] = useState("");
   const [responses,      setResponses]      = useState({});
@@ -636,6 +669,7 @@ function TeachBackChecklist() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<TeachBackChecklist />);
 </script>
+  <script src="/static/patient-select.js"></script>
   <script src="/static/pwa.js" defer></script>
 </body>
 </html>

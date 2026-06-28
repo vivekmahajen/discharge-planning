@@ -999,3 +999,221 @@ def validate_coherence(record: dict) -> list[str]:
         issues.append(f"{pid}: no labs")
 
     return issues
+
+
+# ── Tool artifacts ─────────────────────────────────────────────────────────────
+# The paste-based tools (summary generators, multilingual translator, teach-back)
+# consume free-text clinical notes or a discharge-plan JSON rather than a
+# structured form. build_tool_artifacts() derives those inputs from a rich record
+# so the patient picker can drive those tools too.
+
+_FREQ_WORDS = ("daily", "nightly", "weekly", "bid", "tid", "qid", "qhs", "prn",
+               "q6h", "q8h", "q12h", "qod", "once", "twice")
+
+
+def _parse_med(med: str) -> dict:
+    """Best-effort split of a med string into name / dose / frequency / why."""
+    why = ""
+    if "(" in med:
+        why = med[med.index("(") + 1:].rstrip(")").strip(" -—")
+        med = med[:med.index("(")].strip()
+    m = re.search(r"\d", med)
+    name = (med[:m.start()].strip() if m else med).strip()
+    rest = med[m.start():].strip() if m else ""
+    # dose = leading number(+unit); frequency = trailing schedule words
+    dose, freq = rest, ""
+    low = rest.lower()
+    cut = len(rest)
+    for w in _FREQ_WORDS:
+        i = low.find(w)
+        if i != -1:
+            cut = min(cut, i)
+    if cut < len(rest):
+        dose = rest[:cut].strip()
+        freq = rest[cut:].strip()
+    return {"name": name or med, "dose": dose, "frequency": freq, "why": why}
+
+
+# Condition-specific warning signs keyed by substrings in the short diagnosis.
+_WARNING_MAP = [
+    ("heart failure", [("Weight gain of more than 2-3 lbs in a day or 5 lbs in a week", "call_doctor", "urgent"),
+                       ("Worsening shortness of breath, or trouble breathing lying flat", "call_911", "emergent"),
+                       ("Increased swelling in legs, ankles, or belly", "call_doctor", "urgent")]),
+    ("copd", [("More shortness of breath than usual or needing your rescue inhaler more often", "call_doctor", "urgent"),
+              ("Lips or fingertips turning blue, or severe trouble breathing", "call_911", "emergent"),
+              ("Fever, or coughing up yellow/green or bloody mucus", "call_doctor", "urgent")]),
+    ("stroke", [("Sudden weakness, numbness, trouble speaking, or face drooping", "call_911", "emergent"),
+                ("Severe headache, vision changes, or confusion", "call_911", "emergent"),
+                ("Trouble swallowing or choking with food or liquids", "call_doctor", "urgent")]),
+    ("sepsis", [("Fever above 100.4°F, shaking chills, or feeling very unwell", "call_doctor", "urgent"),
+                ("Confusion, fast breathing, or a racing heart", "call_911", "emergent"),
+                ("Redness, swelling, or drainage at any wound or IV site", "call_doctor", "urgent")]),
+    ("dka", [("Blood sugar over 300 that will not come down", "call_doctor", "urgent"),
+             ("Nausea, vomiting, belly pain, or fruity-smelling breath", "call_911", "emergent"),
+             ("Very high or very low blood sugar with confusion", "call_911", "emergent")]),
+    ("cellulitis", [("Spreading redness, warmth, or red streaks from the wound", "call_doctor", "urgent"),
+                    ("Fever, increasing pain, or foul drainage from the wound", "call_doctor", "urgent"),
+                    ("New numbness, black tissue, or severe pain in the foot", "call_911", "emergent")]),
+    ("gi bleed", [("Black, tarry, or bloody stools", "call_911", "emergent"),
+                  ("Vomiting blood or material that looks like coffee grounds", "call_911", "emergent"),
+                  ("Dizziness, lightheadedness, or fainting", "call_doctor", "urgent")]),
+    ("preeclampsia", [("Severe headache that does not go away, or vision changes", "call_911", "emergent"),
+                      ("Pain in the upper-right belly or under the ribs", "call_doctor", "urgent"),
+                      ("Home blood pressure 160/110 or higher", "call_911", "emergent")]),
+]
+_GENERIC_WARNINGS = [
+    ("Fever above 100.4°F, chills, or feeling much worse", "call_doctor", "urgent"),
+    ("Chest pain, trouble breathing, or fainting", "call_911", "emergent"),
+    ("Any symptom that worries you or is not improving", "call_doctor", "routine"),
+]
+
+
+def _warning_signs(dx_short: str) -> list:
+    low = (dx_short or "").lower()
+    for key, signs in _WARNING_MAP:
+        if key in low:
+            return [{"sign": s, "action": a, "urgency": u} for s, a, u in signs]
+    return [{"sign": s, "action": a, "urgency": u} for s, a, u in _GENERIC_WARNINGS]
+
+
+def _hrrp_flag(dx_short: str) -> str:
+    low = (dx_short or "").lower()
+    for key, label in (("heart failure", "Heart Failure"), ("chf", "Heart Failure"),
+                       ("copd", "COPD"), ("pneumonia", "Pneumonia"), ("cabg", "CABG"),
+                       ("nstemi", "AMI"), ("stemi", "AMI"), ("myocardial", "AMI")):
+        if key in low:
+            return label
+    return ""
+
+
+def _destination(disposition: str) -> str:
+    low = (disposition or "").lower()
+    if "snf" in low or "skilled nursing" in low:
+        return "snf"
+    if "rehab" in low or "irf" in low:
+        return "rehab"
+    if "respite" in low or "shelter" in low:
+        return "shelter"
+    if "hospice" in low:
+        return "hospice"
+    return "home"
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in (name or "").split() if p]
+    return ".".join(p[0].upper() for p in parts) + "." if parts else ""
+
+
+def build_tool_artifacts(record: dict) -> dict:
+    """Derive paste-ready inputs for the text/JSON-based tools from a rich record."""
+    d = record["demographics"]
+    enc = record["encounter"]
+    rk = record["risk"]
+    disp = record["discharge"]["disposition"]
+    dx = enc["admitting_dx"]
+    meds_dis = record["medications"]["discharge"]
+    meds_home = record["medications"]["home"]
+    allergies = (", ".join(a["substance"] for a in record["allergies"]) or "NKDA")
+    fu = record["discharge"]["follow_up"]
+    fu_text = "; ".join(f"{f['with']} {f['when']}" for f in fu)
+    warnings = _warning_signs(dx)
+    warnings_text = "; ".join(w["sign"] for w in warnings)
+    func = record["functional_status"]
+    labs_text = "; ".join(f"{l['test']} {l['value']}{(' ' + l['unit']) if l['unit'] else ''}"
+                          f"{(' (' + l['flag'] + ')') if l['flag'] else ''}" for l in record["labs"])
+    v = record["vitals"]["latest"]
+    problems = record["problem_list"]
+    pmh = "; ".join(p["label"] for p in problems if not p.get("primary"))
+
+    activity = "Rest at home and increase activity gradually. Avoid heavy lifting; walk short distances and stop if you feel unwell."
+    diet = "Follow the diet your team recommended. Limit salt and processed foods; drink fluids as advised."
+    if "heart failure" in dx.lower() or "chf" in dx.lower():
+        activity = "Do not lift more than 10 lbs. Walk short distances and rest when short of breath."
+        diet = "Limit salt to less than 2 grams per day and fluids to about 2 liters per day. Avoid canned soups and processed foods. Weigh yourself daily."
+
+    # 1) Clinical note (for the summary generators)
+    note_lines = [
+        f"DISCHARGE / PROGRESS NOTE (SYNTHETIC — {record['disclaimer']})",
+        "",
+        f"PATIENT: {d['name']}  |  MRN: {d['mrn']}  |  DOB: {d['dob']}  |  {d['age']} y/o {d['sex']}",
+        f"PREFERRED LANGUAGE: {d['preferred_language']}"
+        + ("  (interpreter required)" if d.get("interpreter_needed") else ""),
+        f"ATTENDING: {enc['attending']}  |  UNIT: {enc['unit']}",
+        f"ADMITTED: {enc['admit_date']}  |  LOS: {enc['los_days']} days  |  EXPECTED D/C: {enc['expected_discharge_date']}",
+        "",
+        f"CHIEF CONCERN / ADMITTING DIAGNOSIS: {dx}",
+        f"HPI / ASSESSMENT: {record['form_data'].get('primary_diagnosis', dx)}",
+        "",
+        f"PAST MEDICAL HISTORY: {pmh or 'See problem list.'}",
+        f"ALLERGIES: {allergies}",
+        "",
+        f"VITALS (latest): BP {v['bp']}, HR {v['hr']}, RR {v['rr']}, SpO2 {v['spo2']}%, "
+        f"Temp {v['temp']}F, Wt {v['weight_kg']} kg",
+        f"PERTINENT LABS: {labs_text}",
+        "",
+        "HOME MEDICATIONS:",
+        *[f"  - {m}" for m in meds_home],
+        "",
+        "DISCHARGE MEDICATIONS:",
+        *[f"  - {m}" for m in meds_dis],
+        "",
+        "FUNCTIONAL STATUS: "
+        f"Mobility — {func.get('mobility', '')}; ADLs — {func.get('adls', '')}; "
+        f"Cognition — {func.get('cognition', '')}; Fall risk — {func.get('fall_risk', '')}.",
+        f"HOSPITAL COURSE / PLAN: {record['form_data'].get('additional_clinical_notes', '')}",
+        "",
+        f"DISPOSITION: {disp}.",
+        f"FOLLOW-UP: {fu_text}.",
+        f"READMISSION RISK: LACE {rk['readmission_lace']} ({rk['readmission_band']}); "
+        f"complexity {rk['complexity']}.",
+    ]
+    clinical_note = "\n".join(note_lines)
+
+    # 2) Discharge-plan JSON (for the multilingual translator)
+    discharge_plan = {
+        "diagnosis": {
+            "primary": dx,
+            "source_content": f"You were treated for {dx.lower()}. {record['form_data'].get('primary_diagnosis', '')}",
+        },
+        "medications": [_parse_med(m) for m in meds_dis],
+        "warning_signs": warnings,
+        "follow_up": {
+            "appointments": [
+                {"provider": f["with"], "timeframe": f["when"],
+                 "reason": "discharge follow-up",
+                 "instruction": "Call the office to schedule this appointment."}
+                for f in fu
+            ]
+        },
+        "activity_restrictions": {"source_content": activity},
+        "diet_instructions": {"source_content": diet},
+        "when_to_call": {
+            "er_instruction": "Go to the emergency room for any of the emergency warning signs above.",
+            "emergency_instruction": "Call 911 if you have severe chest pain, cannot breathe, or pass out.",
+        },
+    }
+
+    # 3) Context object (for the summary generators + teach-back)
+    context = {
+        "admissionDate": enc["admit_date"],
+        "dischargeDate": enc["expected_discharge_date"],
+        "attending": enc["attending"],
+        "unit": enc["unit"],
+        "payer": record["payer"]["payer_short"],
+        "language": d["preferred_language"],
+        "laceScore": str(rk["readmission_lace"]),
+        "laceTier": rk["readmission_band"],
+        "hrrpFlag": _hrrp_flag(dx),
+        "diagnosis": dx,
+        "medications": ", ".join(meds_dis),
+        "warningsSigns": warnings_text,
+        "followUp": fu_text,
+        "activity": activity,
+        "diet": diet,
+        "destination": _destination(disp),
+        "patientInitials": _initials(d["name"]),
+        "mrn": d["mrn"],
+        "dob": d["dob"],
+    }
+
+    return {"clinical_note": clinical_note, "discharge_plan": discharge_plan, "context": context}
