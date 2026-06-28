@@ -61,6 +61,20 @@ class TestDischargeSummaryGenerate:
             json={"notes": "test", "ctx": {}})
         assert r.status_code == 401
 
+    async def test_truncated_response_returns_friendly_error(self, authed_client, mock_claude):
+        # Model hit the token ceiling → incomplete JSON. Surface a clear message
+        # instead of a cryptic parse failure.
+        mock_claude.messages.create.return_value.stop_reason = "max_tokens"
+        mock_claude.messages.create.return_value.content[0].text = '{"meta": {"confidence":'
+        r = await authed_client.post("/api/discharge-summary/generate", json={
+            "notes": "Long synthetic clinical note for a complex patient.",
+            "ctx": {},
+        })
+        assert r.status_code == 500
+        body = r.json()
+        assert body["success"] is False
+        assert "cut off" in body["error"].lower()
+
 
 class TestTeachbackGenerate:
     async def test_valid_prompt_returns_categories(self, authed_client, mock_claude):

@@ -1586,30 +1586,41 @@ async def generate_discharge_summary_v2(request: Request, body: dict[str, Any] =
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4000,
+            max_tokens=8000,
             temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return response.content[0].text
+        return response
 
     try:
-        raw_text = await asyncio.to_thread(_call_api)
+        response = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+    raw_text = response.content[0].text
+    # A truncated response (hit the token ceiling) yields invalid JSON — surface a
+    # clear message instead of a cryptic "JSON parse failed".
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        return JSONResponse(
+            {"success": False,
+             "error": "The discharge summary was cut off before it finished. "
+                      "Please try again, or trim the clinical notes.",
+             "raw": raw_text},
+            status_code=500,
+        )
+
     clean = raw_text.strip()
     if clean.startswith("```"):
-        clean = clean.split("\n", 1)[-1]
-        if clean.endswith("```"):
-            clean = clean.rsplit("```", 1)[0]
+        clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+        clean = re.sub(r"\n?```$", "", clean)
     clean = clean.strip()
 
     try:
         summary = json.loads(clean)
         return JSONResponse({"success": True, "summary": summary})
-    except json.JSONDecodeError:
-        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"success": False, "error": f"JSON parse failed: {exc}", "raw": raw_text}, status_code=500)
 
 
 @app.post("/api/summary/generate")
@@ -1668,24 +1679,33 @@ Rules:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4000,
+            max_tokens=8000,
             temperature=0,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return response.content[0].text
+        return response
 
     try:
-        raw_text = await asyncio.to_thread(_call_api)
+        response = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    raw_text = response.content[0].text
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        return JSONResponse(
+            {"success": False,
+             "error": "The discharge summary was cut off before it finished. "
+                      "Please try again, or trim the clinical notes.",
+             "raw": raw_text},
+            status_code=500,
+        )
 
     # Strip markdown fences defensively
     clean = raw_text.strip()
     if clean.startswith("```"):
-        clean = clean.split("\n", 1)[-1]
-        if clean.endswith("```"):
-            clean = clean.rsplit("```", 1)[0]
+        clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+        clean = re.sub(r"\n?```$", "", clean)
     clean = clean.strip()
 
     try:
@@ -1695,8 +1715,8 @@ Rules:
             if "readmission_risk" in summary:
                 summary["readmission_risk"]["follow_up_call_cadence"] = "24h + 72h + 7d + 14d"
         return JSONResponse({"success": True, "summary": summary})
-    except json.JSONDecodeError:
-        return JSONResponse({"success": False, "error": "JSON parse failed", "raw": raw_text}, status_code=500)
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"success": False, "error": f"JSON parse failed: {exc}", "raw": raw_text}, status_code=500)
 
 
 @app.post("/api/plan/stream")
@@ -4088,17 +4108,27 @@ async def generate_multilingual_instructions(request: Request, body: dict[str, A
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=8000,
             temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return resp.content[0].text
+        return resp
 
     try:
-        raw = await asyncio.to_thread(_call_api)
+        resp = await asyncio.to_thread(_call_api)
     except anthropic.APIError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    raw = resp.content[0].text
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        return JSONResponse(
+            {"success": False,
+             "error": "The translation was cut off before it finished. "
+                      "Please try again, or shorten the discharge plan.",
+             "raw": raw},
+            status_code=500,
+        )
 
     clean = raw.strip()
     if clean.startswith("```"):
