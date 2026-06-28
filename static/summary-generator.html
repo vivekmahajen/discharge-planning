@@ -69,6 +69,8 @@
   <a href="/api/auth/logout">Sign Out</a>
 </header>
 
+<div id="patientPickerMount" style="max-width:1100px;margin:14px auto 0;padding:0 16px"></div>
+
 <div id="root"></div>
 
 <script>
@@ -406,6 +408,33 @@ function DischargeSummaryPrompt() {
   const [tryResult, setTryResult] = useState(null);
   const [tryError, setTryError] = useState(null);
 
+  // Synthetic-patient picker → fill the clinical notes + context for this tool.
+  React.useEffect(() => {
+    window.applyPatientData = function (d) {
+      if (!d || !d.id) return;
+      fetch("/api/sample-patient/" + encodeURIComponent(d.id) + "/artifacts")
+        .then(r => r.ok ? r.json() : null)
+        .then(a => {
+          if (!a) return;
+          if (a.clinical_note) setTryNotes(a.clinical_note);
+          if (a.context) setTryContext(prev => ({
+            ...prev,
+            admissionDate: a.context.admissionDate || "",
+            dischargeDate: a.context.dischargeDate || "",
+            attending: a.context.attending || "",
+            unit: a.context.unit || "",
+            payer: a.context.payer || "",
+            language: a.context.language || "English",
+            laceScore: a.context.laceScore || "",
+            laceTier: a.context.laceTier || "",
+            hrrpFlag: a.context.hrrpFlag || "",
+          }));
+        })
+        .catch(() => {});
+    };
+    return () => { delete window.applyPatientData; };
+  }, []);
+
   const copy = (text, id) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(id);
@@ -679,6 +708,7 @@ function DischargeSummaryPrompt() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<DischargeSummaryPrompt />);
 </script>
+  <script src="/static/patient-select.js"></script>
   <script src="/static/pwa.js" defer></script>
 </body>
 </html>

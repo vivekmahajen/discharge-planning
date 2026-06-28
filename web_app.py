@@ -951,6 +951,19 @@ async def get_sample_record_by_id(request: Request, pid: str,
     return JSONResponse(record)
 
 
+@app.get("/api/sample-patient/{pid}/artifacts")
+@limiter.limit("120/hour")
+async def get_sample_artifacts(request: Request, pid: str,
+                              ctx: OrgContext = Depends(get_current_org)):
+    """Paste-ready tool inputs (clinical note, discharge-plan JSON, context)
+    derived from a synthetic patient — drives the text/JSON-based tools."""
+    from sample_patients import get_sample_record as _get, build_tool_artifacts
+    record = _get(pid)
+    if not record:
+        return JSONResponse({"error": "Sample patient not found"}, status_code=404)
+    return JSONResponse(build_tool_artifacts(record))
+
+
 async def stream_plan(patient_data: dict):
     """Generate SSE events as each specialist agent runs, then the coordinator."""
     api_key = os.getenv("ANTHROPIC_API_KEY")

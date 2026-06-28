@@ -77,6 +77,8 @@
   <a href="/api/auth/logout">Sign Out</a>
 </header>
 
+<div id="patientPickerMount" style="max-width:1100px;margin:14px auto 0;padding:0 16px"></div>
+
 <div id="root"></div>
 
 <script>
@@ -225,6 +227,32 @@ function DischargeSummaryGenerator() {
   const [copied, setCopied]   = useState(false);
   const [activeTab, setActiveTab] = useState("input");
   const printRef = useRef();
+
+  // Synthetic-patient picker → fill clinical notes + context for this tool.
+  React.useEffect(() => {
+    window.applyPatientData = function (d) {
+      if (!d || !d.id) return;
+      fetch("/api/sample-patient/" + encodeURIComponent(d.id) + "/artifacts")
+        .then(r => r.ok ? r.json() : null)
+        .then(a => {
+          if (!a) return;
+          if (a.clinical_note) setNotes(a.clinical_note);
+          if (a.context) setCtx(prev => ({
+            ...prev,
+            admissionDate: a.context.admissionDate || prev.admissionDate,
+            dischargeDate: a.context.dischargeDate || prev.dischargeDate,
+            attending: a.context.attending || prev.attending,
+            unit: a.context.unit || prev.unit,
+            payer: a.context.payer || prev.payer,
+            laceScore: a.context.laceScore || prev.laceScore,
+            hrrpFlag: a.context.hrrpFlag || prev.hrrpFlag,
+          }));
+          setActiveTab("input");
+        })
+        .catch(() => {});
+    };
+    return () => { delete window.applyPatientData; };
+  }, []);
 
   const generate = async () => {
     setLoading(true); setError(null); setSummary(null);
@@ -624,6 +652,7 @@ function DischargeSummaryGenerator() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<DischargeSummaryGenerator />);
 </script>
+  <script src="/static/patient-select.js"></script>
   <script src="/static/pwa.js" defer></script>
 </body>
 </html>
