@@ -33,6 +33,15 @@
     }
   }
 
+  // Reserve / release space at the bottom of the page so a fixed bottom banner
+  // never overlaps page content (e.g. action buttons at the end of a report).
+  function _reserveBottomSpace(el) {
+    try { document.body.style.paddingBottom = ((el && el.offsetHeight) || 56) + "px"; } catch (_) {}
+  }
+  function _releaseBottomSpace() {
+    try { document.body.style.paddingBottom = ""; } catch (_) {}
+  }
+
   // ─────────────────── Online / Offline Banners ──────────────────────
 
   function _createBanner(id, html, bgColor) {
@@ -177,17 +186,20 @@
       boxShadow: "0 -2px 12px rgba(0,0,0,.3)",
     });
     document.body.appendChild(banner);
+    _reserveBottomSpace(banner);
 
     document.getElementById("pwa-install-btn").addEventListener("click", async () => {
       _deferredPrompt.prompt();
       const { outcome } = await _deferredPrompt.userChoice;
       _markInstallPromptSeen();
       banner.remove();
+      _releaseBottomSpace();
       _deferredPrompt = null;
     });
     document.getElementById("pwa-install-dismiss").addEventListener("click", () => {
       _markInstallPromptSeen();
       banner.remove();
+      _releaseBottomSpace();
     });
   }
 
@@ -217,10 +229,12 @@
       boxShadow: "0 -2px 12px rgba(0,0,0,.3)",
     });
     document.body.appendChild(banner);
+    _reserveBottomSpace(banner);
 
     document.getElementById("pwa-ios-dismiss").addEventListener("click", () => {
       _markIosHintSeen();
       banner.remove();
+      _releaseBottomSpace();
     });
   }
 
