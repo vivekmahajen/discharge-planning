@@ -16,10 +16,10 @@
  */
 "use strict";
 
-const VERSION = "dp-sw-v8";
+const VERSION = "dp-sw-v9";
 
 // Named caches
-const CACHE_SHELL   = "dp-shell-v8";
+const CACHE_SHELL   = "dp-shell-v9";
 const CACHE_DIR     = "dp-directory-v1";
 const CACHE_PATIENT = "dp-patient-";   // prefix — one cache per patient id
 
